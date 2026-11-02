@@ -123,7 +123,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
           </div>
         </div>
 
-        {showImport ? <JiraImport onDone={() => { setShowImport(false); refresh(); }} /> : null}
+        {showImport ? <JiraImport onImported={refresh} onClose={() => setShowImport(false)} /> : null}
         {showNew ? <NewTaskForm repos={repos} onDone={() => { setShowNew(false); refresh(); }} /> : null}
 
         {error ? <div className="inline-error">{error}</div> : null}
@@ -463,7 +463,7 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
 
 // ---- jira import ----
 
-function JiraImport({ onDone }: { onDone: () => void }) {
+function JiraImport({ onImported, onClose }: { onImported: () => void; onClose: () => void }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<JiraSearchResult[] | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -510,16 +510,36 @@ function JiraImport({ onDone }: { onDone: () => void }) {
     setError(null);
     setMsg(null);
     try {
-      const created = await api.jiraImport(selected.map((r) => r.jira_key));
-      const missed = selected.length - created.length;
-      setMsg(
-        `Imported ${created.length} of ${selected.length} task${selected.length === 1 ? "" : "s"}` +
-          (missed > 0 ? ` (${missed} skipped or failed, see server log).` : "."),
+      const res = await api.jiraImport(selected.map((r) => ({ key: r.jira_key, fingerprint: r.fingerprint })));
+      const createdIds = new Map(res.created.map((t) => [t.jira_key, t.id]));
+      const fresh = new Map(res.changed.map((r) => [r.jira_key, r]));
+      const skipped = new Set(res.skipped);
+      // Keep the list: imported rows flip to "already imported", changed rows
+      // show their new content and stay selected for another review.
+      setResults((prev) =>
+        (prev ?? []).map((r) => {
+          const id = createdIds.get(r.jira_key) ?? (skipped.has(r.jira_key) ? "existing" : null);
+          return fresh.get(r.jira_key) ?? (id ? { ...r, existing_task_id: id } : r);
+        }),
       );
-      setResults(null);
-      setSelectedKeys(new Set());
-      setReviewing(false);
-      onDone();
+      setSelectedKeys(new Set(fresh.keys()));
+      setReviewing(fresh.size > 0);
+      const notes = [
+        res.skipped.length ? `${res.skipped.length} already imported` : "",
+        res.failed.length ? `${res.failed.length} failed (see server log): ${res.failed.join(", ")}` : "",
+      ].filter(Boolean);
+      setMsg(
+        `Imported ${res.created.length} of ${selected.length} task${selected.length === 1 ? "" : "s"}` +
+          (notes.length ? ` · ${notes.join(" · ")}` : "") +
+          ".",
+      );
+      if (fresh.size > 0) {
+        setError(
+          `${fresh.size} ticket${fresh.size === 1 ? "" : "s"} changed since you reviewed ` +
+            `${fresh.size === 1 ? "it" : "them"}. Check the updated preview below and confirm again.`,
+        );
+      }
+      if (res.created.length) onImported();
     } catch (err) {
       setError(errText(err));
     } finally {
@@ -636,7 +656,7 @@ function JiraImport({ onDone }: { onDone: () => void }) {
             >
               Review import ({selected.length})
             </button>
-            <button className="btn" onClick={onDone} disabled={busy !== null}>
+            <button className="btn" onClick={onClose} disabled={busy !== null}>
               Close
             </button>
           </div>
