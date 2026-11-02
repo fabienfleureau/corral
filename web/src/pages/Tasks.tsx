@@ -467,9 +467,16 @@ function JiraImport({ onDone }: { onDone: () => void }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<JiraSearchResult[] | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState<"search" | "import" | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const selected = useMemo(
+    () => (results ?? []).filter((r) => selectedKeys.has(r.jira_key)),
+    [results, selectedKeys],
+  );
 
   const search = async () => {
     if (busy) return;
@@ -479,6 +486,8 @@ function JiraImport({ onDone }: { onDone: () => void }) {
     try {
       setResults(await api.jiraSearch(q));
       setSelectedKeys(new Set());
+      setExpandedKeys(new Set());
+      setReviewing(false);
     } catch (err) {
       setError(errText(err));
     } finally {
@@ -486,8 +495,8 @@ function JiraImport({ onDone }: { onDone: () => void }) {
     }
   };
 
-  const toggleKey = (key: string) => {
-    setSelectedKeys((prev) => {
+  const toggle = (set: (fn: (prev: Set<string>) => Set<string>) => void, key: string) => {
+    set((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -496,15 +505,20 @@ function JiraImport({ onDone }: { onDone: () => void }) {
   };
 
   const importSelected = async () => {
-    if (busy || selectedKeys.size === 0) return;
+    if (busy || selected.length === 0) return;
     setBusy("import");
     setError(null);
     setMsg(null);
     try {
-      const created = await api.jiraImport([...selectedKeys]);
-      setMsg(`Imported ${created.length} task${created.length === 1 ? "" : "s"}.`);
+      const created = await api.jiraImport(selected.map((r) => r.jira_key));
+      const missed = selected.length - created.length;
+      setMsg(
+        `Imported ${created.length} of ${selected.length} task${selected.length === 1 ? "" : "s"}` +
+          (missed > 0 ? ` (${missed} skipped or failed, see server log).` : "."),
+      );
       setResults(null);
       setSelectedKeys(new Set());
+      setReviewing(false);
       onDone();
     } catch (err) {
       setError(errText(err));
@@ -513,63 +527,121 @@ function JiraImport({ onDone }: { onDone: () => void }) {
     }
   };
 
+  const repoBadge = (r: JiraSearchResult) =>
+    r.repo_name ? (
+      <span className="badge badge-target" title={r.repo_path ?? undefined}>
+        → {r.repo_name}
+      </span>
+    ) : (
+      <span className="badge badge-mute" title="No repo mapped to this Jira prefix; pick one after import">
+        no repo
+      </span>
+    );
+
   return (
     <div className="panel-form">
       <h2 className="panel-title">Import from Jira</h2>
-      <div className="search-row">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Text or JQL…"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void search();
-          }}
-        />
-        <button className="btn" onClick={() => void search()} disabled={busy !== null || !q.trim()}>
-          {busy === "search" ? <Spinner /> : null}
-          Search
-        </button>
-      </div>
+      {reviewing ? null : (
+        <div className="search-row">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Text or JQL…"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void search();
+            }}
+          />
+          <button className="btn" onClick={() => void search()} disabled={busy !== null || !q.trim()}>
+            {busy === "search" ? <Spinner /> : null}
+            Search
+          </button>
+        </div>
+      )}
       {error ? <div className="inline-error">{error}</div> : null}
       {msg ? <div className="inline-ok">{msg}</div> : null}
-      {results !== null ? (
-        results.length === 0 ? (
-          <div className="pane-note">No issues found.</div>
-        ) : (
-          <>
-            <div className="import-list">
-              {results.map((r) => (
-                <label className="import-row" key={r.jira_key}>
-                  <input
-                    type="checkbox"
-                    checked={selectedKeys.has(r.jira_key)}
-                    onChange={() => toggleKey(r.jira_key)}
-                  />
+      {results === null ? null : reviewing ? (
+        <>
+          <div className="muted import-summary">
+            {selected.length} task{selected.length === 1 ? "" : "s"} will be created:
+          </div>
+          <div className="import-list">
+            {selected.map((r) => (
+              <div className="import-review" key={r.jira_key}>
+                <div className="import-row-head">
                   <span className="import-title">{r.title}</span>
-                  <a href={r.jira_url} target="_blank" rel="noreferrer" className="meta-link">
-                    {r.jira_key}
-                    <ExternalLinkIcon />
-                  </a>
-                  {r.jira_parent_key ? <span className="badge">{r.jira_parent_key}</span> : null}
-                </label>
-              ))}
-            </div>
-            <div className="form-foot">
-              <button
-                className="btn btn-primary"
-                onClick={() => void importSelected()}
-                disabled={busy !== null || selectedKeys.size === 0}
-              >
-                {busy === "import" ? <Spinner /> : null}
-                Import selected ({selectedKeys.size})
-              </button>
-              <button className="btn" onClick={onDone} disabled={busy !== null}>
-                Close
-              </button>
-            </div>
-          </>
-        )
-      ) : null}
+                  {r.jira_status ? <span className="badge">{r.jira_status}</span> : null}
+                  {repoBadge(r)}
+                </div>
+                <pre className="import-prompt">{r.prompt || "No description."}</pre>
+              </div>
+            ))}
+          </div>
+          <div className="form-foot">
+            <button className="btn btn-primary" onClick={() => void importSelected()} disabled={busy !== null}>
+              {busy === "import" ? <Spinner /> : null}
+              Confirm import ({selected.length})
+            </button>
+            <button className="btn" onClick={() => setReviewing(false)} disabled={busy !== null}>
+              Back
+            </button>
+          </div>
+        </>
+      ) : results.length === 0 ? (
+        <div className="pane-note">No issues found.</div>
+      ) : (
+        <>
+          <div className="import-list">
+            {results.map((r) => {
+              const imported = r.existing_task_id !== null;
+              const open = expandedKeys.has(r.jira_key);
+              return (
+                <div className={`import-item ${imported ? "import-item-done" : ""}`} key={r.jira_key}>
+                  <div className="import-row">
+                    <button
+                      type="button"
+                      className="import-toggle"
+                      onClick={() => toggle(setExpandedKeys, r.jira_key)}
+                      aria-label={open ? "Hide description" : "Show description"}
+                      aria-expanded={open}
+                    >
+                      <Chevron open={open} />
+                    </button>
+                    <label className="import-row-head">
+                      <input
+                        type="checkbox"
+                        checked={selectedKeys.has(r.jira_key)}
+                        disabled={imported}
+                        onChange={() => toggle(setSelectedKeys, r.jira_key)}
+                      />
+                      <span className="import-title">{r.title}</span>
+                    </label>
+                    {r.jira_status ? <span className="badge">{r.jira_status}</span> : null}
+                    {imported ? <span className="badge badge-mute">already imported</span> : repoBadge(r)}
+                    {r.jira_parent_key ? <span className="badge">{r.jira_parent_key}</span> : null}
+                    <a href={r.jira_url} target="_blank" rel="noreferrer" className="meta-link">
+                      {r.jira_key}
+                      <ExternalLinkIcon />
+                    </a>
+                  </div>
+                  {open ? <pre className="import-prompt">{r.prompt || "No description."}</pre> : null}
+                </div>
+              );
+            })}
+          </div>
+          <div className="form-foot">
+            <button
+              className="btn btn-primary"
+              onClick={() => setReviewing(true)}
+              disabled={busy !== null || selected.length === 0}
+            >
+              Review import ({selected.length})
+            </button>
+            <button className="btn" onClick={onDone} disabled={busy !== null}>
+              Close
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

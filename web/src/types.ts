@@ -52,6 +52,12 @@ export type JiraSearchResult = {
   jira_key: string;
   jira_url: string;
   jira_parent_key: string | null;
+  jira_status: string | null;
+  /** Repo the import would target (by Jira key prefix); null when unmapped. */
+  repo_path: string | null;
+  repo_name: string | null;
+  /** Set when a task for this issue exists; import skips it. */
+  existing_task_id: string | null;
 };
 
 export type Repo = {

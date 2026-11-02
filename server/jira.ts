@@ -177,6 +177,7 @@ export class JiraClient {
     jira_key: string;
     jira_url: string;
     jira_parent_key: string | null;
+    jira_status: string | null;
   } {
     const base = this.jira.baseUrl.replace(/\/$/, "");
     return {
@@ -185,6 +186,7 @@ export class JiraClient {
       jira_key: issue.key,
       jira_url: `${base}/browse/${issue.key}`,
       jira_parent_key: issue.fields.parent?.key ?? null,
+      jira_status: issue.fields.status?.name ?? null,
     };
   }
 }

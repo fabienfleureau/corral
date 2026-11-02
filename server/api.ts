@@ -12,7 +12,7 @@ import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient } from "./jira.ts";
 import { summarizeText } from "./llm.ts";
 import { dispatchTask, removeWorktree } from "./dispatch.ts";
-import { addRepo, gitToplevel, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
+import { addRepo, gitToplevel, importPreview, scanWorkspaceRepos } from "./repos.ts";
 import type { Idea, Item, Task } from "./types.ts";
 
 export interface AppState {
@@ -281,7 +281,14 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!q) return json(res, 400, { error: "q required (text or JQL)" });
     try {
       const issues = await state.jira.search(q);
-      json(res, 200, issues.map((i) => state.jira.issueToTaskFields(i)));
+      json(
+        res,
+        200,
+        issues.map((i) => {
+          const f = state.jira.issueToTaskFields(i);
+          return { ...f, ...importPreview(state.db, f.jira_key) };
+        }),
+      );
     } catch (err) {
       console.error("corral: jira search failed:", String(err));
       json(res, 502, { error: String(err) });
@@ -294,17 +301,17 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!keys.length) return json(res, 400, { error: "keys required" });
     const created: Task[] = [];
     for (const key of keys) {
-      if (state.db.getTaskByJiraKey(key)) continue; // dedupe by issue key
+      const preview = importPreview(state.db, key);
+      if (preview.existing_task_id) continue; // dedupe by issue key
       try {
         const issue = await state.jira.getIssue(key);
         const f = state.jira.issueToTaskFields(issue);
-        const mapped = state.db.getRepoByJiraPrefix(jiraKeyPrefix(f.jira_key));
         const now = Date.now();
         const task: Task = {
           id: randomUUID(),
           title: f.title,
           prompt: f.prompt,
-          repo_path: mapped?.path ?? "",
+          repo_path: preview.repo_path ?? "",
           target: "",
           target_state: "suggested",
           base_branch: null,

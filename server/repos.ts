@@ -80,3 +80,19 @@ export function jiraKeyPrefix(issueKey: string): string {
   const m = issueKey.match(/^([A-Za-z0-9]+)-/);
   return m ? m[1] : issueKey;
 }
+
+export interface ImportPreview {
+  repo_path: string | null;
+  repo_name: string | null;
+  existing_task_id: string | null;
+}
+
+/** What importing this issue would do: target repo and whether a task already exists. */
+export function importPreview(db: Db, issueKey: string): ImportPreview {
+  const repo = db.getRepoByJiraPrefix(jiraKeyPrefix(issueKey));
+  return {
+    repo_path: repo?.path ?? null,
+    repo_name: repo?.name ?? null,
+    existing_task_id: db.getTaskByJiraKey(issueKey)?.id ?? null,
+  };
+}
