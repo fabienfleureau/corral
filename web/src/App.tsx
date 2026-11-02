@@ -91,6 +91,21 @@ export function App() {
     };
   }, [eventVersion]);
 
+  // Offline mode: track connectivity (the service worker serves cached data).
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
+
   if (unauthorized) return <TokenScreen />;
 
   return (
@@ -119,6 +134,12 @@ export function App() {
         {bootError ? <div className="sidebar-foot inline-error">{bootError}</div> : <div className="sidebar-foot muted">live</div>}
       </aside>
       <main className="content">
+        {!online ? (
+          <div className="offline-banner">
+            Offline — showing cached data. Actions will fail until the connection
+            is back.
+          </div>
+        ) : null}
         {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
