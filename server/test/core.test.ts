@@ -63,6 +63,8 @@ test("db: task and item round-trip", () => {
       title: "needs you",
       summary: "",
       body: "tail",
+      context: "",
+      options: null,
       source_ref: "t9",
       task_id: "task-1",
       structured: 0,
@@ -191,14 +193,17 @@ test("capture: structured question supersedes fallback; auto-resolution", async 
     assert.ok(broadcasts.some(([t]) => t === "item.created"));
 
     // structured report upgrades it
-    const structured = engine.createStructuredQuestion({
+    const structured = await engine.createStructuredQuestion({
       taskId: "task-1",
       terminal: "t9",
       title: "Use Postgres or SQLite?",
       body: "I recommend SQLite.",
+      options: ["SQLite", "Postgres", "none"],
     });
     assert.equal(structured.id, fallback.id, "supersedes the fallback item");
     assert.equal(structured.structured, 1);
+    assert.equal(structured.options, JSON.stringify(["SQLite", "Postgres", "none"]));
+    assert.equal(structured.context, "agent tail…", "context tail captured at report time");
     assert.equal(db.openQuestionItemForTerminal("t9")?.title, "Use Postgres or SQLite?");
 
     // leaving blocked auto-resolves

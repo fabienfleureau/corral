@@ -37,6 +37,10 @@ export interface Item {
   title: string;
   summary: string;
   body: string;
+  /** Raw recent terminal output captured at report time (context drawer). */
+  context: string;
+  /** JSON array of quick-reply options the agent offered, e.g. ["all","none"]. */
+  options: string | null;
   source_ref: string | null;
   task_id: string | null;
   structured: number;
@@ -122,4 +126,21 @@ export interface MetricEvent {
   name: string;
   ref: string | null;
   data: string | null;
+}
+
+export interface SessionInfo {
+  address: string;
+  name: string | null;
+  agent: string | null;
+  task_id: string | null;
+  task_title: string | null;
+  /** OSC 7501 state: working | blocked | idle | done | error (null when none reported). */
+  status: string | null;
+  /** live | finished */
+  state: string;
+  turn: number;
+  cwd: string;
+  created_ms: number;
+  updated_ms: number;
+  exit_code: number | null;
 }

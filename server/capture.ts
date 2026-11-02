@@ -107,6 +107,8 @@ export class CaptureEngine {
       title: task ? `${task.title} — needs you` : `Agent ${address} needs you`,
       summary: "",
       body: tail,
+      context: "",
+      options: null,
       source_ref: address,
       task_id: taskId,
       structured: 0,
@@ -144,16 +146,26 @@ export class CaptureEngine {
   }
 
   /** Called from POST /api/reports: a structured question report from an agent. */
-  createStructuredQuestion(opts: {
+  async createStructuredQuestion(opts: {
     taskId?: string | null;
     terminal?: string | null;
     title: string;
     body: string;
-  }): Item {
+    options?: string[];
+  }): Promise<Item> {
     const taskId = opts.taskId ?? null;
     const address =
       opts.terminal ??
       (taskId ? this.db.getTask(taskId)?.terminal_address ?? null : null);
+    let context = "";
+    if (address) {
+      try {
+        context = (await this.herdr.readTerminal(address, 60)).text;
+      } catch {
+        context = "";
+      }
+    }
+    const optionsJson = opts.options?.length ? JSON.stringify(opts.options) : null;
     // A structured report supersedes a pending fallback capture for this terminal.
     if (address) {
       const existing = this.db.openQuestionItemForTerminal(address);
@@ -162,6 +174,8 @@ export class CaptureEngine {
           title: opts.title,
           summary: opts.body,
           body: opts.body,
+          context: context || existing.body,
+          options: optionsJson,
           task_id: taskId ?? existing.task_id,
           structured: 1,
         });
@@ -179,6 +193,8 @@ export class CaptureEngine {
       title: opts.title,
       summary: opts.body,
       body: opts.body,
+      context,
+      options: optionsJson,
       source_ref: address,
       task_id: taskId,
       structured: 1,

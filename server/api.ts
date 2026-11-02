@@ -196,6 +196,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const b = (body ?? {}) as { target?: string; use_worktree?: boolean };
     const target = b.target ?? task.target;
     if (!target) return json(res, 400, { error: "target required (claude|codex|opencode)" });
+    if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — assign one before dispatching" });
     try {
       const result = await dispatchTask(state.db, state.cfg, state.herdr, task, target, {
         useWorktree: b.use_worktree,
@@ -222,16 +223,85 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   // ---- structured agent reports ----
-  on("POST", "/api/reports", (req, res, { body }) => {
-    const b = body as { task_id?: string; terminal?: string; kind?: string; title?: string; body?: string };
+  on("POST", "/api/reports", async (req, res, { body }) => {
+    const b = body as {
+      task_id?: string;
+      terminal?: string;
+      kind?: string;
+      title?: string;
+      body?: string;
+      options?: string[];
+    };
     if (!b?.title || !b?.body) return json(res, 400, { error: "title and body required" });
-    const item = state.capture.createStructuredQuestion({
+    const item = await state.capture.createStructuredQuestion({
       taskId: b.task_id ?? null,
       terminal: b.terminal ?? null,
       title: b.title,
       body: b.body,
+      options: Array.isArray(b.options) ? b.options.filter((o) => typeof o === "string").slice(0, 8) : undefined,
     });
     json(res, 200, item);
+  });
+
+  // ---- sessions (live agent terminals) ----
+  on("GET", "/api/sessions", async (_req, res) => {
+    const tracked = state.db.listTerminals();
+    const tasks = new Map(state.db.listTasks().map((t) => [t.id, t]));
+    type HcLike = { address: string; state?: string; status?: unknown; turn?: number; cwd?: string; created_ms?: number; exit_code?: number | null };
+    let liveFacts = new Map<string, HcLike>();
+    try {
+      const list = await state.herdr.listTerminals(true);
+      liveFacts = new Map((list.terminals as unknown as HcLike[]).map((t) => [t.address, t]));
+    } catch {
+      /* core unreachable: report from the db alone */
+    }
+    const sessions = tracked.map((t) => {
+      const facts = liveFacts.get(t.address);
+      const rawStatus = facts?.status;
+      const status =
+        typeof rawStatus === "string"
+          ? rawStatus
+          : rawStatus && typeof rawStatus === "object" && "state" in rawStatus
+            ? String((rawStatus as { state: unknown }).state)
+            : t.last_status;
+      const task = t.task_id ? tasks.get(t.task_id) ?? null : null;
+      return {
+        address: t.address,
+        name: t.name,
+        agent: t.agent,
+        task_id: t.task_id,
+        task_title: task?.title ?? null,
+        status: status ?? null,
+        state: facts?.state ?? (task?.status === "done" ? "finished" : "unknown"),
+        turn: facts?.turn ?? t.last_turn,
+        cwd: facts?.cwd ?? "",
+        created_ms: facts?.created_ms ?? t.updated_ms,
+        updated_ms: t.updated_ms,
+        exit_code: facts?.exit_code ?? task?.exit_code ?? null,
+      };
+    });
+    json(res, 200, sessions);
+  });
+
+  on("POST", "/api/terminals/:address/open", async (_req, res, { params }) => {
+    const address = params.address;
+    // Give the terminal a pane in the Herdr app, or peek at it — best effort.
+    const attempts = [
+      `herdr-app do terminal.peek '{"terminal":"${address}"}'`,
+      `herdr-app do agent.focus '{"terminal":"${address}"}'`,
+    ];
+    for (const line of attempts) {
+      try {
+        await state.herdr.exec(line, { timeout: 15 });
+        state.db.recordMetric("session.opened", address, { line });
+        json(res, 200, { ok: true, opened: true });
+        return;
+      } catch {
+        /* try the next */
+      }
+    }
+    // Fallback: tell the client the attach command so the person can run it.
+    json(res, 200, { ok: true, opened: false, attach_command: `hc attach ${address}` });
   });
 
   // ---- repos ----

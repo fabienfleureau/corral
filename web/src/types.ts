@@ -28,6 +28,8 @@ export type Item = {
   title: string;
   summary: string; // structured summary ("" until summarized)
   body: string; // raw tail / structured body — shown when summary is empty
+  context: string; // raw agent output captured at report time (context drawer)
+  options: string | null; // JSON array of quick-reply options
   source_ref: string | null; // herdr terminal address for question items
   task_id: string | null;
   structured: number; // 1 = agent reported it, 0 = blocked-status fallback
@@ -35,6 +37,21 @@ export type Item = {
   updated_ms: number;
   resolved_ms: number | null;
   snooze_until_ms: number | null;
+};
+
+export type SessionInfo = {
+  address: string;
+  name: string | null;
+  agent: string | null;
+  task_id: string | null;
+  task_title: string | null;
+  status: string | null; // working | blocked | idle | done | error | null
+  state: string; // live | finished | unknown
+  turn: number;
+  cwd: string;
+  created_ms: number;
+  updated_ms: number;
+  exit_code: number | null;
 };
 
 export type Idea = {

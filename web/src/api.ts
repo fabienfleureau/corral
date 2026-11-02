@@ -1,7 +1,7 @@
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
-import type { Config, Idea, Item, JiraSearchResult, Repo, Task } from "./types";
+import type { Config, Idea, Item, JiraSearchResult, Repo, SessionInfo, Task } from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -133,6 +133,11 @@ export const api = {
     post<Idea>("/api/ideas", input),
   patchIdea: (id: string, input: { status?: Idea["status"]; tag?: Idea["tag"] }): Promise<{ ok: boolean }> =>
     patch<{ ok: boolean }>(`/api/ideas/${id}`, input),
+
+  // ---- sessions ----
+  listSessions: (): Promise<SessionInfo[]> => get<SessionInfo[]>("/api/sessions"),
+  openSession: (address: string): Promise<{ ok: boolean; opened: boolean; attach_command?: string }> =>
+    post<{ ok: boolean; opened: boolean; attach_command?: string }>(`/api/terminals/${encodeURIComponent(address)}/open`),
 
   // ---- repos ----
   listRepos: (): Promise<Repo[]> => get<Repo[]>("/api/repos"),
