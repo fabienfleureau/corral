@@ -14,8 +14,11 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
   let last = 0;
   let k = 0;
   let m: RegExpExecArray | null;
-  INLINE_RE.lastIndex = 0;
-  while ((m = INLINE_RE.exec(text)) !== null) {
+  // Fresh regex per call: inline() recurses on emphasis tokens, and a shared
+  // /g regex would have its lastIndex clobbered by the inner call — the outer
+  // loop then re-matches the same token forever.
+  const re = new RegExp(INLINE_RE.source, "g");
+  while ((m = re.exec(text)) !== null) {
     if (m.index > last) nodes.push(text.slice(last, m.index));
     const tok = m[0];
     const key = `${keyBase}-${k++}`;
