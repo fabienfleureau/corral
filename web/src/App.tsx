@@ -1,0 +1,159 @@
+// App shell — sidebar navigation, auth gate, live SSE updates + notifications.
+
+import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
+import { ApiError, api, setUnauthorizedHandler, subscribeEvents } from "./api";
+import { errText } from "./util";
+import { Spinner } from "./ui";
+import { InboxPage } from "./pages/Inbox";
+import { TasksPage } from "./pages/Tasks";
+import { IdeasPage } from "./pages/Ideas";
+import { SettingsPage } from "./pages/Settings";
+
+type Tab = "inbox" | "tasks" | "ideas" | "settings";
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: "inbox", label: "Inbox" },
+  { key: "tasks", label: "Tasks" },
+  { key: "ideas", label: "Ideas" },
+  { key: "settings", label: "Settings" },
+];
+
+type Counts = { inbox: number; tasks: number; ideas: number };
+
+export function App() {
+  const [unauthorized, setUnauthorized] = useState(false);
+  const [tab, setTab] = useState<Tab>("inbox");
+  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, ideas: 0 });
+  const [eventVersion, setEventVersion] = useState(0);
+  const [bootError, setBootError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => setEventVersion((v) => v + 1), []);
+
+  // Auth probe + global 401 handling.
+  useEffect(() => {
+    setUnauthorizedHandler(() => setUnauthorized(true));
+    api
+      .getConfig()
+      .then(() => setBootError(null))
+      .catch((err: unknown) => {
+        const status = err instanceof ApiError ? err.status : -1;
+        if (status === 401) return; // handled by setUnauthorizedHandler
+        setBootError(status === 0 ? "Cannot reach the Corral server." : errText(err));
+      });
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  // Live updates: one SSE connection feeds every page + desktop notifications.
+  useEffect(() => {
+    const close = subscribeEvents((event) => {
+      if (event.type === "item.created" && event.item.kind === "question") {
+        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+          try {
+            new Notification(event.item.title, {
+              body: event.item.summary || event.item.body.slice(0, 120),
+            });
+          } catch {
+            /* notification construction can fail in some environments */
+          }
+        }
+      }
+      setEventVersion((v) => v + 1);
+    });
+    return close;
+  }, []);
+
+  // Sidebar open counts.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([api.listItems({ status: "open" }), api.listTasks("open"), api.listIdeas("new")])
+      .then(([items, tasks, ideas]) => {
+        if (!cancelled) setCounts({ inbox: items.length, tasks: tasks.length, ideas: ideas.length });
+      })
+      .catch(() => {
+        /* 401 surfaces globally; other errors are non-fatal for counts */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventVersion]);
+
+  if (unauthorized) return <TokenScreen />;
+
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-mark">C</span>
+          <span className="brand-name">Corral</span>
+        </div>
+        <nav className="nav">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              className={`nav-item ${tab === t.key ? "nav-active" : ""}`}
+              onClick={() => setTab(t.key)}
+            >
+              <span>{t.label}</span>
+              {t.key !== "settings" ? (
+                <span className={`nav-count ${counts[t.key as keyof Counts] > 0 ? "nav-count-hot" : ""}`}>
+                  {counts[t.key as keyof Counts]}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </nav>
+        {bootError ? <div className="sidebar-foot inline-error">{bootError}</div> : <div className="sidebar-foot muted">live</div>}
+      </aside>
+      <main className="content">
+        {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} /> : null}
+        {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
+        {tab === "ideas" ? <IdeasPage eventVersion={eventVersion} refresh={refresh} /> : null}
+        {tab === "settings" ? <SettingsPage /> : null}
+      </main>
+    </div>
+  );
+}
+
+function TokenScreen() {
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = (ev: FormEvent) => {
+    ev.preventDefault();
+    const value = token.trim();
+    if (!value) return;
+    setBusy(true);
+    // The server sets the cookie and redirects back to "/".
+    window.location.href = `/?token=${encodeURIComponent(value)}`;
+  };
+
+  return (
+    <div className="token-screen">
+      <form className="token-card" onSubmit={submit}>
+        <div className="brand">
+          <span className="brand-mark">C</span>
+          <span className="brand-name">Corral</span>
+        </div>
+        <p className="muted">Enter your Corral token to continue. It is stored as a cookie.</p>
+        <label className="field">
+          <span>Token</span>
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="corral token"
+            autoFocus
+            autoComplete="off"
+          />
+        </label>
+        <div className="form-foot">
+          <button type="submit" className="btn btn-primary" disabled={busy || !token.trim()}>
+            {busy ? <Spinner /> : null}
+            {busy ? "Connecting…" : "Continue"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

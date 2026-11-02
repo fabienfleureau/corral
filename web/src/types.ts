@@ -1,0 +1,67 @@
+// Entity types — mirrors API.md exactly.
+
+export type Task = {
+  id: string;
+  title: string;
+  prompt: string;
+  repo_path: string;
+  target: string; // "", "claude", "codex", "opencode"
+  target_state: "suggested" | "confirmed";
+  base_branch: string | null;
+  branch: string | null;
+  worktree_path: string | null;
+  assignee: string | null;
+  jira_key: string | null;
+  jira_url: string | null;
+  jira_parent_key: string | null;
+  status: "open" | "dispatched" | "done" | "archived";
+  terminal_address: string | null;
+  exit_code: number | null;
+  created_ms: number;
+  updated_ms: number;
+};
+
+export type Item = {
+  id: string;
+  kind: "question" | "pr" | "digest";
+  status: "open" | "resolved" | "archived";
+  title: string;
+  summary: string; // structured summary ("" until summarized)
+  body: string; // raw tail / structured body — shown when summary is empty
+  source_ref: string | null; // herdr terminal address for question items
+  task_id: string | null;
+  structured: number; // 1 = agent reported it, 0 = blocked-status fallback
+  created_ms: number;
+  updated_ms: number;
+  resolved_ms: number | null;
+  snooze_until_ms: number | null;
+};
+
+export type Idea = {
+  id: string;
+  text: string;
+  tag: "workflow" | "product";
+  origin: "user" | "agent";
+  status: "new" | "promoted" | "dismissed";
+  created_ms: number;
+};
+
+export type JiraSearchResult = {
+  title: string;
+  prompt: string;
+  jira_key: string;
+  jira_url: string;
+  jira_parent_key: string | null;
+};
+
+export type Config = {
+  port: number;
+  host: string;
+  agents: string[];
+  assistant: string;
+  herdrSocket: string;
+  worktreesDir: string;
+  jiraConfigured: boolean;
+  jiraJql: string;
+  token: string; // masked
+};
