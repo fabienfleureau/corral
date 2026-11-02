@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "./db.ts";
 import type { HerdrClient } from "./herdr.ts";
+import { syncTaskPr } from "./pr.ts";
 import type { HcEvent, HcTerminal, Item } from "./types.ts";
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
@@ -139,7 +140,17 @@ export class CaptureEngine {
       if (task && (task.status === "dispatched" || task.status === "open")) {
         this.db.updateTask(task.id, { status: "done", exit_code: exitCode });
         this.db.recordMetric("task.finished", task.id, { exit_code: exitCode, reason });
-        this.hub.broadcast("task.updated", this.db.getTask(task.id));
+        const updated = this.db.getTask(task.id);
+        this.hub.broadcast("task.updated", updated);
+        // Look for the PR this task's branch produced (the agent may have
+        // opened it, or been interrupted before its completion report).
+        if (updated) {
+          try {
+            syncTaskPr(this.db, this.hub, updated);
+          } catch {
+            /* PR discovery is best effort */
+          }
+        }
       }
     }
     this.lastState.delete(address);

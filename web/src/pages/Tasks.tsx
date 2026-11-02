@@ -229,6 +229,12 @@ function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh:
           </span>
           {task.target && task.target_state === "suggested" ? <span className="muted">(suggested)</span> : null}
           {task.branch ? <span className="mono">{task.branch}</span> : null}
+          {task.pr_url ? (
+            <a href={task.pr_url} target="_blank" rel="noreferrer" className="meta-link">
+              PR
+              <ExternalLinkIcon />
+            </a>
+          ) : null}
           {task.repo_path ? <span className="mono muted">{task.repo_path}</span> : null}
           <span className="time muted" title={formatTs(task.updated_ms)}>
             {timeAgo(task.updated_ms)}

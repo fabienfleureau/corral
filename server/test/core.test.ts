@@ -29,6 +29,7 @@ function makeTask(over: Partial<Task> = {}): Task {
     jira_key: null,
     jira_url: null,
     jira_parent_key: null,
+    pr_url: null,
     status: "open",
     terminal_address: null,
     exit_code: null,

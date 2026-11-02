@@ -49,7 +49,7 @@ export function App() {
   // Live updates: one SSE connection feeds every page + desktop notifications.
   useEffect(() => {
     const close = subscribeEvents((event) => {
-      if (event.type === "item.created" && (event.item.kind === "question" || event.item.kind === "pr")) {
+      if (event.type === "item.created" && event.item.status === "open" && (event.item.kind === "question" || event.item.kind === "pr")) {
         if (typeof Notification !== "undefined" && Notification.permission === "granted") {
           try {
             new Notification(event.item.title, {

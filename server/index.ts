@@ -6,6 +6,7 @@ import { Db } from "./db.ts";
 import { HerdrClient, HerdrEventStream } from "./herdr.ts";
 import { CaptureEngine } from "./capture.ts";
 import { JiraClient } from "./jira.ts";
+import { prCandidateTasks, syncTaskPr } from "./pr.ts";
 import { createHttpServer, type AppState } from "./api.ts";
 import type { ServerResponse } from "node:http";
 
@@ -43,6 +44,17 @@ stream.start();
 
 // Safety net for missed events.
 setInterval(() => void capture.reconcile(), 30_000);
+
+// PR discovery: find review links for tasks whose branches may have PRs.
+setInterval(() => {
+  for (const task of prCandidateTasks(db)) {
+    try {
+      syncTaskPr(db, hub, task);
+    } catch {
+      /* best effort */
+    }
+  }
+}, 120_000);
 
 const server = createHttpServer(state);
 server.listen(cfg.port, cfg.host, () => {

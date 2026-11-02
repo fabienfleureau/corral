@@ -116,6 +116,8 @@ export const api = {
   dispatchTask: (id: string, input: { target?: string; use_worktree?: boolean }): Promise<DispatchResult> =>
     post<DispatchResult>(`/api/tasks/${id}/dispatch`, input),
   cleanupTask: (id: string): Promise<{ ok: boolean }> => post<{ ok: boolean }>(`/api/tasks/${id}/cleanup`),
+  checkPr: (id: string): Promise<{ pr: unknown; task: Task }> =>
+    post<{ pr: unknown; task: Task }>(`/api/tasks/${id}/check-pr`),
 
   // ---- jira ----
   jiraSearch: (q: string): Promise<JiraSearchResult[]> =>

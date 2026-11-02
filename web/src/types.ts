@@ -14,6 +14,7 @@ export type Task = {
   jira_key: string | null;
   jira_url: string | null;
   jira_parent_key: string | null;
+  pr_url: string | null;
   status: "open" | "dispatched" | "done" | "archived";
   terminal_address: string | null;
   exit_code: number | null;
