@@ -77,7 +77,12 @@ export function prItemBody(pr: PrInfo): string {
 // ---- discovery ----
 
 function run(cmd: string, args: string[], cwd: string): string {
-  return execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], cwd }).trim();
+  return execFileSync(cmd, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    cwd,
+    timeout: 20_000, // never block the event loop on a stuck gh/glab call
+  }).trim();
 }
 
 function repoSlug(repoPath: string): string | null {
