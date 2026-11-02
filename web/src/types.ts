@@ -52,6 +52,23 @@ export type JiraSearchResult = {
   jira_key: string;
   jira_url: string;
   jira_parent_key: string | null;
+  jira_status: string | null;
+  /** Repo the import would target (by Jira key prefix); null when unmapped. */
+  repo_path: string | null;
+  repo_name: string | null;
+  /** Set when a task for this issue exists; import skips it. */
+  existing_task_id: string | null;
+  /** Hash of the fields import would write; import refuses the issue if it changed. */
+  fingerprint: string;
+};
+
+export type JiraImportResult = {
+  created: Task[];
+  /** Issues whose content or repo mapping changed since review; not imported. */
+  changed: JiraSearchResult[];
+  /** Keys that already had a task. */
+  skipped: string[];
+  failed: string[];
 };
 
 export type Repo = {

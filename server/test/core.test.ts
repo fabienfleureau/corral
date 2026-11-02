@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "../db.ts";
 import { slugify, defaultBaseBranch, ensureWorktree, removeWorktree } from "../dispatch.ts";
-import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
+import { addRepo, importFingerprint, importPreview, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
 import { CaptureEngine } from "../capture.ts";
 import { execFileSync } from "node:child_process";
 import type { Item, Task } from "../types.ts";
@@ -145,6 +145,22 @@ test("repos: registry, scan and jira prefix mapping", () => {
     assert.equal(db.getRepoByJiraPrefix(jiraKeyPrefix("OPS-123"))?.id, alpha.id, "prefix maps case-insensitively");
     assert.equal(jiraKeyPrefix("QOV-2138"), "QOV");
     assert.equal(jiraKeyPrefix("NOKEY"), "NOKEY");
+
+    // import preview: mapped prefix, unmapped prefix, already imported
+    assert.deepEqual(importPreview(db, "OPS-7"), {
+      repo_path: alpha.path,
+      repo_name: alpha.name,
+      existing_task_id: null,
+    });
+    assert.deepEqual(importPreview(db, "QOV-1"), { repo_path: null, repo_name: null, existing_task_id: null });
+    db.insertTask(makeTask({ id: "task-ops-8", jira_key: "OPS-8" }));
+    assert.equal(importPreview(db, "OPS-8").existing_task_id, "task-ops-8");
+
+    // fingerprint: stable for the same fields, changes with prompt or repo
+    const fields = { title: "OPS-7 Fix", prompt: "Do it", jira_parent_key: null, repo_path: alpha.path };
+    assert.equal(importFingerprint(fields), importFingerprint({ ...fields }));
+    assert.notEqual(importFingerprint(fields), importFingerprint({ ...fields, prompt: "Do it now" }));
+    assert.notEqual(importFingerprint(fields), importFingerprint({ ...fields, repo_path: null }));
 
     addRepo(db, join(root, "alpha"), { source: "scan" }); // duplicate path is ignored
     assert.equal(db.listRepos().length, 2);

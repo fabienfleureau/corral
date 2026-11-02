@@ -2,7 +2,7 @@
 // scanning workspace roots; mapped to Jira projects by prefix.
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import type { Db } from "./db.ts";
@@ -79,4 +79,35 @@ export function scanWorkspaceRepos(db: Db, roots: string[], maxDepth = 2): Repo[
 export function jiraKeyPrefix(issueKey: string): string {
   const m = issueKey.match(/^([A-Za-z0-9]+)-/);
   return m ? m[1] : issueKey;
+}
+
+export interface ImportPreview {
+  repo_path: string | null;
+  repo_name: string | null;
+  existing_task_id: string | null;
+}
+
+/** What importing this issue would do: target repo and whether a task already exists. */
+export function importPreview(db: Db, issueKey: string): ImportPreview {
+  const repo = db.getRepoByJiraPrefix(jiraKeyPrefix(issueKey));
+  return {
+    repo_path: repo?.path ?? null,
+    repo_name: repo?.name ?? null,
+    existing_task_id: db.getTaskByJiraKey(issueKey)?.id ?? null,
+  };
+}
+
+/**
+ * Hash of the task fields an import would write. Search returns it; import
+ * re-checks it so a ticket or repo mapping that changed after review is not
+ * imported unseen.
+ */
+export function importFingerprint(f: {
+  title: string;
+  prompt: string;
+  jira_parent_key: string | null;
+  repo_path: string | null;
+}): string {
+  const payload = JSON.stringify([f.title, f.prompt, f.jira_parent_key, f.repo_path]);
+  return createHash("sha256").update(payload).digest("hex").slice(0, 16);
 }

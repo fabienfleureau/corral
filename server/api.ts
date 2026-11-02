@@ -9,10 +9,10 @@ import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { HerdrClient } from "./herdr.ts";
 import type { CaptureEngine, Hub } from "./capture.ts";
-import type { JiraClient } from "./jira.ts";
+import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText } from "./llm.ts";
 import { dispatchTask, removeWorktree } from "./dispatch.ts";
-import { addRepo, gitToplevel, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
+import { addRepo, gitToplevel, importFingerprint, importPreview, scanWorkspaceRepos } from "./repos.ts";
 import type { Idea, Item, Task } from "./types.ts";
 
 export interface AppState {
@@ -22,6 +22,13 @@ export interface AppState {
   capture: CaptureEngine;
   jira: JiraClient;
   hub: Hub & { clients: Set<ServerResponse> };
+}
+
+/** A Jira issue as the import would create it, plus the fingerprint of those fields. */
+function jiraImportCandidate(state: AppState, issue: JiraIssue) {
+  const f = state.jira.issueToTaskFields(issue);
+  const preview = importPreview(state.db, f.jira_key);
+  return { ...f, ...preview, fingerprint: importFingerprint({ ...f, repo_path: preview.repo_path }) };
 }
 
 type Handler = (req: IncomingMessage, res: ServerResponse, ctx: { body: unknown; params: Record<string, string>; url: URL }) => void | Promise<void>;
@@ -281,7 +288,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!q) return json(res, 400, { error: "q required (text or JQL)" });
     try {
       const issues = await state.jira.search(q);
-      json(res, 200, issues.map((i) => state.jira.issueToTaskFields(i)));
+      json(
+        res,
+        200,
+        issues.map((i) => jiraImportCandidate(state, i)),
+      );
     } catch (err) {
       console.error("corral: jira search failed:", String(err));
       json(res, 502, { error: String(err) });
@@ -289,22 +300,29 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   on("POST", "/api/jira/import", async (req, res, { body }) => {
-    const b = body as { keys?: string[] };
-    const keys = b?.keys ?? [];
-    if (!keys.length) return json(res, 400, { error: "keys required" });
-    const created: Task[] = [];
-    for (const key of keys) {
-      if (state.db.getTaskByJiraKey(key)) continue; // dedupe by issue key
+    // items carry the fingerprint the user reviewed; bare keys skip that check.
+    const b = body as { items?: { key: string; fingerprint?: string }[]; keys?: string[] };
+    const items = b?.items ?? (b?.keys ?? []).map((key) => ({ key, fingerprint: undefined }));
+    if (!items.length) return json(res, 400, { error: "items or keys required" });
+    const out: { created: Task[]; changed: ReturnType<typeof jiraImportCandidate>[]; skipped: string[]; failed: string[] } =
+      { created: [], changed: [], skipped: [], failed: [] };
+    for (const { key, fingerprint } of items) {
+      if (state.db.getTaskByJiraKey(key)) {
+        out.skipped.push(key); // dedupe by issue key
+        continue;
+      }
       try {
-        const issue = await state.jira.getIssue(key);
-        const f = state.jira.issueToTaskFields(issue);
-        const mapped = state.db.getRepoByJiraPrefix(jiraKeyPrefix(f.jira_key));
+        const f = jiraImportCandidate(state, await state.jira.getIssue(key));
+        if (fingerprint !== undefined && fingerprint !== f.fingerprint) {
+          out.changed.push(f); // ticket or repo mapping changed since review
+          continue;
+        }
         const now = Date.now();
         const task: Task = {
           id: randomUUID(),
           title: f.title,
           prompt: f.prompt,
-          repo_path: mapped?.path ?? "",
+          repo_path: f.repo_path ?? "",
           target: "",
           target_state: "suggested",
           base_branch: null,
@@ -323,12 +341,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         state.db.insertTask(task);
         state.db.recordMetric("jira.imported", task.id, { key });
         state.hub.broadcast("task.updated", task);
-        created.push(task);
+        out.created.push(task);
       } catch (err) {
         console.error(`corral: jira import ${key} failed`, err);
+        out.failed.push(key);
       }
     }
-    json(res, 200, created);
+    json(res, 200, out);
   });
 
   on("POST", "/api/jira/tasks/:id/done", async (req, res, { body, params }) => {
