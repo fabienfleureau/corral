@@ -131,9 +131,21 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
       };
       const nodes = gql.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
       for (const raw of nodes) {
-        const t = raw as { id?: string; isResolved?: boolean; comments?: { nodes?: { author?: { login?: string }; body?: string }[] } };
+        const t = raw as {
+          id?: string;
+          isResolved?: boolean;
+          comments?: { nodes?: { author?: { login?: string }; body?: string }[] };
+        };
         if (t.isResolved) continue;
-        const first = t.comments?.nodes?.[0];
+        const comments = t.comments?.nodes ?? [];
+        const first = comments[0];
+        const last = comments[comments.length - 1];
+        // "Answered" per the readiness rule: someone replied after the
+        // reviewer. GitHub never auto-resolves a thread on reply — requiring
+        // isResolved would keep the gate red forever.
+        const answered =
+          comments.length > 1 && (first?.author?.login ?? "") !== (last?.author?.login ?? "");
+        if (answered) continue;
         threads.push({
           id: String(t.id ?? randomUUID()),
           author: String(first?.author?.login ?? "reviewer"),
@@ -241,11 +253,15 @@ function threadSignature(pr: PrInfo): string {
 }
 
 function commentsMessage(pr: PrInfo): string {
-  const parts = pr.threads.map((t, i) => `[${i + 1}] ${t.author}:\n${t.body}`);
+  const parts = pr.threads.map(
+    (t, i) => `[${i + 1}] ${t.author} (thread ${t.id}):\n${t.body}`,
+  );
   return [
     "PR review comments need handling — this is the PR loop, not a question:",
-    "fix each comment (or reply on the thread if you disagree), run your tests,",
-    "commit and push. Do not ask for permission. Do not merge the PR.",
+    "for each comment: fix the code (or reply on the thread if you disagree),",
+    "then resolve the thread:",
+    "  gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"<thread id>\"}){thread{isResolved}}}'",
+    "run your tests, commit and push. Do not ask for permission. Do not merge the PR.",
     "",
     `PR: ${pr.url}`,
     "",
