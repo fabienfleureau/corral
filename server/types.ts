@@ -20,6 +20,7 @@ export interface Task {
   jira_key: string | null;
   jira_url: string | null;
   jira_parent_key: string | null;
+  pr_url: string | null;
   status: TaskStatus;
   terminal_address: string | null;
   exit_code: number | null;

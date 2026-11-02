@@ -12,7 +12,8 @@ import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText } from "./llm.ts";
 import { dispatchTask, removeWorktree } from "./dispatch.ts";
-import { addRepo, gitToplevel, importFingerprint, importPreview, scanWorkspaceRepos } from "./repos.ts";
+import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
+import { syncTaskPr } from "./pr.ts";
 import type { Idea, Item, Task } from "./types.ts";
 
 export interface AppState {
@@ -174,6 +175,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       jira_key: b.jira_key ?? null,
       jira_url: b.jira_url ?? null,
       jira_parent_key: b.jira_parent_key ?? null,
+      pr_url: null,
       status: "open",
       terminal_address: null,
       exit_code: null,
@@ -224,6 +226,18 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       state.db.updateTask(task.id, { worktree_path: null });
       state.db.recordMetric("task.worktree_removed", task.id, {});
       json(res, 200, { ok: true });
+    } catch (err) {
+      json(res, 500, { error: String(err) });
+    }
+  });
+
+  on("POST", "/api/tasks/:id/check-pr", (req, res, { params }) => {
+    const task = state.db.getTask(params.id);
+    if (!task) return json(res, 404, { error: "task not found" });
+    if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
+    try {
+      const pr = syncTaskPr(state.db, state.hub, task);
+      json(res, 200, { pr, task: state.db.getTask(task.id) });
     } catch (err) {
       json(res, 500, { error: String(err) });
     }
@@ -403,6 +417,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
           jira_key: f.jira_key,
           jira_url: f.jira_url,
           jira_parent_key: f.jira_parent_key,
+          pr_url: null,
           status: "open",
           terminal_address: null,
           exit_code: null,
