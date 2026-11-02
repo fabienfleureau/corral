@@ -54,6 +54,15 @@ export type JiraSearchResult = {
   jira_parent_key: string | null;
 };
 
+export type Repo = {
+  id: string;
+  name: string;
+  path: string;
+  jira_prefix: string | null;
+  source: "manual" | "scan";
+  created_ms: number;
+};
+
 export type Config = {
   port: number;
   host: string;

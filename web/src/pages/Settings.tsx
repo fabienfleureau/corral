@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { Config } from "../types";
+import type { Config, Repo } from "../types";
 import { errText } from "../util";
 import { Spinner } from "../ui";
 
@@ -166,6 +166,8 @@ export function SettingsPage() {
               </div>
             </section>
 
+            <ReposSection />
+
             <section className="panel-form">
               <h2 className="panel-title">Desktop notifications</h2>
               <p className="muted">
@@ -190,5 +192,139 @@ export function SettingsPage() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+// ---- repo registry ----
+
+function ReposSection() {
+  const [repos, setRepos] = useState<Repo[]>([]);
+  const [path, setPath] = useState("");
+  const [name, setName] = useState("");
+  const [prefix, setPrefix] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () => api.listRepos().then(setRepos).catch((err: unknown) => setError(errText(err)));
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const run = async (label: string, fn: () => Promise<unknown>, okMsg?: string) => {
+    if (busy) return;
+    setBusy(label);
+    setError(null);
+    setMsg(null);
+    try {
+      await fn();
+      if (okMsg) setMsg(okMsg);
+      await load();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="panel-form">
+      <h2 className="panel-title">Repos</h2>
+      <p className="muted">
+        The git repos tasks can dispatch into. Jira issues whose key starts with the prefix (e.g.{" "}
+        <span className="mono">QOV</span> for <span className="mono">QOV-123</span>) import straight into that repo.
+      </p>
+      {repos.length === 0 ? (
+        <p className="muted">No repos yet — add one below or scan your workspace.</p>
+      ) : (
+        <ul className="repo-list">
+          {repos.map((repo) => (
+            <li key={repo.id} className="repo-row">
+              <div className="repo-info">
+                <span className="repo-name">{repo.name}</span>
+                <span className="mono muted">{repo.path}</span>
+                {repo.source === "scan" ? <span className="badge badge-mute">scanned</span> : null}
+              </div>
+              <div className="repo-actions">
+                <label className="field-inline">
+                  <span>Jira prefix</span>
+                  <input
+                    className="prefix-input"
+                    defaultValue={repo.jira_prefix ?? ""}
+                    placeholder="e.g. QOV"
+                    onBlur={(e) => {
+                      const value = e.target.value.trim();
+                      if (value !== (repo.jira_prefix ?? "")) {
+                        void run("prefix", () => api.patchRepo(repo.id, { jira_prefix: value || null }), "Prefix updated.");
+                      }
+                    }}
+                  />
+                </label>
+                <button
+                  className="btn"
+                  onClick={() => void run(`del-${repo.id}`, () => api.deleteRepo(repo.id), "Repo removed.")}
+                  disabled={busy !== null}
+                >
+                  Remove
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="field-row">
+        <label className="field">
+          <span>Path</span>
+          <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/path/to/git/repo" />
+        </label>
+        <label className="field">
+          <span>Name (optional)</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="api" />
+        </label>
+        <label className="field">
+          <span>Jira prefix (optional)</span>
+          <input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="QOV" />
+        </label>
+      </div>
+      {error ? <div className="inline-error">{error}</div> : null}
+      {msg ? <div className="inline-ok">{msg}</div> : null}
+      <div className="form-foot">
+        <button
+          className="btn btn-primary"
+          onClick={() =>
+            void run(
+              "add",
+              () =>
+                api
+                  .addRepo({ path: path.trim(), name: name.trim() || undefined, jira_prefix: prefix.trim() || undefined })
+                  .then(() => {
+                    setPath("");
+                    setName("");
+                    setPrefix("");
+                  }),
+              "Repo added.",
+            )
+          }
+          disabled={busy !== null || !path.trim()}
+        >
+          {busy === "add" ? <Spinner /> : null}
+          Add repo
+        </button>
+        <button
+          className="btn"
+          onClick={() =>
+            void run("scan", async () => {
+              const res = await api.scanRepos();
+              setMsg(`Scan complete — ${res.added.length} new, ${res.total} total (${res.roots.join(", ")}).`);
+            })
+          }
+          disabled={busy !== null}
+        >
+          {busy === "scan" ? <Spinner /> : null}
+          Scan workspace
+        </button>
+      </div>
+    </section>
   );
 }

@@ -1,7 +1,7 @@
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
-import type { Config, Idea, Item, JiraSearchResult, Task } from "./types";
+import type { Config, Idea, Item, JiraSearchResult, Repo, Task } from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -133,6 +133,16 @@ export const api = {
     post<Idea>("/api/ideas", input),
   patchIdea: (id: string, input: { status?: Idea["status"]; tag?: Idea["tag"] }): Promise<{ ok: boolean }> =>
     patch<{ ok: boolean }>(`/api/ideas/${id}`, input),
+
+  // ---- repos ----
+  listRepos: (): Promise<Repo[]> => get<Repo[]>("/api/repos"),
+  addRepo: (input: { path: string; name?: string; jira_prefix?: string }): Promise<Repo> =>
+    post<Repo>("/api/repos", input),
+  patchRepo: (id: string, input: { name?: string; jira_prefix?: string | null }): Promise<Repo> =>
+    patch<Repo>(`/api/repos/${id}`, input),
+  deleteRepo: (id: string): Promise<{ ok: boolean }> => request<{ ok: boolean }>(`/api/repos/${id}`, "DELETE"),
+  scanRepos: (): Promise<{ added: Repo[]; total: number; roots: string[] }> =>
+    post<{ added: Repo[]; total: number; roots: string[] }>("/api/repos/scan"),
 
   // ---- misc ----
   getConfig: (): Promise<Config> => get<Config>("/api/config"),

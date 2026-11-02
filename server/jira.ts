@@ -40,14 +40,22 @@ function descriptionToText(description: unknown): string {
     const out: string[] = [];
     const walk = (node: Record<string, unknown>) => {
       if (node.type === "text" && typeof node.text === "string") out.push(node.text);
+      if (node.type === "hardBreak") out.push("\n");
       const content = node.content as Record<string, unknown>[] | undefined;
       if (Array.isArray(content)) {
         for (const child of content) walk(child);
-        if (node.type === "paragraph") out.push("\n");
+        if (node.type === "paragraph" || node.type === "heading" || node.type === "listItem" || node.type === "codeBlock") {
+          out.push("\n");
+        }
       }
     };
     walk(description as Record<string, unknown>);
-    return out.join("").trim();
+    return out
+      .join("")
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .join("\n")
+      .trim();
   }
   return "";
 }
@@ -76,18 +84,16 @@ export class JiraClient {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`Jira ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`);
+      const err = new Error(`Jira ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`);
+      (err as Error & { status?: number }).status = res.status;
+      throw err;
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
   }
 
-  /** Free text or JQL. Free text becomes `text ~ "..."` JQL. */
-  async search(query: string, max = 25): Promise<JiraIssue[]> {
-    const jql =
-      /order\s+by|=\s*|in\s*\(|updated\s|status\s|project\s|assignee\s|parent\s/i.test(query) && !query.includes('"')
-        ? query
-        : `text ~ "${query.replace(/"/g, '\\"')}" ORDER BY updated DESC`;
+  /** Run one JQL query. GET /search first, POST /search/jql on older-path errors. */
+  private async runJql(jql: string, max: number): Promise<JiraIssue[]> {
     const params = new URLSearchParams({
       jql: jql.slice(0, 2000),
       maxResults: String(max),
@@ -96,14 +102,31 @@ export class JiraClient {
     try {
       const res = await this.request<{ issues: JiraIssue[] }>("GET", `/rest/api/3/search?${params}`);
       return res.issues ?? [];
-    } catch {
-      // Newer Cloud tenants expose only POST /search/jql
+    } catch (err) {
+      const status = (err as Error & { status?: number }).status;
+      if (status !== 404 && status !== 410) throw err; // 404/410: endpoint moved
       const res = await this.request<{ issues: JiraIssue[] }>("POST", `/rest/api/3/search/jql`, {
         jql: jql.slice(0, 2000),
         maxResults: max,
         fields: ["summary", "description", "parent", "status", "issuetype"],
       });
       return res.issues ?? [];
+    }
+  }
+
+  /**
+   * Free text or JQL — decided by Jira, not by guessing:
+   * the query runs as JQL first; only if Jira rejects the syntax (400) does it
+   * become a `text ~` search.
+   */
+  async search(query: string, max = 25): Promise<JiraIssue[]> {
+    try {
+      return await this.runJql(query, max);
+    } catch (err) {
+      const status = (err as Error & { status?: number }).status;
+      if (status !== 400) throw err;
+      const textJql = `text ~ "${query.replace(/"/g, '\\"')}" ORDER BY updated DESC`;
+      return this.runJql(textJql, max);
     }
   }
 

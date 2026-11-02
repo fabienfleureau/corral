@@ -1,16 +1,7 @@
 // SQLite storage. One file at <dataDir>/corral.db. Schema is additive only.
 
 import { DatabaseSync } from "node:sqlite";
-import type {
-  Idea,
-  Item,
-  ItemKind,
-  ItemStatus,
-  MetricEvent,
-  Task,
-  TaskStatus,
-  TrackedTerminal,
-} from "./types.ts";
+import type { Idea, Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskStatus, TrackedTerminal } from "./types.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -64,6 +55,15 @@ CREATE TABLE IF NOT EXISTS ideas (
   created_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ideas_status ON ideas(status);
+
+CREATE TABLE IF NOT EXISTS repos (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  path TEXT NOT NULL UNIQUE,
+  jira_prefix TEXT,
+  source TEXT NOT NULL DEFAULT 'manual',
+  created_ms INTEGER NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS terminals (
   address TEXT PRIMARY KEY,
@@ -211,6 +211,47 @@ export class Db {
       ? this.raw.prepare(`SELECT * FROM ideas WHERE status = ? ORDER BY created_ms DESC`).all(status)
       : this.raw.prepare(`SELECT * FROM ideas ORDER BY created_ms DESC`).all();
     return rows as unknown as Idea[];
+  }
+
+  // ---- repos ----
+
+  insertRepo(r: Repo): void {
+    this.raw
+      .prepare(`INSERT OR IGNORE INTO repos (id, name, path, jira_prefix, source, created_ms) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(r.id, r.name, r.path, r.jira_prefix, r.source, r.created_ms);
+  }
+
+  updateRepo(id: string, patch: Partial<Repo>): void {
+    const keys = Object.keys(patch).filter((k) => k !== "id") as (keyof Repo)[];
+    if (keys.length === 0) return;
+    const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
+    const values = keys.map((k) => patch[k] as never);
+    this.raw.prepare(`UPDATE repos SET ${sets} WHERE id = ?`).run(...values, id);
+  }
+
+  deleteRepo(id: string): void {
+    this.raw.prepare(`DELETE FROM repos WHERE id = ?`).run(id);
+  }
+
+  getRepo(id: string): Repo | null {
+    const row = this.raw.prepare(`SELECT * FROM repos WHERE id = ?`).get(id);
+    return (row as unknown as Repo) ?? null;
+  }
+
+  getRepoByPath(path: string): Repo | null {
+    const row = this.raw.prepare(`SELECT * FROM repos WHERE path = ?`).get(path);
+    return (row as unknown as Repo) ?? null;
+  }
+
+  getRepoByJiraPrefix(prefix: string): Repo | null {
+    const row = this.raw
+      .prepare(`SELECT * FROM repos WHERE UPPER(jira_prefix) = ? ORDER BY created_ms LIMIT 1`)
+      .get(prefix.toUpperCase());
+    return (row as unknown as Repo) ?? null;
+  }
+
+  listRepos(): Repo[] {
+    return this.raw.prepare(`SELECT * FROM repos ORDER BY name`).all() as unknown as Repo[];
   }
 
   // ---- terminals ----

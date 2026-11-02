@@ -21,6 +21,8 @@ export interface Config {
   configDir: string;
   dataDir: string;
   worktreesDir: string;
+  /** Directories scanned for git repos by POST /api/repos/scan. */
+  workspaceRoots: string[];
   /** Agent launch commands. "{prompt}" is replaced with the task prompt. */
   agents: Record<string, string[]>;
   /** Corral's own LLM calls (summarization). "{prompt}" placeholder. */
@@ -39,6 +41,7 @@ function defaultConfig(): Config {
     configDir,
     dataDir: join(home, ".local", "share", "corral"),
     worktreesDir: join(home, ".herdr", "worktrees"),
+    workspaceRoots: [join(home, "workspace")],
     agents: {
       claude: ["claude", "{prompt}"],
       codex: ["codex", "{prompt}"],

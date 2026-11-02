@@ -68,6 +68,15 @@ export interface TrackedTerminal {
   updated_ms: number;
 }
 
+export interface Repo {
+  id: string;
+  name: string;
+  path: string;
+  jira_prefix: string | null;
+  source: "manual" | "scan";
+  created_ms: number;
+}
+
 /** Facts about a terminal, as herdr reports them (subset we care about). */
 export interface HcTerminal {
   address: string;

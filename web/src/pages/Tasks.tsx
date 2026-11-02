@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
-import type { JiraSearchResult, Task } from "../types";
+import type { JiraSearchResult, Repo, Task } from "../types";
 import { errText, formatTs, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 
@@ -17,6 +17,14 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [showNew, setShowNew] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [repos, setRepos] = useState<Repo[]>([]);
+
+  useEffect(() => {
+    api
+      .listRepos()
+      .then(setRepos)
+      .catch(() => setRepos([]));
+  }, [eventVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +100,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={repos} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -116,7 +124,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         </div>
 
         {showImport ? <JiraImport onDone={() => { setShowImport(false); refresh(); }} /> : null}
-        {showNew ? <NewTaskForm onDone={() => { setShowNew(false); refresh(); }} /> : null}
+        {showNew ? <NewTaskForm repos={repos} onDone={() => { setShowNew(false); refresh(); }} /> : null}
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
@@ -151,7 +159,7 @@ function parentUrl(members: Task[], parentKey: string): string | null {
 
 // ---- one task row ----
 
-function TaskRow({ task, refresh }: { task: Task; refresh: () => void }) {
+function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh: () => void }) {
   const [showDispatch, setShowDispatch] = useState(false);
   const [target, setTarget] = useState(task.target || "claude");
   const [useWorktree, setUseWorktree] = useState(true);
@@ -226,6 +234,28 @@ function TaskRow({ task, refresh }: { task: Task; refresh: () => void }) {
             {timeAgo(task.updated_ms)}
           </span>
         </div>
+        {!task.repo_path && task.status !== "archived" ? (
+          <div className="task-sub">
+            <label className="field-inline">
+              <span>Repo</span>
+              <select
+                value=""
+                onChange={(e) => {
+                  const path = e.target.value;
+                  if (path) void run("repo", () => api.patchTask(task.id, { repo_path: path }), "Repo assigned.");
+                }}
+                disabled={busy !== null}
+              >
+                <option value="">{repos.length ? "assign a repo…" : "no repos registered (Settings)"}</option>
+                {repos.map((r) => (
+                  <option key={r.id} value={r.path}>
+                    {r.name} — {r.path}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
         {task.worktree_path ? <div className="task-sub mono muted">worktree: {task.worktree_path}</div> : null}
         {dispatchResult ? (
           <div className="task-sub">
@@ -239,6 +269,9 @@ function TaskRow({ task, refresh }: { task: Task; refresh: () => void }) {
 
         {showDispatch ? (
           <div className="inline-form">
+            {!task.repo_path ? (
+              <div className="inline-error">Assign a repo before dispatching.</div>
+            ) : null}
             <label className="field-inline">
               <span>Target</span>
               <select value={target} onChange={(e) => setTarget(e.target.value)}>
@@ -257,7 +290,11 @@ function TaskRow({ task, refresh }: { task: Task; refresh: () => void }) {
               />
               <span>Create worktree</span>
             </label>
-            <button className="btn btn-primary" onClick={() => void dispatch()} disabled={busy !== null}>
+            <button
+              className="btn btn-primary"
+              onClick={() => void dispatch()}
+              disabled={busy !== null || !task.repo_path}
+            >
               {busy === "dispatch" ? <Spinner /> : null}
               {busy === "dispatch" ? "Dispatching…" : "Dispatch"}
             </button>
@@ -328,9 +365,10 @@ function TaskRow({ task, refresh }: { task: Task; refresh: () => void }) {
 
 // ---- new task form ----
 
-function NewTaskForm({ onDone }: { onDone: () => void }) {
+function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [repoChoice, setRepoChoice] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [target, setTarget] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
@@ -345,7 +383,7 @@ function NewTaskForm({ onDone }: { onDone: () => void }) {
       const input: NewTaskInput = {
         title: title.trim(),
         prompt,
-        repo_path: repoPath.trim(),
+        repo_path: repoChoice === "__custom__" ? repoPath.trim() : repoChoice,
         target,
         base_branch: baseBranch.trim() || null,
       };
@@ -376,9 +414,23 @@ function NewTaskForm({ onDone }: { onDone: () => void }) {
       </label>
       <div className="field-row">
         <label className="field">
-          <span>Repo path</span>
-          <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/repo" />
+          <span>Repo</span>
+          <select value={repoChoice} onChange={(e) => setRepoChoice(e.target.value)}>
+            <option value="">{repos.length ? "choose a repo…" : "no repos yet (add in Settings)"}</option>
+            {repos.map((r) => (
+              <option key={r.id} value={r.path}>
+                {r.name} — {r.path}
+              </option>
+            ))}
+            <option value="__custom__">custom path…</option>
+          </select>
         </label>
+        {repoChoice === "__custom__" ? (
+          <label className="field">
+            <span>Repo path</span>
+            <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/repo" />
+          </label>
+        ) : null}
         <label className="field">
           <span>Target</span>
           <select value={target} onChange={(e) => setTarget(e.target.value)}>

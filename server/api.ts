@@ -12,6 +12,7 @@ import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient } from "./jira.ts";
 import { summarizeText } from "./llm.ts";
 import { dispatchTask, removeWorktree } from "./dispatch.ts";
+import { addRepo, gitToplevel, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import type { Idea, Item, Task } from "./types.ts";
 
 export interface AppState {
@@ -233,6 +234,47 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, item);
   });
 
+  // ---- repos ----
+  on("GET", "/api/repos", (_req, res) => json(res, 200, state.db.listRepos()));
+
+  on("POST", "/api/repos", (req, res, { body }) => {
+    const b = body as { path?: string; name?: string; jira_prefix?: string };
+    if (!b?.path) return json(res, 400, { error: "path required" });
+    try {
+      const toplevel = gitToplevel(b.path);
+      const repo = addRepo(state.db, toplevel, {
+        name: b.name,
+        jiraPrefix: b.jira_prefix ?? null,
+        source: "manual",
+      });
+      if (b.jira_prefix && repo.jira_prefix !== b.jira_prefix) {
+        state.db.updateRepo(repo.id, { jira_prefix: b.jira_prefix });
+        repo.jira_prefix = b.jira_prefix;
+      }
+      json(res, 200, repo);
+    } catch {
+      json(res, 400, { error: `not a git repository: ${b.path}` });
+    }
+  });
+
+  on("PATCH", "/api/repos/:id", (req, res, { body, params }) => {
+    const repo = state.db.getRepo(params.id);
+    if (!repo) return json(res, 404, { error: "repo not found" });
+    const patch = body as Partial<{ name: string; jira_prefix: string | null }>;
+    state.db.updateRepo(repo.id, patch);
+    json(res, 200, state.db.getRepo(repo.id));
+  });
+
+  on("DELETE", "/api/repos/:id", (_req, res, { params }) => {
+    state.db.deleteRepo(params.id);
+    json(res, 200, { ok: true });
+  });
+
+  on("POST", "/api/repos/scan", (_req, res) => {
+    const added = scanWorkspaceRepos(state.db, state.cfg.workspaceRoots);
+    json(res, 200, { added, total: state.db.listRepos().length, roots: state.cfg.workspaceRoots });
+  });
+
   // ---- jira ----
   on("GET", "/api/jira/search", async (_req, res, { url }) => {
     const q = url.searchParams.get("q") ?? state.cfg.jira.jql;
@@ -241,6 +283,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       const issues = await state.jira.search(q);
       json(res, 200, issues.map((i) => state.jira.issueToTaskFields(i)));
     } catch (err) {
+      console.error("corral: jira search failed:", String(err));
       json(res, 502, { error: String(err) });
     }
   });
@@ -255,12 +298,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       try {
         const issue = await state.jira.getIssue(key);
         const f = state.jira.issueToTaskFields(issue);
+        const mapped = state.db.getRepoByJiraPrefix(jiraKeyPrefix(f.jira_key));
         const now = Date.now();
         const task: Task = {
           id: randomUUID(),
           title: f.title,
           prompt: f.prompt,
-          repo_path: "",
+          repo_path: mapped?.path ?? "",
           target: "",
           target_state: "suggested",
           base_branch: null,

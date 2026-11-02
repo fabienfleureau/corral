@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "../db.ts";
 import { slugify, defaultBaseBranch, ensureWorktree, removeWorktree } from "../dispatch.ts";
+import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
 import { CaptureEngine } from "../capture.ts";
 import { execFileSync } from "node:child_process";
 import type { Item, Task } from "../types.ts";
@@ -113,6 +114,41 @@ test("worktree: create, reuse and remove", () => {
     assert.equal(wt2, wt);
 
     removeWorktree(repo, wt);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("repos: registry, scan and jira prefix mapping", () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-repos-"));
+  try {
+    // two fake repos under a workspace root, one nested one level deeper
+    const root = join(dir, "workspace");
+    for (const name of ["alpha", "team/beta"]) {
+      const repo = join(root, name);
+      execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+    }
+    const notRepo = join(root, "notes");
+    execFileSync("mkdir", ["-p", notRepo], { stdio: "ignore" });
+
+    const db = new Db(join(dir, "test.db"));
+    assert.ok(isGitRepo(join(root, "alpha")));
+    assert.ok(!isGitRepo(notRepo));
+
+    const added = scanWorkspaceRepos(db, [root]);
+    assert.equal(added.length, 2, "both repos found");
+    assert.equal(db.listRepos().length, 2);
+    assert.equal(scanWorkspaceRepos(db, [root]).length, 0, "idempotent rescan");
+
+    const alpha = db.getRepoByPath(join(root, "alpha"))!;
+    db.updateRepo(alpha.id, { jira_prefix: "ops" });
+    assert.equal(db.getRepoByJiraPrefix(jiraKeyPrefix("OPS-123"))?.id, alpha.id, "prefix maps case-insensitively");
+    assert.equal(jiraKeyPrefix("QOV-2138"), "QOV");
+    assert.equal(jiraKeyPrefix("NOKEY"), "NOKEY");
+
+    addRepo(db, join(root, "alpha"), { source: "scan" }); // duplicate path is ignored
+    assert.equal(db.listRepos().length, 2);
+    db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
