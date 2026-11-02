@@ -241,6 +241,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     };
     if (!b?.title || !b?.body) return json(res, 400, { error: "title and body required" });
     const item = await state.capture.createStructuredQuestion({
+      kind: b.kind ?? "question",
       taskId: b.task_id ?? null,
       terminal: b.terminal ?? null,
       title: b.title,

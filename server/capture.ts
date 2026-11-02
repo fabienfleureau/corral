@@ -145,14 +145,18 @@ export class CaptureEngine {
     this.lastState.delete(address);
   }
 
-  /** Called from POST /api/reports: a structured question report from an agent. */
+  /** Called from POST /api/reports: a structured report from an agent.
+   *  kind "question" -> question item; kind "done"/"pr" -> pr item (the link
+   *  to review). Completion reports supersede nothing — every PR is its own item. */
   async createStructuredQuestion(opts: {
+    kind?: string;
     taskId?: string | null;
     terminal?: string | null;
     title: string;
     body: string;
     options?: string[];
   }): Promise<Item> {
+    const itemKind: Item["kind"] = opts.kind === "done" || opts.kind === "pr" ? "pr" : "question";
     const taskId = opts.taskId ?? null;
     const address =
       opts.terminal ??
@@ -166,8 +170,9 @@ export class CaptureEngine {
       }
     }
     const optionsJson = opts.options?.length ? JSON.stringify(opts.options) : null;
-    // A structured report supersedes a pending fallback capture for this terminal.
-    if (address) {
+    // A structured question supersedes a pending fallback capture for this
+    // terminal. Completion ("done"/"pr") reports always create their own item.
+    if (address && itemKind === "question") {
       const existing = this.db.openQuestionItemForTerminal(address);
       if (existing && existing.structured === 0) {
         this.db.updateItem(existing.id, {
@@ -188,7 +193,7 @@ export class CaptureEngine {
     }
     const item: Item = {
       id: randomUUID(),
-      kind: "question",
+      kind: itemKind,
       status: "open",
       title: opts.title,
       summary: opts.body,
@@ -204,7 +209,7 @@ export class CaptureEngine {
       snooze_until_ms: null,
     };
     this.db.insertItem(item);
-    this.db.recordMetric("item.created", item.id, { kind: "question", capture: "structured", task_id: taskId });
+    this.db.recordMetric("item.created", item.id, { kind: itemKind, capture: "structured", task_id: taskId });
     this.hub.broadcast("item.created", item);
     return item;
   }
