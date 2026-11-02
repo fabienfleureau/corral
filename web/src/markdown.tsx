@@ -7,7 +7,7 @@
 import type { ReactNode } from "react";
 
 const INLINE_RE =
-  /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]\n]*\]\([^)\s]+\))/g;
+  /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<>"']+)/g;
 
 function inline(text: string, keyBase = "i"): ReactNode[] {
   const nodes: ReactNode[] = [];
@@ -39,6 +39,16 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
           <span key={key}>{label}</span>
         ),
       );
+    } else if (tok.startsWith("http")) {
+      // Bare URL, autolinked. Trailing punctuation stays outside the link.
+      const trailing = /[.,;:!?)\]}]+$/.exec(tok);
+      const url = trailing ? tok.slice(0, tok.length - trailing[0].length) : tok;
+      nodes.push(
+        <a key={key} href={url} target="_blank" rel="noreferrer">
+          {url}
+        </a>,
+      );
+      if (trailing) nodes.push(trailing[0]);
     } else {
       nodes.push(<em key={key}>{inline(tok.slice(1, -1), key)}</em>);
     }

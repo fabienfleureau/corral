@@ -191,6 +191,13 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                       <span className="kind-label">{item.kind}</span>
                       <span>·</span>
                       <span>{item.structured ? "structured" : "auto-captured"}</span>
+                      {item.kind === "pr" && item.status === "open" ? (
+                        item.ready === 1 ? (
+                          <span className="badge badge-ready">ready for review</span>
+                        ) : (
+                          <span className="badge badge-wait">needs work</span>
+                        )
+                      ) : null}
                     </span>
                   </span>
                   <span className="item-row-side">
@@ -219,6 +226,13 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                 <span className="chip chip-static">
                   {selected.structured ? "structured report" : "auto-captured"}
                 </span>
+                {selected.kind === "pr" && selected.status === "open" ? (
+                  selected.ready === 1 ? (
+                    <span className="badge badge-ready">ready for review</span>
+                  ) : (
+                    <span className="badge badge-wait">needs work — {selected.summary || "see body"}</span>
+                  )
+                ) : null}
                 <span className={`chip chip-static status-${selected.status}`}>{selected.status}</span>
                 {linkedTask ? (
                   <span className="meta-task">
@@ -238,7 +252,12 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
 
             <div className="detail-body">
               {selected.structured ? (
-                <Markdown text={selected.summary || selected.body} className="body-text" />
+                <>
+                  {selected.summary ? <Markdown text={selected.summary} className="body-text" /> : null}
+                  {selected.body && selected.body !== selected.summary ? (
+                    <Markdown text={selected.body} className="body-text" />
+                  ) : null}
+                </>
               ) : (
                 <pre className="body-text body-raw">{selected.body}</pre>
               )}

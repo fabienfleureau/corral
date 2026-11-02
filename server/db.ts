@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS items (
   body TEXT NOT NULL DEFAULT '',
   context TEXT NOT NULL DEFAULT '',
   options TEXT,
+  ready INTEGER NOT NULL DEFAULT 1,
   source_ref TEXT,
   task_id TEXT,
   structured INTEGER NOT NULL DEFAULT 0,
@@ -103,9 +104,11 @@ export class Db {
     const names = new Set(cols.map((c) => c.name));
     if (!names.has("context")) this.raw.exec(`ALTER TABLE items ADD COLUMN context TEXT NOT NULL DEFAULT ''`);
     if (!names.has("options")) this.raw.exec(`ALTER TABLE items ADD COLUMN options TEXT`);
+    if (!names.has("ready")) this.raw.exec(`ALTER TABLE items ADD COLUMN ready INTEGER NOT NULL DEFAULT 1`);
     const taskCols = this.raw.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
     const taskNames = new Set(taskCols.map((c) => c.name));
     if (!taskNames.has("pr_url")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
+    if (!taskNames.has("pr_meta")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN pr_meta TEXT`);
   }
 
   close(): void {
@@ -118,13 +121,13 @@ export class Db {
     this.raw
       .prepare(
         `INSERT INTO tasks (id, title, prompt, repo_path, target, target_state, base_branch, branch,
-          worktree_path, assignee, jira_key, jira_url, jira_parent_key, pr_url, status, terminal_address,
+          worktree_path, assignee, jira_key, jira_url, jira_parent_key, pr_url, pr_meta, status, terminal_address,
           exit_code, created_ms, updated_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         t.id, t.title, t.prompt, t.repo_path, t.target, t.target_state, t.base_branch, t.branch,
-        t.worktree_path, t.assignee, t.jira_key, t.jira_url, t.jira_parent_key, t.pr_url, t.status,
+        t.worktree_path, t.assignee, t.jira_key, t.jira_url, t.jira_parent_key, t.pr_url, t.pr_meta ?? null, t.status,
         t.terminal_address, t.exit_code, t.created_ms, t.updated_ms,
       );
   }
@@ -159,12 +162,12 @@ export class Db {
   insertItem(i: Item): void {
     this.raw
       .prepare(
-        `INSERT INTO items (id, kind, status, title, summary, body, context, options, source_ref, task_id, structured,
+        `INSERT INTO items (id, kind, status, title, summary, body, context, options, ready, source_ref, task_id, structured,
           created_ms, updated_ms, resolved_ms, snooze_until_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        i.id, i.kind, i.status, i.title, i.summary, i.body, i.context, i.options, i.source_ref, i.task_id, i.structured,
+        i.id, i.kind, i.status, i.title, i.summary, i.body, i.context, i.options, i.ready, i.source_ref, i.task_id, i.structured,
         i.created_ms, i.updated_ms, i.resolved_ms, i.snooze_until_ms,
       );
   }

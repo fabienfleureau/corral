@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { Db } from "../db.ts";
 import { slugify, defaultBaseBranch, ensureWorktree, removeWorktree } from "../dispatch.ts";
 import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
+import { prReady, prItemBody, type PrInfo } from "../pr.ts";
 import { CaptureEngine } from "../capture.ts";
 import { execFileSync } from "node:child_process";
 import type { Item, Task } from "../types.ts";
@@ -30,6 +31,7 @@ function makeTask(over: Partial<Task> = {}): Task {
     jira_url: null,
     jira_parent_key: null,
     pr_url: null,
+    pr_meta: null,
     status: "open",
     terminal_address: null,
     exit_code: null,
@@ -66,6 +68,7 @@ test("db: task and item round-trip", () => {
       body: "tail",
       context: "",
       options: null,
+      ready: 1,
       source_ref: "t9",
       task_id: "task-1",
       structured: 0,
@@ -155,6 +158,49 @@ test("repos: registry, scan and jira prefix mapping", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("pr gate: ready only when threads resolved, checks green, mergeable", () => {
+  const base: PrInfo = {
+    url: "https://example.com/pr/1",
+    title: "feat: thing",
+    state: "OPEN",
+    number: 1,
+    description: "Does a thing.",
+    additions: 10,
+    deletions: 2,
+    changed_files: 3,
+    mergeable: "MERGEABLE",
+    review_decision: null,
+    checks: { total: 2, failed: 0, pending: false },
+    threads: [],
+  };
+
+  assert.equal(prReady(base).ready, true, "clean PR is ready");
+
+  const withComments = { ...base, threads: [{ id: "t1", author: "copilot", body: "fix this" }] };
+  const r1 = prReady(withComments);
+  assert.equal(r1.ready, false);
+  assert.match(r1.reasons.join(), /1 unresolved review comment/);
+
+  const failing = { ...base, checks: { total: 2, failed: 1, pending: false } };
+  assert.match(prReady(failing).reasons.join(), /1 failing check/);
+
+  const pending = { ...base, checks: { total: 2, failed: 0, pending: true } };
+  assert.match(prReady(pending).reasons.join(), /checks still running/);
+
+  const conflicts = { ...base, mergeable: "CONFLICTING" };
+  assert.match(prReady(conflicts).reasons.join(), /merge conflicts/);
+
+  const merged = { ...base, state: "MERGED" };
+  assert.equal(prReady(merged).ready, false);
+
+  // body shows description + counts + link
+  const body = prItemBody(base);
+  assert.match(body, /Does a thing\./);
+  assert.match(body, /3/); // files changed
+  assert.match(body, /\+10 \/ -2/);
+  assert.match(body, /https:\/\/example\.com\/pr\/1/);
 });
 
 test("capture: structured question supersedes fallback; auto-resolution", async () => {

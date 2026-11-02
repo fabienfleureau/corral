@@ -169,6 +169,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       jira_url: b.jira_url ?? null,
       jira_parent_key: b.jira_parent_key ?? null,
       pr_url: null,
+      pr_meta: null,
       status: "open",
       terminal_address: null,
       exit_code: null,
@@ -229,7 +230,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!task) return json(res, 404, { error: "task not found" });
     if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
     try {
-      const pr = syncTaskPr(state.db, state.hub, task);
+      const pr = syncTaskPr(state.db, state.hub, task, { herdr: state.herdr, cfg: state.cfg });
       json(res, 200, { pr, task: state.db.getTask(task.id) });
     } catch (err) {
       json(res, 500, { error: String(err) });
@@ -400,6 +401,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
           jira_url: f.jira_url,
           jira_parent_key: f.jira_parent_key,
           pr_url: null,
+          pr_meta: null,
           status: "open",
           terminal_address: null,
           exit_code: null,

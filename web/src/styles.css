@@ -1174,6 +1174,16 @@ select:focus {
   font-weight: 600;
 }
 
+.badge-ready {
+  background: color-mix(in srgb, #2e9e5b 25%, transparent);
+  color: #2e9e5b;
+}
+
+.badge-wait {
+  background: color-mix(in srgb, #c98a1b 25%, transparent);
+  color: #c98a1b;
+}
+
 /* sessions */
 .session-list {
   display: flex;

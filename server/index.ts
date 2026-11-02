@@ -30,7 +30,7 @@ const hub = {
   },
 };
 
-const capture = new CaptureEngine(db, herdr, hub);
+const capture = new CaptureEngine(db, herdr, hub, cfg);
 const state: AppState = { db, cfg, herdr, capture, jira, hub };
 
 const stream = new HerdrEventStream({
@@ -45,11 +45,11 @@ stream.start();
 // Safety net for missed events.
 setInterval(() => void capture.reconcile(), 30_000);
 
-// PR discovery: find review links for tasks whose branches may have PRs.
+// PR discovery + the PR loop: find review links, feed comments back to agents.
 setInterval(() => {
   for (const task of prCandidateTasks(db)) {
     try {
-      syncTaskPr(db, hub, task);
+      syncTaskPr(db, hub, task, { herdr, cfg });
     } catch {
       /* best effort */
     }
