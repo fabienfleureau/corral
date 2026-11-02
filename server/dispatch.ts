@@ -105,16 +105,21 @@ export function trustClaudeWorkspace(path: string): void {
 }
 
 export function questionConvention(cfg: Config, task: Task): string {
-  const path = join(cfg.configDir, "skills", "question-report.md");
-  const fallback = join(process.cwd(), "skills", "question-report.md");
-  const file = existsSync(path) ? path : fallback;
-  let text = "";
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    text = "When you need the human, ask clearly and wait. Do not guess.";
-  }
-  return text
+  const read = (name: string, fallback: string): string => {
+    const path = join(cfg.configDir, "skills", name);
+    const local = join(process.cwd(), "skills", name);
+    try {
+      return readFileSync(existsSync(path) ? path : local, "utf8");
+    } catch {
+      return fallback;
+    }
+  };
+  const report = read(
+    "question-report.md",
+    "When you need the human, ask clearly and wait. Do not guess.",
+  );
+  const prLoop = read("pr-loop.md", "");
+  return [report, prLoop].filter(Boolean).join("\n\n---\n\n")
     .replaceAll("{task_id}", task.id)
     .replaceAll("{corral_url}", `http://${cfg.host}:${cfg.port}`)
     .replaceAll("{corral_token}", process.env.CORRAL_TOKEN ?? cfg.token);

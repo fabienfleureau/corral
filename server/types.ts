@@ -21,6 +21,8 @@ export interface Task {
   jira_url: string | null;
   jira_parent_key: string | null;
   pr_url: string | null;
+  /** JSON state for the PR loop, e.g. {"pushed":"<thread ids>"} (dedupe). */
+  pr_meta: string | null;
   status: TaskStatus;
   terminal_address: string | null;
   exit_code: number | null;
@@ -45,6 +47,8 @@ export interface Item {
   source_ref: string | null;
   task_id: string | null;
   structured: number;
+  /** For pr items: 1 = the review gate passes (threads resolved, checks green). */
+  ready: number;
   created_ms: number;
   updated_ms: number;
   resolved_ms: number | null;

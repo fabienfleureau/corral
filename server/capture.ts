@@ -7,6 +7,7 @@
 //  - a periodic reconcile() catches anything the stream missed.
 
 import { randomUUID } from "node:crypto";
+import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { HerdrClient } from "./herdr.ts";
 import { syncTaskPr } from "./pr.ts";
@@ -31,11 +32,13 @@ export class CaptureEngine {
   private db: Db;
   private herdr: HerdrClient;
   private hub: Hub;
+  private cfg: Config | null;
 
-  constructor(db: Db, herdr: HerdrClient, hub: Hub) {
+  constructor(db: Db, herdr: HerdrClient, hub: Hub, cfg: Config | null = null) {
     this.db = db;
     this.herdr = herdr;
     this.hub = hub;
+    this.cfg = cfg;
   }
 
   async handleEvent(e: HcEvent): Promise<void> {
@@ -110,6 +113,7 @@ export class CaptureEngine {
       body: tail,
       context: "",
       options: null,
+      ready: 1,
       source_ref: address,
       task_id: taskId,
       structured: 0,
@@ -146,7 +150,7 @@ export class CaptureEngine {
         // opened it, or been interrupted before its completion report).
         if (updated) {
           try {
-            syncTaskPr(this.db, this.hub, updated);
+            syncTaskPr(this.db, this.hub, updated, { herdr: this.herdr, cfg: this.cfg ?? undefined });
           } catch {
             /* PR discovery is best effort */
           }
@@ -211,6 +215,7 @@ export class CaptureEngine {
       body: opts.body,
       context,
       options: optionsJson,
+      ready: 1,
       source_ref: address,
       task_id: taskId,
       structured: 1,
