@@ -215,6 +215,18 @@ test("capture: structured question supersedes fallback; auto-resolution", async 
     });
     assert.equal(db.openQuestionItemForTerminal("t9"), null, "auto-resolved");
 
+    // a completion report creates a pr item with the review link
+    const done = await engine.createStructuredQuestion({
+      kind: "done",
+      taskId: "task-1",
+      terminal: "t9",
+      title: "PR: add caching",
+      body: "Done, tests pass.\n\nPR: https://example.com/pr/1",
+    });
+    assert.equal(done.kind, "pr");
+    assert.equal(done.status, "open");
+    assert.equal(db.listItems({ kind: "pr" }).length, 1);
+
     // finished marks the task done
     await engine.handleEvent({
       type: "finished",
