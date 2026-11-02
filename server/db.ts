@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS items (
   title TEXT NOT NULL,
   summary TEXT NOT NULL DEFAULT '',
   body TEXT NOT NULL DEFAULT '',
+  context TEXT NOT NULL DEFAULT '',
+  options TEXT,
   source_ref TEXT,
   task_id TEXT,
   structured INTEGER NOT NULL DEFAULT 0,
@@ -92,6 +94,15 @@ export class Db {
     this.raw = new DatabaseSync(path);
     this.raw.exec("PRAGMA journal_mode = WAL;");
     this.raw.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** Additive column migrations for databases created before a field existed. */
+  private migrate(): void {
+    const cols = this.raw.prepare("PRAGMA table_info(items)").all() as { name: string }[];
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has("context")) this.raw.exec(`ALTER TABLE items ADD COLUMN context TEXT NOT NULL DEFAULT ''`);
+    if (!names.has("options")) this.raw.exec(`ALTER TABLE items ADD COLUMN options TEXT`);
   }
 
   close(): void {
@@ -145,12 +156,12 @@ export class Db {
   insertItem(i: Item): void {
     this.raw
       .prepare(
-        `INSERT INTO items (id, kind, status, title, summary, body, source_ref, task_id, structured,
+        `INSERT INTO items (id, kind, status, title, summary, body, context, options, source_ref, task_id, structured,
           created_ms, updated_ms, resolved_ms, snooze_until_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        i.id, i.kind, i.status, i.title, i.summary, i.body, i.source_ref, i.task_id, i.structured,
+        i.id, i.kind, i.status, i.title, i.summary, i.body, i.context, i.options, i.source_ref, i.task_id, i.structured,
         i.created_ms, i.updated_ms, i.resolved_ms, i.snooze_until_ms,
       );
   }

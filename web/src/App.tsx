@@ -7,24 +7,26 @@ import { errText } from "./util";
 import { Spinner } from "./ui";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
+import { SessionsPage } from "./pages/Sessions";
 import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
 
-type Tab = "inbox" | "tasks" | "ideas" | "settings";
+type Tab = "inbox" | "tasks" | "sessions" | "ideas" | "settings";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
   { key: "tasks", label: "Tasks" },
+  { key: "sessions", label: "Sessions" },
   { key: "ideas", label: "Ideas" },
   { key: "settings", label: "Settings" },
 ];
 
-type Counts = { inbox: number; tasks: number; ideas: number };
+type Counts = { inbox: number; tasks: number; sessions: number; ideas: number };
 
 export function App() {
   const [unauthorized, setUnauthorized] = useState(false);
   const [tab, setTab] = useState<Tab>("inbox");
-  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, ideas: 0 });
+  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, sessions: 0, ideas: 0 });
   const [eventVersion, setEventVersion] = useState(0);
   const [bootError, setBootError] = useState<string | null>(null);
 
@@ -66,9 +68,16 @@ export function App() {
   // Sidebar open counts.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.listItems({ status: "open" }), api.listTasks("open"), api.listIdeas("new")])
-      .then(([items, tasks, ideas]) => {
-        if (!cancelled) setCounts({ inbox: items.length, tasks: tasks.length, ideas: ideas.length });
+    Promise.all([api.listItems({ status: "open" }), api.listTasks("open"), api.listIdeas("new"), api.listSessions()])
+      .then(([items, tasks, ideas, sessions]) => {
+        if (!cancelled) {
+          setCounts({
+            inbox: items.length,
+            tasks: tasks.length,
+            sessions: sessions.filter((s) => s.state === "live").length,
+            ideas: ideas.length,
+          });
+        }
       })
       .catch(() => {
         /* 401 surfaces globally; other errors are non-fatal for counts */
@@ -108,6 +117,7 @@ export function App() {
       <main className="content">
         {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
+        {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
         {tab === "ideas" ? <IdeasPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "settings" ? <SettingsPage /> : null}
       </main>
