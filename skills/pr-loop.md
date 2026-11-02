@@ -18,10 +18,15 @@ When you receive one, run the loop — **automatically, without asking**:
 1. For **each** comment: fix the code as suggested, or — if you disagree — write
    a short justification as a reply on that thread (`gh pr comment` /
    `glab mr note`). Never silently skip one.
-2. Run the tests you touched. They must pass.
-3. Commit and push. The PR updates itself.
-4. Done. Corral re-checks the PR and flips it to "PR ready for review" once all
-   threads are resolved and CI is green — that part is not yours to report.
+2. **Resolve the thread** you just handled — a reply alone does not resolve it
+   on GitHub:
+   `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"<id>"}){thread{isResolved}}}'`
+   (the message Corral sends you carries each thread's id).
+3. Run the tests you touched. They must pass.
+4. Commit and push. The PR updates itself.
+5. Done. Corral re-checks the PR and flips it to "PR ready for review" once all
+   threads are answered or resolved and CI is green — that part is not yours to
+   report.
 
 ## Rules
 
