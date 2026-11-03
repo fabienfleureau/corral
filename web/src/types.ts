@@ -61,6 +61,7 @@ export type PullColor = "green" | "orange" | "red";
 export type Pull = {
   id: string;
   host: "github" | "gitlab";
+  number: number;
   title: string;
   url: string;
   repo: string;

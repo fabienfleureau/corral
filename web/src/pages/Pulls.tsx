@@ -117,7 +117,7 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
       if (filters.author === "others" && p.isMine) return false;
       if (filters.host !== "all" && p.host !== filters.host) return false;
       if (filters.repo !== "all" && p.repo !== filters.repo) return false;
-      if (filters.q && !(p.title + " " + p.repo).toLowerCase().includes(filters.q.toLowerCase())) return false;
+      if (filters.q && !(p.title + " " + p.repo + " " + p.number).toLowerCase().includes(filters.q.toLowerCase())) return false;
       return true;
     });
     const cmp: Record<SortKey, (a: Pull, b: Pull) => number> = {
@@ -236,6 +236,10 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
                 <div className="pull-main">
                   <div className="pull-title">
                     <span className={`badge badge-${p.host === "github" ? "mute" : "target"}`}>{p.host}</span>
+                    <span className="pull-number mono" title={`${p.host} number`}>
+                      {p.host === "gitlab" ? "!" : "#"}
+                      {p.number}
+                    </span>
                     <a href={p.url} target="_blank" rel="noreferrer" className="pull-link">
                       {p.title}
                       <ExternalLinkIcon />
