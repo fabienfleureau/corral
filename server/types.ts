@@ -32,6 +32,12 @@ export interface Task {
   updated_ms: number;
 }
 
+/** Display label: the task title, or the prompt's first line while the
+ *  title is pending (omnigent names the session after dispatch). */
+export function taskLabel(task: Pick<Task, "title" | "prompt">): string {
+  return task.title.trim() || task.prompt.trim().split("\n")[0].slice(0, 80) || "Untitled task";
+}
+
 export type ItemKind = "question" | "pr" | "digest";
 export type ItemStatus = "open" | "resolved" | "archived";
 

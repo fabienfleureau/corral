@@ -1,7 +1,7 @@
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
-import type { Config, Idea, Item, JiraSearchResult, Pull, Repo, SessionInfo, Task } from "./types";
+import type { Config, Idea, Item, JiraImportResult, JiraSearchResult, Pull, Repo, SessionInfo, Task } from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -78,7 +78,8 @@ export type DispatchResult = {
 };
 
 export type NewTaskInput = {
-  title: string;
+  /** Omit to let omnigent title the session after dispatch. */
+  title?: string;
   prompt?: string;
   repo_path?: string;
   target?: string;
@@ -105,6 +106,7 @@ export const api = {
   summarizeItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/summarize`),
   resolveItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/resolve`),
   archiveItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/archive`),
+  syncPrs: (): Promise<{ ok: boolean; ran: boolean }> => post<{ ok: boolean; ran: boolean }>("/api/prs/sync"),
   snoozeItem: (id: string, untilMs: number): Promise<Item> =>
     post<Item>(`/api/items/${id}/snooze`, { until_ms: untilMs }),
 
@@ -125,7 +127,8 @@ export const api = {
   // ---- jira ----
   jiraSearch: (q: string): Promise<JiraSearchResult[]> =>
     get<JiraSearchResult[]>(`/api/jira/search${query({ q })}`),
-  jiraImport: (keys: string[]): Promise<Task[]> => post<Task[]>("/api/jira/import", { keys }),
+  jiraImport: (items: { key: string; fingerprint: string }[]): Promise<JiraImportResult> =>
+    post<JiraImportResult>("/api/jira/import", { items }),
   jiraDone: (taskId: string, transitionId?: string): Promise<{ ok: boolean; transition: string }> =>
     post<{ ok: boolean; transition: string }>(`/api/jira/tasks/${taskId}/done`, { transition_id: transitionId }),
   jiraComment: (taskId: string, text: string): Promise<{ ok: boolean }> =>

@@ -217,7 +217,8 @@ export class OmnigentBackend implements WorkerBackend {
 
   async start(start: WorkerStart): Promise<WorkerSession> {
     const meta: Record<string, unknown> = {
-      title: start.name,
+      // No title = omnigent generates one (untitled tasks).
+      ...(start.name ? { title: start.name } : {}),
       labels: {
         "corral.task": start.taskId ?? "",
         "corral.harness": start.harness,

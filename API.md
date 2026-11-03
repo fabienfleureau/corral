@@ -55,17 +55,18 @@ type Idea = {
 - `POST /api/items/:id/resolve` → `Item`
 - `POST /api/items/:id/archive` → `Item`
 - `POST /api/items/:id/snooze` `{until_ms?}` → `Item` (default +1h)
+- `POST /api/prs/sync` → `{ok, ran}` — re-checks every dispatched/done task with a known PR now (throttled to once per 30s; `ran: false` when skipped). A merged PR archives the task and all its items; a closed one resolves the PR item.
 
 ### Tasks
 - `GET /api/tasks?status=open|dispatched|done|archived` → `Task[]`
-- `POST /api/tasks` `{title, prompt?, repo_path?, target?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task`
+- `POST /api/tasks` `{title?, prompt?, repo_path?, target?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch
 - `PATCH /api/tasks/:id` partial task → `Task`
 - `POST /api/tasks/:id/dispatch` `{target?, use_worktree?}` → `{address, worktreePath, branch}` — creates worktree + starts the agent (409 if already dispatched, 400 if no target)
 - `POST /api/tasks/:id/cleanup` → `{ok}` — removes the task's worktree
 
 ### Jira
-- `GET /api/jira/search?q=<text or jql>` → `[{title, prompt, jira_key, jira_url, jira_parent_key}]`
-- `POST /api/jira/import` `{keys: string[]}` → `Task[]` (deduped by issue key)
+- `GET /api/jira/search?q=<text or jql>` → `[{title, prompt, jira_key, jira_url, jira_parent_key, jira_status, repo_path, repo_name, existing_task_id, fingerprint}]` — `repo_*` is the repo the import would target (null when no prefix mapping), `existing_task_id` is set when the issue is already imported (import skips it), `fingerprint` hashes the fields the import would write
+- `POST /api/jira/import` `{items: [{key, fingerprint}]}` (or `{keys: string[]}`, no fingerprint check) → `{created: Task[], changed: SearchResult[], skipped: string[], failed: string[]}` — an item whose fingerprint no longer matches the issue (content or repo mapping changed since search) lands in `changed` with its current preview and is not imported; keys with an existing task land in `skipped`
 - `POST /api/jira/tasks/:id/done` `{transition_id?}` → `{ok, transition}` — auto-picks a done-like transition when omitted
 - `POST /api/jira/tasks/:id/comment` `{text}` → `{ok}`
 

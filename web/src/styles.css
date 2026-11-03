@@ -23,50 +23,52 @@
   --shadow: 0 1px 2px rgba(16, 20, 26, 0.06);
 }
 
-/* Dark palette: explicit choice, or the OS when the theme is "system". */
+/* Dark palette: explicit choice, or the OS when the theme is "system".
+   Mirrors omnigent's default dark theme (web/src/themePalettes.generated.css,
+   `.dark:not([data-theme])`); keep both dark blocks in sync. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --bg: #23262c;
-    --bg-sunken: #1b1e23;
-    --bg-hover: #2b2f36;
-    --chip-bg: #31363e;
-    --code-bg: #272b32;
-    --border: #3a4048;
-    --text: #e9ebee;
-    --muted: #a6adb7;
-    --faint: #7c838d;
-    --accent: #7c93ee;
-    --accent-ink: #a9bbff;
-    --accent-soft: #2b3350;
-    --danger-ink: #ff9d96;
-    --danger-soft: #43292b;
-    --warn-ink: #e8c175;
-    --warn-soft: #423823;
-    --ok-ink: #8ce3b2;
-    --ok-soft: #22382e;
+    --bg: #181f25;
+    --bg-sunken: #0e1013;
+    --bg-hover: #1f272d;
+    --chip-bg: color-mix(in srgb, #92a4b3 15%, #262f36);
+    --code-bg: oklch(0.38 0.005 240);
+    --border: oklch(0.28 0.005 240);
+    --text: oklch(0.965 0.003 240);
+    --muted: #92a4b3;
+    --faint: #a1a1aa;
+    --accent: oklch(0.64 0.22 254);
+    --accent-ink: #4299e0;
+    --accent-soft: #04355d;
+    --danger-ink: #e65b77;
+    --danger-soft: color-mix(in srgb, #f04858 18%, #181f25);
+    --warn-ink: #d4972a;
+    --warn-soft: color-mix(in srgb, #d4972a 18%, #181f25);
+    --ok-ink: #2ea65c;
+    --ok-soft: color-mix(in srgb, #2ea65c 18%, #181f25);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #23262c;
-  --bg-sunken: #1b1e23;
-  --bg-hover: #2b2f36;
-  --chip-bg: #31363e;
-  --code-bg: #272b32;
-  --border: #3a4048;
-  --text: #e9ebee;
-  --muted: #a6adb7;
-  --faint: #7c838d;
-  --accent: #7c93ee;
-  --accent-ink: #a9bbff;
-  --accent-soft: #2b3350;
-  --danger-ink: #ff9d96;
-  --danger-soft: #43292b;
-  --warn-ink: #e8c175;
-  --warn-soft: #423823;
-  --ok-ink: #8ce3b2;
-  --ok-soft: #22382e;
+  --bg: #181f25;
+  --bg-sunken: #0e1013;
+  --bg-hover: #1f272d;
+  --chip-bg: color-mix(in srgb, #92a4b3 15%, #262f36);
+  --code-bg: oklch(0.38 0.005 240);
+  --border: oklch(0.28 0.005 240);
+  --text: oklch(0.965 0.003 240);
+  --muted: #92a4b3;
+  --faint: #a1a1aa;
+  --accent: oklch(0.64 0.22 254);
+  --accent-ink: #4299e0;
+  --accent-soft: #04355d;
+  --danger-ink: #e65b77;
+  --danger-soft: color-mix(in srgb, #f04858 18%, #181f25);
+  --warn-ink: #d4972a;
+  --warn-soft: color-mix(in srgb, #d4972a 18%, #181f25);
+  --ok-ink: #2ea65c;
+  --ok-soft: color-mix(in srgb, #2ea65c 18%, #181f25);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
@@ -721,6 +723,46 @@ select:focus {
   margin-bottom: 14px;
 }
 
+.detail-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.detail-title-row .detail-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.pr-open {
+  flex: none;
+  text-decoration: none;
+}
+
+.pr-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pr-pill:hover {
+  text-decoration: underline;
+}
+
+.chip-count {
+  margin-left: 5px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
 .detail-title {
   margin: 0 0 8px;
   font-size: 17px;
@@ -999,6 +1041,67 @@ select:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.import-item,
+.import-review {
+  border-bottom: 1px solid var(--border);
+}
+
+.import-item:last-child,
+.import-review:last-child {
+  border-bottom: none;
+}
+
+.import-item .import-row,
+.import-review .import-row-head {
+  border-bottom: none;
+}
+
+.import-item-done .import-title {
+  color: var(--faint);
+}
+
+.import-row-head {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.import-review .import-row-head {
+  padding: 8px 10px 4px;
+  font-size: 12.5px;
+  cursor: default;
+}
+
+.import-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.import-prompt {
+  margin: 0 10px 8px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.import-summary {
+  font-size: 12px;
 }
 
 /* ---------- token screen ---------- */

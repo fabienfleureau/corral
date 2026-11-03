@@ -382,6 +382,10 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
   const { ready, reasons } = prReady(pr);
   const existing = db.listItems({ kind: "pr" }).find((i) => i.task_id === task.id) ?? null;
   const shouldResolve = pr.state !== "OPEN";
+  // A merged PR means the work is over: its items go to "archived" (and the
+  // task follows) — a closed PR is just "resolved".
+  const merged = pr.state === "MERGED";
+  const doneStatus: Item["status"] = merged ? "archived" : "resolved";
 
   // The loop: comments to manage go back to the agent — automatically.
   if (!shouldResolve && pr.threads.length > 0 && opts.backend && opts.cfg) {
@@ -410,7 +414,7 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
     const item: Item = {
       id: randomUUID(),
       kind: "pr",
-      status: shouldResolve ? "resolved" : "open",
+      status: shouldResolve ? doneStatus : "open",
       title,
       summary: ready && !shouldResolve ? "ready for review" : reasons.join(", ") || "ready",
       body: prItemBody(pr),
@@ -428,6 +432,7 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
     db.insertItem(item);
     db.recordMetric("item.created", item.id, { kind: "pr", capture: "pr-sync", task_id: task.id, ready: item.ready });
     hub.broadcast("item.created", item);
+    if (merged) archiveMergedTask(db, hub, task);
     return pr;
   }
 
@@ -439,9 +444,9 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
   if (existing.summary !== summary) patch.summary = summary;
   const readyFlag = shouldResolve ? 1 : ready ? 1 : 0;
   if (existing.ready !== readyFlag) patch.ready = readyFlag;
-  if (shouldResolve && existing.status === "open") {
-    patch.status = "resolved";
-    patch.resolved_ms = Date.now();
+  if (shouldResolve && existing.status !== doneStatus && existing.status !== "archived") {
+    patch.status = doneStatus;
+    patch.resolved_ms = existing.resolved_ms ?? Date.now();
   } else if (!shouldResolve && existing.status === "resolved") {
     // PR reopened (e.g. new comments after merge-back) — surface again.
     patch.status = "open";
@@ -454,7 +459,47 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
       db.recordMetric("item.ready_for_review", existing.id, { task_id: task.id });
     }
   }
+  if (merged) archiveMergedTask(db, hub, task);
   return pr;
+}
+
+/** Merged PR = the task is over: archive the task and every inbox item tied to it. */
+function archiveMergedTask(db: Db, hub: Hub, task: Task): void {
+  const now = Date.now();
+  for (const item of db.listItems()) {
+    if (item.task_id !== task.id || item.status === "archived") continue;
+    db.updateItem(item.id, { status: "archived", resolved_ms: item.resolved_ms ?? now });
+    hub.broadcast("item.updated", db.getItem(item.id));
+  }
+  const current = db.getTask(task.id);
+  if (current && current.status !== "archived") {
+    db.updateTask(task.id, { status: "archived" });
+    db.recordMetric("task.archived", task.id, { how: "pr-merged" });
+    hub.broadcast("task.updated", db.getTask(task.id));
+  }
+}
+
+let lastSyncAll = 0;
+
+/** Sync every task that may have a PR. minIntervalMs throttles bursts. */
+export function syncAllPrs(
+  db: Db,
+  hub: Hub,
+  opts: SyncOptions & { knownPrsOnly?: boolean } = {},
+  minIntervalMs = 30_000,
+): boolean {
+  const now = Date.now();
+  if (now - lastSyncAll < minIntervalMs) return false;
+  lastSyncAll = now;
+  const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url);
+  for (const task of tasks) {
+    try {
+      syncTaskPr(db, hub, task, opts);
+    } catch {
+      /* best effort */
+    }
+  }
+  return true;
 }
 
 /** Tasks whose branch may have a PR: dispatched/done, with a repo and branch. */

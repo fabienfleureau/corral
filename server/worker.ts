@@ -5,8 +5,9 @@
 
 export interface WorkerStart {
   taskId: string | null;
-  /** Human label for the session (task slug etc.). */
-  name: string;
+  /** Human label for the session (task slug etc.) — null = let the backend
+   *  generate a title (untitled tasks). */
+  name: string | null;
   /** Source repo directory (or a direct working directory when no git request). */
   repoPath: string;
   /** Worktree request: the backend prepares the worktree (omnigent does it

@@ -9,13 +9,14 @@ import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { WorkerBackend } from "./worker.ts";
 import type { CaptureEngine, Hub } from "./capture.ts";
-import type { JiraClient } from "./jira.ts";
+import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText } from "./llm.ts";
 import { dispatchTask } from "./dispatch.ts";
-import { addRepo, gitToplevel, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
-import { syncTaskPr } from "./pr.ts";
+import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
+import { syncAllPrs, syncTaskPr } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Idea, Item, Task } from "./types.ts";
+import { taskLabel } from "./types.ts";
 
 export interface AppState {
   db: Db;
@@ -24,6 +25,13 @@ export interface AppState {
   capture: CaptureEngine;
   jira: JiraClient;
   hub: Hub & { clients: Set<ServerResponse> };
+}
+
+/** A Jira issue as the import would create it, plus the fingerprint of those fields. */
+function jiraImportCandidate(state: AppState, issue: JiraIssue) {
+  const f = state.jira.issueToTaskFields(issue);
+  const preview = importPreview(state.db, f.jira_key);
+  return { ...f, ...preview, fingerprint: importFingerprint({ ...f, repo_path: preview.repo_path }) };
 }
 
 type Handler = (req: IncomingMessage, res: ServerResponse, ctx: { body: unknown; params: Record<string, string>; url: URL }) => void | Promise<void>;
@@ -153,11 +161,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   on("POST", "/api/tasks", (req, res, { body }) => {
     const b = body as Partial<Task>;
-    if (!b?.title) return json(res, 400, { error: "title required" });
+    if (!b?.title?.trim() && !b?.prompt?.trim()) return json(res, 400, { error: "title or prompt required" });
     const now = Date.now();
     const task: Task = {
       id: randomUUID(),
-      title: b.title,
+      // Empty title = adopt omnigent's session title once dispatched.
+      title: b.title?.trim() ?? "",
       prompt: b.prompt ?? "",
       repo_path: b.repo_path ?? "",
       target: b.target ?? "",
@@ -251,6 +260,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
   });
 
+  // Inbox open: re-check PRs so merged ones are archived before the human looks.
+  on("POST", "/api/prs/sync", (_req, res) => {
+    const ran = syncAllPrs(state.db, state.hub, { backend: state.backend, cfg: state.cfg, knownPrsOnly: true });
+    json(res, 200, { ok: true, ran });
+  });
+
   // ---- structured agent reports ----
   on("POST", "/api/reports", async (req, res, { body }) => {
     const b = body as {
@@ -290,7 +305,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         name: s.name,
         agent: s.harness ?? s.name,
         task_id: taskId,
-        task_title: task?.title ?? null,
+        task_title: task ? taskLabel(task) : null,
         status: s.status,
         state: s.state,
         turn: s.turn,
@@ -377,7 +392,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!q) return json(res, 400, { error: "q required (text or JQL)" });
     try {
       const issues = await state.jira.search(q);
-      json(res, 200, issues.map((i) => state.jira.issueToTaskFields(i)));
+      json(
+        res,
+        200,
+        issues.map((i) => jiraImportCandidate(state, i)),
+      );
     } catch (err) {
       console.error("corral: jira search failed:", String(err));
       json(res, 502, { error: String(err) });
@@ -385,22 +404,29 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   on("POST", "/api/jira/import", async (req, res, { body }) => {
-    const b = body as { keys?: string[] };
-    const keys = b?.keys ?? [];
-    if (!keys.length) return json(res, 400, { error: "keys required" });
-    const created: Task[] = [];
-    for (const key of keys) {
-      if (state.db.getTaskByJiraKey(key)) continue; // dedupe by issue key
+    // items carry the fingerprint the user reviewed; bare keys skip that check.
+    const b = body as { items?: { key: string; fingerprint?: string }[]; keys?: string[] };
+    const items = b?.items ?? (b?.keys ?? []).map((key) => ({ key, fingerprint: undefined }));
+    if (!items.length) return json(res, 400, { error: "items or keys required" });
+    const out: { created: Task[]; changed: ReturnType<typeof jiraImportCandidate>[]; skipped: string[]; failed: string[] } =
+      { created: [], changed: [], skipped: [], failed: [] };
+    for (const { key, fingerprint } of items) {
+      if (state.db.getTaskByJiraKey(key)) {
+        out.skipped.push(key); // dedupe by issue key
+        continue;
+      }
       try {
-        const issue = await state.jira.getIssue(key);
-        const f = state.jira.issueToTaskFields(issue);
-        const mapped = state.db.getRepoByJiraPrefix(jiraKeyPrefix(f.jira_key));
+        const f = jiraImportCandidate(state, await state.jira.getIssue(key));
+        if (fingerprint !== undefined && fingerprint !== f.fingerprint) {
+          out.changed.push(f); // ticket or repo mapping changed since review
+          continue;
+        }
         const now = Date.now();
         const task: Task = {
           id: randomUUID(),
           title: f.title,
           prompt: f.prompt,
-          repo_path: mapped?.path ?? "",
+          repo_path: f.repo_path ?? "",
           target: "",
           target_state: "suggested",
           base_branch: null,
@@ -421,12 +447,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         state.db.insertTask(task);
         state.db.recordMetric("jira.imported", task.id, { key });
         state.hub.broadcast("task.updated", task);
-        created.push(task);
+        out.created.push(task);
       } catch (err) {
         console.error(`corral: jira import ${key} failed`, err);
+        out.failed.push(key);
       }
     }
-    json(res, 200, created);
+    json(res, 200, out);
   });
 
   on("POST", "/api/jira/tasks/:id/done", async (req, res, { body, params }) => {
