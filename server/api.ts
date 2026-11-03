@@ -197,7 +197,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
     if (task.status === "dispatched") return json(res, 409, { error: "task already dispatched" });
-    const b = (body ?? {}) as { target?: string; use_worktree?: boolean; model?: string | null; reasoning?: string | null };
+    const b = (body ?? {}) as {
+      target?: string;
+      use_worktree?: boolean;
+      model?: string | null;
+      reasoning?: string | null;
+      agent?: string | null;
+    };
     const target = b.target ?? task.target;
     if (!target) return json(res, 400, { error: "target required (claude|codex|opencode)" });
     if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — assign one before dispatching" });
@@ -206,6 +212,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         useWorktree: b.use_worktree,
         model: b.model ?? null,
         reasoning: b.reasoning ?? null,
+        agent: b.agent ?? null,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
       json(res, 200, result);

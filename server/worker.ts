@@ -14,8 +14,10 @@ export interface WorkerStart {
    *  existingWorktree: repoPath IS the worktree already (bind mode). */
   git: { branch: string; base: string | null; existingWorktree?: boolean } | null;
   prompt: string;
-  /** Harness id: "claude" | "codex" | "opencode" | custom. */
+  /** Harness id: "claude" | "codex" | "opencode" | … (bare harness by default). */
   harness: string;
+  /** Explicit agent choice (omnigent registry name/id) — null = bare harness. */
+  agent?: string | null;
   /** Model pin — null = "let the backend route it" (omnigent smart routing). */
   model: string | null;
   /** Raw per-harness reasoning value — null = backend decides. */

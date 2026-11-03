@@ -4,6 +4,7 @@
 // a tolerant polling loop rather than per-session streams: fewer moving parts,
 // same information (status, blocked elicitations, tree).
 
+import { gzipSync } from "node:zlib";
 import type { OmnigentConfig } from "./config.ts";
 import type {
   WorkerBackend,
@@ -24,6 +25,39 @@ export function harnessOf(agentHarness: string): string {
     .replace(/-sdk$/, "")
     .replace(/-ui$/, "")
     .replace(/^acp:/, "");
+}
+
+// ---- minimal tar.gz writer (for single-file agent bundles) ----
+
+function tarHeader(name: string, size: number): Buffer {
+  const h = Buffer.alloc(512);
+  h.write(name, 0, 100, "utf8");
+  h.write("0000644\0", 100, 8, "ascii");
+  h.write("0000000\0", 108, 8, "ascii");
+  h.write("0000000\0", 116, 8, "ascii");
+  h.write(size.toString(8).padStart(11, "0") + "\0", 124, 12, "ascii");
+  h.write(Math.floor(Date.now() / 1000).toString(8).padStart(11, "0") + "\0", 136, 12, "ascii");
+  h.write("        ", 148, 8, "ascii"); // checksum placeholder
+  h.write("0", 156, 1, "ascii");
+  h.write("ustar\0", 257, 6, "ascii");
+  h.write("00", 263, 2, "ascii");
+  let sum = 0;
+  for (const b of h) sum += b;
+  h.write(sum.toString(8).padStart(6, "0") + "\0 ", 148, 8, "ascii");
+  return h;
+}
+
+function makeTarGz(files: { name: string; content: string }[]): Buffer {
+  const parts: Buffer[] = [];
+  for (const f of files) {
+    const body = Buffer.from(f.content, "utf8");
+    parts.push(tarHeader(f.name, body.length));
+    parts.push(body);
+    const pad = (512 - (body.length % 512)) % 512;
+    if (pad) parts.push(Buffer.alloc(pad));
+  }
+  parts.push(Buffer.alloc(1024)); // end-of-archive
+  return gzipSync(Buffer.concat(parts));
 }
 
 function str(v: unknown): string | null {
@@ -156,15 +190,8 @@ export class OmnigentBackend implements WorkerBackend {
   }
 
   /** Pick the registered agent for a harness: user agents before stock *-ui. */
-  private async resolveAgent(target: string): Promise<{ id: string; name: string } | null> {
-    const agents = await this.listAgents();
-    const matches = agents.filter((a) => harnessOf(a.harness) === target || a.name === target);
-    matches.sort(
-      (a, b) =>
-        Number(a.name.endsWith("-ui")) - Number(b.name.endsWith("-ui")) || a.name.localeCompare(b.name),
-    );
-    return matches[0] ?? null;
-  }
+  // (intentionally unused for dispatch: bare harness is the default and an
+  // explicit agent is an explicit choice — resolution happens via start.agent)
 
   private normalize(raw: Record<string, unknown>): WorkerSession {
     const id = str(raw.id) ?? str(raw.session_id) ?? "";
@@ -189,19 +216,7 @@ export class OmnigentBackend implements WorkerBackend {
   }
 
   async start(start: WorkerStart): Promise<WorkerSession> {
-    const agentCfg = this.cfg.agents[start.harness];
-    let agentId = agentCfg?.agentId ?? null;
-    if (!agentId) {
-      // Harness -> a registered omnigent agent (user agents preferred).
-      const resolved = await this.resolveAgent(start.harness);
-      if (!resolved) {
-        const known = (await this.harnesses()).map((h) => h.harness).join(", ");
-        throw new Error(`no omnigent agent for harness "${start.harness}" (available: ${known || "none"})`);
-      }
-      agentId = resolved.id;
-    }
-    const body: Record<string, unknown> = {
-      agent_id: agentId,
+    const meta: Record<string, unknown> = {
       title: start.name,
       labels: {
         "corral.task": start.taskId ?? "",
@@ -211,39 +226,111 @@ export class OmnigentBackend implements WorkerBackend {
     };
     if (start.git) {
       // omnigent's host daemon creates the worktree (`<repo>-worktrees/<branch>`)
-      body.git = {
+      meta.git = {
         branch_name: start.git.branch,
         ...(start.git.base ? { base_branch: start.git.base } : {}),
         ...(start.git.existingWorktree ? { existing_worktree: true } : {}),
       };
     }
-    if (this.cfg.hostId) body.host_id = this.cfg.hostId;
-    if (agentCfg?.harness) body.harness_override = agentCfg.harness;
-    if (start.model) body.model_override = start.model;
-    if (start.reasoning) body.reasoning_effort = start.reasoning;
-    const created = await (async () => {
-      try {
-        return await this.request<Record<string, unknown>>("POST", "/v1/sessions", body);
-      } catch (err) {
-        // A 404 here usually means the omnigent host was momentarily
-        // unreachable — worth one quiet retry before failing the dispatch.
-        if (/\b404\b/.test(String(err))) {
-          await new Promise((r) => setTimeout(r, 2000));
-          return await this.request<Record<string, unknown>>("POST", "/v1/sessions", body);
-        }
-        throw err;
+    if (this.cfg.hostId) meta.host_id = this.cfg.hostId;
+    if (start.model) meta.model_override = start.model;
+    if (start.reasoning) meta.reasoning_effort = start.reasoning;
+
+    let address: string;
+    if (start.agent) {
+      // Explicit agent choice: JSON create bound to that registered agent.
+      const agents = await this.listAgents();
+      const agent =
+        agents.find((a) => a.id === start.agent) ??
+        agents.find((a) => a.name === start.agent) ??
+        null;
+      if (!agent) {
+        throw new Error(`omnigent agent "${start.agent}" not found in the registry`);
       }
-    })();
-    const session = this.normalize(created);
+      const created = await this.request<Record<string, unknown>>("POST", "/v1/sessions", {
+        ...meta,
+        agent_id: agent.id,
+      });
+      address = str(created.id) ?? str(created.session_id) ?? "";
+    } else {
+      // Bare harness: run Corral's own minimal agent for this harness (never a
+      // named third-party agent), through the JSON create so worktrees work.
+      const agentId = await this.ensureHarnessAgent(start.harness);
+      const created = await this.request<Record<string, unknown>>("POST", "/v1/sessions", {
+        ...meta,
+        agent_id: agentId,
+      });
+      address = str(created.id) ?? str(created.session_id) ?? "";
+    }
+    if (!address) throw new Error("omnigent create returned no session id");
+
+    const session = (await this.get(address)) ?? this.normalize({ id: address, ...meta });
     if (start.taskId) this.taskIds.set(session.address, start.taskId);
-    // initial_items only records history on external hosts — the prompt must
-    // be delivered as an event to actually start the turn.
+    // The prompt must be delivered as an event to actually start the turn.
     try {
       await this.send(session.address, start.prompt);
     } catch (err) {
       throw new Error(`session created (${session.address}) but prompt delivery failed: ${err}`);
     }
     return session;
+  }
+
+  /** Map a short harness name to the registry's engine id (prefer *-native). */
+  private async harnessIdFor(short: string): Promise<string> {
+    const harnesses = await this.listAgents();
+    const ids = [...new Set(harnesses.map((a) => a.harness))].filter((h) => harnessOf(h) === short);
+    const preferred =
+      ids.find((h) => h.endsWith("-native")) ?? ids.find((h) => h === short) ?? ids[0];
+    return preferred ?? short;
+  }
+
+  private harnessAgentIds = new Map<string, string>();
+
+  /**
+   * Find-or-create Corral's own bare-harness agent for a harness: a minimal
+   * bundle (config.yaml with just executor.config.harness) registered as
+   * `corral-<harness>`. Sessions then run THE HARNESS — never a named
+   * third-party agent — while keeping the JSON create contract (worktrees,
+   * model/reasoning pins).
+   */
+  private async ensureHarnessAgent(short: string): Promise<string> {
+    const cached = this.harnessAgentIds.get(short);
+    if (cached) return cached;
+    const name = `corral-${short}`;
+    const existing = (await this.listAgents()).find((a) => a.name === name);
+    if (existing) {
+      this.harnessAgentIds.set(short, existing.id);
+      return existing.id;
+    }
+    const harnessId = await this.harnessIdFor(short);
+    const config = [
+      "spec_version: 1",
+      `name: ${name}`,
+      "description: Corral bare-harness agent",
+      "executor:",
+      "  type: omnigent",
+      "  config:",
+      `    harness: ${harnessId}`,
+      "",
+    ].join("\n");
+    const form = new FormData();
+    form.append(
+      "bundle",
+      new Blob([makeTarGz([{ name: "config.yaml", content: config }])], { type: "application/gzip" }),
+      "agent.tar.gz",
+    );
+    const headers: Record<string, string> = {};
+    if (this.cfg.token) headers.Authorization = `Bearer ${this.cfg.token}`;
+    const res = await fetch(new URL("/v1/agents", this.cfg.baseUrl), { method: "POST", headers, body: form });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`omnigent POST /v1/agents (bundle) -> ${res.status}: ${text.slice(0, 300)}`);
+    }
+    const created = (await res.json()) as Record<string, unknown>;
+    const id = str(created.id) ?? "";
+    if (!id) throw new Error("omnigent agent registration returned no id");
+    this.harnessAgentIds.set(short, id);
+    return id;
   }
 
   async list(): Promise<WorkerSession[]> {

@@ -23,6 +23,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   });
   const [repos, setRepos] = useState<Repo[]>([]);
   const [targets, setTargets] = useState<string[]>(TARGET_OPTIONS);
+  const [agentOptions, setAgentOptions] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     api
@@ -30,6 +31,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
       .then((res) => {
         const list = res.harnesses.map((h) => h.harness);
         if (list.length > 0) setTargets(list);
+        setAgentOptions(res.harnesses.flatMap((h) => h.agents));
       })
       .catch(() => undefined);
   }, []);
@@ -115,7 +117,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={repos} targets={targets} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={repos} targets={targets} agentOptions={agentOptions} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -174,9 +176,22 @@ function parentUrl(members: Task[], parentKey: string): string | null {
 
 // ---- one task row ----
 
-function TaskRow({ task, repos, targets, refresh }: { task: Task; repos: Repo[]; targets: string[]; refresh: () => void }) {
+function TaskRow({
+  task,
+  repos,
+  targets,
+  agentOptions,
+  refresh,
+}: {
+  task: Task;
+  repos: Repo[];
+  targets: string[];
+  agentOptions: { id: string; name: string }[];
+  refresh: () => void;
+}) {
   const [showDispatch, setShowDispatch] = useState(false);
   const [target, setTarget] = useState(task.target || "claude");
+  const [agent, setAgent] = useState("");
   const [useWorktree, setUseWorktree] = useState(true);
   const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
   const [showComment, setShowComment] = useState(false);
@@ -207,7 +222,11 @@ function TaskRow({ task, repos, targets, refresh }: { task: Task; repos: Repo[];
     setError(null);
     setMsg(null);
     try {
-      const result = await api.dispatchTask(task.id, { target, use_worktree: useWorktree });
+      const result = await api.dispatchTask(task.id, {
+        target,
+        use_worktree: useWorktree,
+        agent: agent || null,
+      });
       setDispatchResult(result);
       setShowDispatch(false);
       refresh();
@@ -299,6 +318,17 @@ function TaskRow({ task, repos, targets, refresh }: { task: Task; repos: Repo[];
                 {targets.map((t) => (
                   <option key={t} value={t}>
                     {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-inline">
+              <span>Agent</span>
+              <select value={agent} onChange={(e) => setAgent(e.target.value)}>
+                <option value="">— none (bare harness) —</option>
+                {agentOptions.map((a) => (
+                  <option key={a.id} value={a.name}>
+                    {a.name}
                   </option>
                 ))}
               </select>
