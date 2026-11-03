@@ -28,6 +28,8 @@ idea → Jira (clarify outside Corral) → task backlog → dispatch (worktree +
 - **Answer from the inbox** — reply box sends the answer straight into the agent's
   terminal (`hc send`), plus an "open in terminal" escape hatch.
 - **Auto-resolving lifecycle** — questions close when the agent leaves `blocked`;
+  a merged PR archives its task and every inbox item tied to it (see the
+  **Archived** tab);
   tasks close when the agent exits. Manual snooze + archive on top.
 - **Notifications** — in-app + desktop, for new actionable items only.
 - **Ideas** — free-form capture (`corral idea`) into a tagged list

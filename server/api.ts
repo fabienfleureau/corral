@@ -13,7 +13,7 @@ import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText } from "./llm.ts";
 import { dispatchTask } from "./dispatch.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
-import { syncTaskPr } from "./pr.ts";
+import { syncAllPrs, syncTaskPr } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Idea, Item, Task } from "./types.ts";
 import { taskLabel } from "./types.ts";
@@ -258,6 +258,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     } catch (err) {
       json(res, 500, { error: String(err) });
     }
+  });
+
+  // Inbox open: re-check PRs so merged ones are archived before the human looks.
+  on("POST", "/api/prs/sync", (_req, res) => {
+    const ran = syncAllPrs(state.db, state.hub, { backend: state.backend, cfg: state.cfg, knownPrsOnly: true });
+    json(res, 200, { ok: true, ran });
   });
 
   // ---- structured agent reports ----
