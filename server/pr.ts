@@ -277,7 +277,10 @@ function commentsSection(pr: PrInfo): string {
 }
 
 function conflictSection(pr: PrInfo, task: Task): string {
-  const base = pr.base_ref ?? task.base_branch ?? "main";
+  // The base ref lands in a shell command the agent runs: allow plain ref
+  // names only (git permits `;`, `$`, backticks in branch names).
+  const safe = (r: string | null) => (r && /^[A-Za-z0-9._][A-Za-z0-9._\/-]*$/.test(r) ? r : null);
+  const base = safe(pr.base_ref) ?? safe(task.base_branch) ?? "main";
   return [
     `PR merge conflicts need handling — the PR no longer merges cleanly into \`${base}\`.`,
     "Rebase and resolve them, automatically, without asking:",
