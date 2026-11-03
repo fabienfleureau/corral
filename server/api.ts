@@ -16,6 +16,7 @@ import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, 
 import { syncTaskPr } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Idea, Item, Task } from "./types.ts";
+import { taskLabel } from "./types.ts";
 
 export interface AppState {
   db: Db;
@@ -160,11 +161,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   on("POST", "/api/tasks", (req, res, { body }) => {
     const b = body as Partial<Task>;
-    if (!b?.title) return json(res, 400, { error: "title required" });
+    if (!b?.title?.trim() && !b?.prompt?.trim()) return json(res, 400, { error: "title or prompt required" });
     const now = Date.now();
     const task: Task = {
       id: randomUUID(),
-      title: b.title,
+      // Empty title = adopt omnigent's session title once dispatched.
+      title: b.title?.trim() ?? "",
       prompt: b.prompt ?? "",
       repo_path: b.repo_path ?? "",
       target: b.target ?? "",
@@ -297,7 +299,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         name: s.name,
         agent: s.harness ?? s.name,
         task_id: taskId,
-        task_title: task?.title ?? null,
+        task_title: task ? taskLabel(task) : null,
         status: s.status,
         state: s.state,
         turn: s.turn,

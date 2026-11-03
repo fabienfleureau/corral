@@ -15,6 +15,7 @@ import type { Db } from "./db.ts";
 import type { WorkerBackend, WorkerElicitation, WorkerEvent } from "./worker.ts";
 import { syncTaskPr } from "./pr.ts";
 import type { Item } from "./types.ts";
+import { taskLabel } from "./types.ts";
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
 
@@ -35,6 +36,7 @@ export class CaptureEngine {
 
   async handleEvent(e: WorkerEvent): Promise<void> {
     try {
+      this.adoptSessionTitle(e);
       switch (e.type) {
         case "created": {
           if (e.task_id) {
@@ -64,6 +66,17 @@ export class CaptureEngine {
     } catch (err) {
       console.error("corral: capture event error", err);
     }
+  }
+
+  /** An untitled task takes the session title omnigent generated for it. */
+  private adoptSessionTitle(e: WorkerEvent): void {
+    const title = e.title?.trim();
+    if (!title) return;
+    const taskId = e.task_id ?? this.db.getTerminal(e.address)?.task_id ?? null;
+    const task = taskId ? this.db.getTask(taskId) : null;
+    if (!task || task.title.trim() || task.terminal_address !== e.address) return;
+    this.db.updateTask(task.id, { title });
+    this.hub.broadcast("task.updated", this.db.getTask(task.id));
   }
 
   private async onStatus(e: WorkerEvent): Promise<void> {
@@ -103,7 +116,7 @@ export class CaptureEngine {
     if (elicitations.length > 0) {
       structured = 1;
       const first = elicitations[0];
-      title = first.prompt.split("\n")[0].slice(0, 120) || (task ? `${task.title} — needs you` : "Agent needs you");
+      title = first.prompt.split("\n")[0].slice(0, 120) || (task ? `${taskLabel(task)} — needs you` : "Agent needs you");
       body = elicitations
         .map((el) => {
           const lines = [`**${el.kind}**: ${el.prompt}`];
@@ -118,7 +131,7 @@ export class CaptureEngine {
       } catch {
         body = "(output unavailable)";
       }
-      title = task ? `${task.title} — needs you` : `Agent ${e.address} needs you`;
+      title = task ? `${taskLabel(task)} — needs you` : `Agent ${e.address} needs you`;
     }
 
     const item: Item = {

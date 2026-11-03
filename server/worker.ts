@@ -5,8 +5,9 @@
 
 export interface WorkerStart {
   taskId: string | null;
-  /** Human label for the session (task slug etc.). */
-  name: string;
+  /** Human label for the session (task slug etc.). null = let the backend
+   *  generate a title (omnigent names the session from its first turn). */
+  name: string | null;
   /** Source repo directory (or a direct working directory when no git request). */
   repoPath: string;
   /** Worktree request: the backend prepares the worktree (omnigent does it
@@ -43,6 +44,8 @@ export interface WorkerSession {
   exit_code: number | null;
   /** Parent session address in a sub-agent tree (null = top). */
   parent: string | null;
+  /** Backend-provided session title (omnigent auto-titles untitled sessions). */
+  title?: string | null;
 }
 
 export interface WorkerElicitation {
@@ -69,6 +72,8 @@ export interface WorkerEvent {
   exit_code?: number | null;
   parent?: string | null;
   turn?: number;
+  /** Session title on created/status events — lets an untitled task adopt it. */
+  title?: string | null;
 }
 
 export interface WorkerEventSubscription {

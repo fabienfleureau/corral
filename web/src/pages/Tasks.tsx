@@ -141,7 +141,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         </div>
 
         {showImport ? <JiraImport onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        {showNew ? <NewTaskForm repos={repos} targets={targets} onDone={() => { setShowNew(false); refresh(); }} /> : null}
+        {showNew ? <NewTaskForm repos={repos} onDone={() => { setShowNew(false); refresh(); }} /> : null}
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
@@ -248,7 +248,13 @@ function TaskRow({
     <div className="task-row">
       <div className="task-main">
         <div className="task-title">
-          <span>{task.title}</span>
+          {task.title ? (
+            <span>{task.title}</span>
+          ) : (
+            <span className="muted" title="Title comes from the agent session once dispatched">
+              {firstLine(task.prompt) || "Untitled task"}
+            </span>
+          )}
           {task.jira_key && task.jira_url ? (
             <a href={task.jira_url} target="_blank" rel="noreferrer" className="meta-link" title={task.jira_url}>
               {task.jira_key}
@@ -258,10 +264,7 @@ function TaskRow({
         </div>
         <div className="task-sub">
           <span className={`badge status-${task.status}`}>{task.status}</span>
-          <span className={`badge badge-target ${task.target ? "" : "badge-mute"}`}>
-            {task.target || "target: suggested"}
-          </span>
-          {task.target && task.target_state === "suggested" ? <span className="muted">(suggested)</span> : null}
+          {task.target ? <span className="badge badge-target">{task.target}</span> : null}
           {task.branch ? <span className="mono">{task.branch}</span> : null}
           {task.pr_url ? (
             <a href={task.pr_url} target="_blank" rel="noreferrer" className="meta-link">
@@ -416,26 +419,27 @@ function TaskRow({
 
 // ---- new task form ----
 
-function NewTaskForm({ repos, targets, onDone }: { repos: Repo[]; targets: string[]; onDone: () => void }) {
-  const [title, setTitle] = useState("");
+function firstLine(text: string): string {
+  return text.trim().split("\n")[0].slice(0, 120);
+}
+
+// No title (omnigent names the session) and no target (picked at dispatch).
+function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [repoChoice, setRepoChoice] = useState("");
   const [repoPath, setRepoPath] = useState("");
-  const [target, setTarget] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!title.trim() || busy) return;
+    if (!prompt.trim() || busy) return;
     setBusy(true);
     setError(null);
     try {
       const input: NewTaskInput = {
-        title: title.trim(),
         prompt,
         repo_path: repoChoice === "__custom__" ? repoPath.trim() : repoChoice,
-        target,
         base_branch: baseBranch.trim() || null,
       };
       await api.createTask(input);
@@ -451,16 +455,13 @@ function NewTaskForm({ repos, targets, onDone }: { repos: Repo[]; targets: strin
     <div className="panel-form">
       <h2 className="panel-title">New task</h2>
       <label className="field">
-        <span>Title</span>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What should the agent do?" />
-      </label>
-      <label className="field">
         <span>Prompt</span>
         <textarea
-          rows={4}
+          rows={6}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Extra context for the agent…"
+          placeholder="What should the agent do?"
+          autoFocus
         />
       </label>
       <div className="field-row">
@@ -483,24 +484,13 @@ function NewTaskForm({ repos, targets, onDone }: { repos: Repo[]; targets: strin
           </label>
         ) : null}
         <label className="field">
-          <span>Target</span>
-          <select value={target} onChange={(e) => setTarget(e.target.value)}>
-            <option value="">suggested</option>
-            {targets.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
           <span>Base branch (optional)</span>
           <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
         </label>
       </div>
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
-        <button className="btn btn-primary" onClick={() => void submit()} disabled={busy || !title.trim()}>
+        <button className="btn btn-primary" onClick={() => void submit()} disabled={busy || !prompt.trim()}>
           {busy ? <Spinner /> : null}
           {busy ? "Creating…" : "Create task"}
         </button>

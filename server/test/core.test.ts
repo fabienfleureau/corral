@@ -348,3 +348,26 @@ test("pr sync: item flips ready->needs work and back, resolves on merge", () => 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("capture: untitled task adopts the omnigent session title, titled task keeps its own", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-test-"));
+  try {
+    const db = new Db(join(dir, "test.db"));
+    db.insertTask(makeTask({ title: "", prompt: "Fix the flaky login test\nmore context", terminal_address: "s1" }));
+    db.insertTask(makeTask({ id: "task-2", title: "Mine", terminal_address: "s2" }));
+    const { backend } = fakeBackend();
+    const engine = new CaptureEngine(db, backend, { broadcast: () => undefined });
+
+    // no title yet -> stays untitled
+    await engine.handleEvent({ type: "created", address: "s1", task_id: "task-1", status: "working", title: null });
+    assert.equal(db.getTask("task-1")?.title, "");
+
+    await engine.handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "working", title: "Fix flaky login test" });
+    assert.equal(db.getTask("task-1")?.title, "Fix flaky login test");
+
+    await engine.handleEvent({ type: "status", address: "s2", task_id: "task-2", status: "working", title: "Other" });
+    assert.equal(db.getTask("task-2")?.title, "Mine");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

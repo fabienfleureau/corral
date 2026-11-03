@@ -78,7 +78,8 @@ export type DispatchResult = {
 };
 
 export type NewTaskInput = {
-  title: string;
+  /** Omit to let omnigent title the session after dispatch. */
+  title?: string;
   prompt?: string;
   repo_path?: string;
   target?: string;

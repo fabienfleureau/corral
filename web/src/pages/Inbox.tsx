@@ -236,7 +236,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                 <span className={`chip chip-static status-${selected.status}`}>{selected.status}</span>
                 {linkedTask ? (
                   <span className="meta-task">
-                    Task: <strong>{linkedTask.title}</strong>
+                    Task: <strong>{linkedTask.title || linkedTask.prompt.trim().split("\n")[0].slice(0, 120) || "Untitled task"}</strong>
                     {linkedTask.jira_url ? (
                       <a href={linkedTask.jira_url} target="_blank" rel="noreferrer" className="meta-link">
                         {linkedTask.jira_key}
