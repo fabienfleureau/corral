@@ -16,6 +16,16 @@ import type {
 
 const POLL_MS = 4000;
 
+/** "claude-native-ui" | "claude-sdk" | "claude-native" -> "claude"; "acp:junie" -> "junie" */
+export function harnessOf(agentHarness: string): string {
+  return agentHarness
+    .replace(/-native-ui$/, "")
+    .replace(/-native$/, "")
+    .replace(/-sdk$/, "")
+    .replace(/-ui$/, "")
+    .replace(/^acp:/, "");
+}
+
 function str(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
 }
@@ -115,6 +125,47 @@ export class OmnigentBackend implements WorkerBackend {
 
   // ---- normalization ----
 
+  private async listAgents(): Promise<{ id: string; name: string; harness: string }[]> {
+    try {
+      const res = await this.request<Record<string, unknown>>("GET", "/v1/agents?limit=200");
+      const rows = (res.data ?? res.agents ?? []) as Record<string, unknown>[];
+      return rows
+        .map((r) => ({
+          id: str(r.id) ?? "",
+          name: str(r.name) ?? "",
+          harness: str(r.harness) ?? "",
+        }))
+        .filter((a) => a.id);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Harness dimension of the registry: "claude", "codex", "opencode", … */
+  async harnesses(): Promise<{ harness: string; agents: { id: string; name: string }[] }[]> {
+    const groups = new Map<string, { id: string; name: string }[]>();
+    for (const a of await this.listAgents()) {
+      const key = harnessOf(a.harness) || a.name;
+      const list = groups.get(key) ?? [];
+      list.push({ id: a.id, name: a.name });
+      groups.set(key, list);
+    }
+    return [...groups.entries()]
+      .map(([harness, agents]) => ({ harness, agents }))
+      .sort((a, b) => a.harness.localeCompare(b.harness));
+  }
+
+  /** Pick the registered agent for a harness: user agents before stock *-ui. */
+  private async resolveAgent(target: string): Promise<{ id: string; name: string } | null> {
+    const agents = await this.listAgents();
+    const matches = agents.filter((a) => harnessOf(a.harness) === target || a.name === target);
+    matches.sort(
+      (a, b) =>
+        Number(a.name.endsWith("-ui")) - Number(b.name.endsWith("-ui")) || a.name.localeCompare(b.name),
+    );
+    return matches[0] ?? null;
+  }
+
   private normalize(raw: Record<string, unknown>): WorkerSession {
     const id = str(raw.id) ?? str(raw.session_id) ?? "";
     const labels = (raw.labels ?? {}) as Record<string, unknown>;
@@ -139,7 +190,16 @@ export class OmnigentBackend implements WorkerBackend {
 
   async start(start: WorkerStart): Promise<WorkerSession> {
     const agentCfg = this.cfg.agents[start.harness];
-    const agentId = agentCfg?.agentId ?? start.harness;
+    let agentId = agentCfg?.agentId ?? null;
+    if (!agentId) {
+      // Harness -> a registered omnigent agent (user agents preferred).
+      const resolved = await this.resolveAgent(start.harness);
+      if (!resolved) {
+        const known = (await this.harnesses()).map((h) => h.harness).join(", ");
+        throw new Error(`no omnigent agent for harness "${start.harness}" (available: ${known || "none"})`);
+      }
+      agentId = resolved.id;
+    }
     const body: Record<string, unknown> = {
       agent_id: agentId,
       title: start.name,

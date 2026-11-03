@@ -100,5 +100,7 @@ export interface WorkerBackend {
   tree(): Promise<{ address: string; children: string[] }[]>;
   /** Where to inspect this session in the backend's own UI (null = none). */
   inspectUrl?(address: string): string | null;
+  /** Harness dimension of the backend's registry (for target pickers). */
+  harnesses?(): Promise<{ harness: string; agents: { id: string; name: string }[] }[]>;
   onEvent(cb: (e: WorkerEvent) => void): WorkerEventSubscription;
 }
