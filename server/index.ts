@@ -7,6 +7,7 @@ import { OmnigentBackend } from "./omnigent.ts";
 import { CaptureEngine } from "./capture.ts";
 import { JiraClient } from "./jira.ts";
 import { prCandidateTasks, syncTaskPr } from "./pr.ts";
+import { refreshPulls } from "./pulls.ts";
 import { createHttpServer, type AppState } from "./api.ts";
 import type { ServerResponse } from "node:http";
 
@@ -46,6 +47,22 @@ setInterval(() => {
     }
   }
 }, 120_000);
+
+// Pull Requests page: refresh where the human is awaited (GitHub + GitLab).
+setTimeout(() => {
+  try {
+    refreshPulls();
+  } catch {
+    /* best effort */
+  }
+}, 3_000);
+setInterval(() => {
+  try {
+    refreshPulls();
+  } catch {
+    /* best effort */
+  }
+}, 180_000);
 
 const server = createHttpServer(state);
 server.listen(cfg.port, cfg.host, () => {

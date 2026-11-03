@@ -1255,6 +1255,90 @@ select:focus {
   color: #c98a1b;
 }
 
+.badge-mine {
+  background: color-mix(in srgb, #4a7fd4 25%, transparent);
+  color: #4a7fd4;
+}
+
+/* pull requests page */
+.pull-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pull-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.pull-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pull-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pull-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.pull-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.9em;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.dot-green {
+  background: #2e9e5b;
+}
+
+.dot-orange {
+  background: #c98a1b;
+}
+
+.dot-red {
+  background: #d43f3f;
+}
+
+.pull-status.pull-green {
+  color: #2e9e5b;
+}
+
+.pull-status.pull-orange {
+  color: #c98a1b;
+}
+
+.pull-status.pull-red {
+  color: #d43f3f;
+}
+
 /* sessions */
 .session-list {
   display: flex;

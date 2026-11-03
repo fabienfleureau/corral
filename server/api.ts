@@ -14,6 +14,7 @@ import { summarizeText } from "./llm.ts";
 import { dispatchTask } from "./dispatch.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import { syncTaskPr } from "./pr.ts";
+import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Idea, Item, Task } from "./types.ts";
 
 export interface AppState {
@@ -311,6 +312,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
     json(res, 200, { ok: true, opened: false });
   });
+
+  // ---- pull requests (where the human is awaited) ----
+  on("GET", "/api/pulls", (_req, res) => json(res, 200, cachedPulls()));
+
+  on("POST", "/api/pulls/refresh", (_req, res) => json(res, 200, { pulls: refreshPulls() }));
 
   // ---- repos ----
   on("GET", "/api/repos", (_req, res) => json(res, 200, state.db.listRepos()));
