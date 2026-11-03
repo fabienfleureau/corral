@@ -11,6 +11,15 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<string>(() => localStorage.getItem("corral-theme") ?? "light");
+  const [section, setSection] = useState<string>(() => {
+    const q = window.location.hash.split("?")[1] ?? "";
+    return new URLSearchParams(q).get("tab") ?? "general";
+  });
+
+  const setSectionTab = (s: string) => {
+    setSection(s);
+    window.history.replaceState(null, "", `#/settings${s !== "general" ? "?tab=" + s : ""}`);
+  };
 
   const [baseUrl, setBaseUrl] = useState("");
   const [email, setEmail] = useState("");
@@ -105,12 +114,29 @@ export function SettingsPage() {
         </div>
 
         {error ? <div className="inline-error">{error}</div> : null}
+        <div className="chip-row settings-tabs">
+          {[
+            { key: "general", label: "General" },
+            { key: "jira", label: "Jira" },
+            { key: "repos", label: "Repos" },
+          ].map((s) => (
+            <button
+              key={s.key}
+              className={`chip ${section === s.key ? "chip-active" : ""}`}
+              onClick={() => setSectionTab(s.key)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
         {loading ? (
           <div className="pane-note">
             <Spinner label="Loading…" />
           </div>
         ) : config ? (
           <div className="settings-grid">
+            {section === "general" ? (
+              <>
             <section className="panel-form">
               <h2 className="panel-title">Server</h2>
               <dl className="kv">
@@ -132,7 +158,10 @@ export function SettingsPage() {
                 <dd>{config.jiraConfigured ? "configured" : "not configured"}</dd>
               </dl>
             </section>
+              </>
+            ) : null}
 
+            {section === "jira" ? (
             <section className="panel-form">
               <h2 className="panel-title">Jira</h2>
               <p className="muted">
@@ -177,9 +206,12 @@ export function SettingsPage() {
                 </button>
               </div>
             </section>
+            ) : null}
 
-            <ReposSection />
+            {section === "repos" ? <ReposSection /> : null}
 
+            {section === "general" ? (
+              <>
             <section className="panel-form">
               <h2 className="panel-title">Theme</h2>
               <p className="muted">Light is the default. Dark follows your OS only when set to "system".</p>
@@ -220,6 +252,8 @@ export function SettingsPage() {
                 <p className="muted">This browser does not support desktop notifications.</p>
               )}
             </section>
+              </>
+            ) : null}
           </div>
         ) : null}
       </div>
