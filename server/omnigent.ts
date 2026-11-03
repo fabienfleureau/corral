@@ -24,6 +24,12 @@ function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+function epochMs(v: unknown): number | null {
+  const n = num(v);
+  if (n === null) return null;
+  return n < 1e12 ? n * 1000 : n; // omnigent reports seconds
+}
+
 /** omnigent live_status -> Corral status vocabulary. */
 function normalizeStatus(live: string | null, blocked: boolean): string | null {
   if (blocked) return "blocked";
@@ -121,7 +127,7 @@ export class OmnigentBackend implements WorkerBackend {
       state: raw.archived === true ? "finished" : "live",
       turn: num(raw.turn) ?? num(raw.response_count) ?? 0,
       cwd: str(raw.workspace) ?? str(raw.cwd) ?? "",
-      created_ms: num(raw.created_ms) ?? num(raw.created_at) ?? Date.now(),
+      created_ms: epochMs(raw.created_ms) ?? epochMs(raw.created_at) ?? Date.now(),
       exit_code: live === "failed" ? 1 : null,
       parent: str(raw.parent_session_id),
     };
@@ -151,13 +157,16 @@ export class OmnigentBackend implements WorkerBackend {
     if (agentCfg?.harness) body.harness_override = agentCfg.harness;
     if (start.model) body.model_override = start.model;
     if (start.reasoning) body.reasoning_effort = start.reasoning;
-    body.initial_input = {
-      type: "message",
-      data: { role: "user", content: [{ type: "input_text", text: start.prompt }] },
-    };
     const created = await this.request<Record<string, unknown>>("POST", "/v1/sessions", body);
     const session = this.normalize(created);
     if (start.taskId) this.taskIds.set(session.address, start.taskId);
+    // initial_items only records history on external hosts — the prompt must
+    // be delivered as an event to actually start the turn.
+    try {
+      await this.send(session.address, start.prompt);
+    } catch (err) {
+      throw new Error(`session created (${session.address}) but prompt delivery failed: ${err}`);
+    }
     return session;
   }
 
@@ -290,8 +299,8 @@ export class OmnigentBackend implements WorkerBackend {
   }
 
   inspectUrl(address: string): string | null {
-    // Best-effort deep link into omnigent's own UI ("how the agent worked").
-    return `${this.cfg.baseUrl.replace(/\/$/, "")}/sessions/${address}`;
+    // omnigent's own UI ("how the agent worked").
+    return `${this.cfg.baseUrl.replace(/\/$/, "")}/c/${address}`;
   }
 
   // ---- events via polling ----
