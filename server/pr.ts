@@ -1,7 +1,7 @@
 // PR/MR readiness: Corral verifies — from the platform APIs — that a task's PR
 // is actually ready for human review (exists, threads resolved, checks green,
-// mergeable) before it is shown as such. And when review comments appear,
-// Corral feeds them back to the task's agent automatically (the PR loop in
+// mergeable) before it is shown as such. And when review comments or merge
+// conflicts appear, Corral feeds them back to the task's agent automatically (the PR loop in
 // skills/pr-loop.md) so the human only ever sees "ready for review".
 
 import { execFileSync } from "node:child_process";
@@ -32,6 +32,8 @@ export interface PrInfo {
   changed_files: number;
   /** MERGEABLE | CONFLICTING | UNKNOWN (null when the platform says nothing) */
   mergeable: string | null;
+  /** Branch the PR merges into (rebase target when conflicting). */
+  base_ref: string | null;
   review_decision: string | null;
   checks: { total: number; failed: number; pending: boolean };
   /** Unresolved review threads — the "comments to manage". */
@@ -118,7 +120,7 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
     "gh",
     [
       "pr", "view", branch,
-      "--json", "url,title,state,number,body,additions,deletions,changedFiles,mergeable,reviewDecision,statusCheckRollup",
+      "--json", "url,title,state,number,body,additions,deletions,changedFiles,mergeable,baseRefName,reviewDecision,statusCheckRollup",
     ],
     repoPath,
   );
@@ -172,6 +174,7 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
     deletions: Number(d.deletions ?? 0),
     changed_files: Number(d.changedFiles ?? 0),
     mergeable: d.mergeable ? String(d.mergeable).toUpperCase() : null,
+    base_ref: d.baseRefName ? String(d.baseRefName) : null,
     review_decision: d.reviewDecision ? String(d.reviewDecision).toUpperCase() : null,
     checks: summarizeChecks((d.statusCheckRollup as unknown[]) ?? []),
     threads,
@@ -231,7 +234,8 @@ function findPrGitLab(repoPath: string, branch: string): PrInfo | null {
     additions,
     deletions,
     changed_files: changed,
-    mergeable: null,
+    mergeable: mr.has_conflicts === true ? "CONFLICTING" : mr.has_conflicts === false ? "MERGEABLE" : null,
+    base_ref: mr.target_branch ? String(mr.target_branch) : null,
     review_decision: null,
     checks: { total: 0, failed: 0, pending: false },
     threads,
@@ -258,7 +262,7 @@ function threadSignature(pr: PrInfo): string {
   return pr.threads.map((t) => t.id).sort().join(",");
 }
 
-function commentsMessage(pr: PrInfo): string {
+function commentsSection(pr: PrInfo): string {
   const parts = pr.threads.map(
     (t, i) => `[${i + 1}] ${t.author} (thread ${t.id}):\n${t.body}`,
   );
@@ -269,34 +273,62 @@ function commentsMessage(pr: PrInfo): string {
     "  gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"<thread id>\"}){thread{isResolved}}}'",
     "run your tests, commit and push. Do not ask for permission. Do not merge the PR.",
     "",
-    `PR: ${pr.url}`,
-    "",
     ...parts,
   ].join("\n");
 }
 
-/** Spawn a fresh agent on the task's worktree to handle review comments,
+function conflictSection(pr: PrInfo, task: Task): string {
+  const base = pr.base_ref ?? task.base_branch ?? "main";
+  return [
+    `PR merge conflicts need handling — the PR no longer merges cleanly into \`${base}\`.`,
+    "Rebase and resolve them, automatically, without asking:",
+    `  git fetch origin && git rebase origin/${base}`,
+    "resolve each conflict keeping the intent of both sides (git add, git rebase --continue),",
+    "run your tests, then push: git push --force-with-lease.",
+    "Only if a conflict needs a product decision you cannot make, report a question for that one.",
+    "Do not merge the PR.",
+  ].join("\n");
+}
+
+/** What to push to the agent: review comments, merge conflicts, or both. */
+export interface PrWork {
+  comments: boolean;
+  conflict: boolean;
+}
+
+function workMessage(pr: PrInfo, task: Task, work: PrWork): string {
+  const sections: string[] = [];
+  if (work.conflict) sections.push(conflictSection(pr, task));
+  if (work.comments) sections.push(commentsSection(pr));
+  return [sections.join("\n\n"), "", `PR: ${pr.url}`].join("\n");
+}
+
+/** Spawn a fresh agent on the task's worktree to handle PR work,
  *  seeded with the handoff document from the original run. */
-async function respawnForComments(
+async function respawnForWork(
   db: Db,
   cfg: Config,
   backend: WorkerBackend,
   task: Task,
-  pr: PrInfo,
+  message: string,
+  work: PrWork,
 ): Promise<string | null> {
   const target = task.target && cfg.agents[task.target] ? task.target : "claude";
+  const what = [work.conflict ? "merge conflicts" : "", work.comments ? "review comments" : ""]
+    .filter(Boolean)
+    .join(" and ");
   const prompt = [
-    `Task follow-up: review comments on your PR for "${taskLabel(task)}".`,
+    `Task follow-up: ${what} on your PR for "${taskLabel(task)}".`,
     "",
     task.handoff ? `## Handoff from the previous run\n\n${task.handoff}\n` : "",
-    commentsMessage(pr),
+    message,
     "",
     "---",
     questionConvention(cfg, task),
   ].join("\n");
   const session = await backend.start({
     taskId: task.id,
-    name: `corral-${slugify(taskLabel(task), 20)}-review`,
+    name: `corral-${slugify(taskLabel(task), 20)}-${work.comments ? "review" : "rebase"}`,
     repoPath: task.worktree_path ?? task.repo_path,
     git: task.branch
       ? { branch: task.branch, base: null, existingWorktree: Boolean(task.worktree_path) }
@@ -324,14 +356,15 @@ async function respawnForComments(
   return session.address;
 }
 
-async function deliverComments(
+async function deliverWork(
   db: Db,
   cfg: Config,
   backend: WorkerBackend,
   task: Task,
   pr: PrInfo,
+  work: PrWork,
 ): Promise<string | null> {
-  const message = commentsMessage(pr);
+  const message = workMessage(pr, task, work);
   // Live session? Push into it (its prompt includes the PR loop skill).
   if (task.terminal_address) {
     try {
@@ -346,10 +379,31 @@ async function deliverComments(
   }
   // Otherwise respawn the agent on the worktree so the loop still runs.
   try {
-    return await respawnForComments(db, cfg, backend, task, pr);
+    return await respawnForWork(db, cfg, backend, task, message, work);
   } catch {
     return null;
   }
+}
+
+interface PrMeta {
+  /** Thread signature last pushed to the agent. */
+  pushed?: string;
+  /** Set once conflicts were pushed; cleared when the PR merges cleanly again. */
+  conflict?: boolean;
+}
+
+function readMeta(raw: string | null): PrMeta {
+  try {
+    return JSON.parse(raw ?? "{}") as PrMeta;
+  } catch {
+    return {};
+  }
+}
+
+function patchMeta(db: Db, taskId: string, patch: PrMeta): void {
+  const meta = { ...readMeta(db.getTask(taskId)?.pr_meta ?? null), ...patch };
+  if (meta.conflict === false) delete meta.conflict;
+  db.updateTask(taskId, { pr_meta: JSON.stringify(meta) });
 }
 
 // ---- sync ----
@@ -367,6 +421,7 @@ export interface SyncOptions {
  *  - one inbox item (kind "pr") per task — "ready for review" only when the
  *    gate passes; otherwise "needs work" with the reasons,
  *  - unresolved comments are fed to the agent automatically (once per set),
+ *  - merge conflicts are fed to the agent as a rebase request (once per episode),
  *  - the item auto-resolves when the PR closes; on merge the task and all
  *    its inbox items are archived (the work is over, the inbox stays clean).
  */
@@ -387,18 +442,33 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
   const merged = pr.state === "MERGED";
   const doneStatus: Item["status"] = merged ? "archived" : "resolved";
 
-  // The loop: comments to manage go back to the agent — automatically.
-  if (!shouldResolve && pr.threads.length > 0 && opts.backend && opts.cfg) {
-    const meta = JSON.parse(task.pr_meta ?? "{}") as { pushed?: string };
+  // The loop: comments and merge conflicts go back to the agent —
+  // automatically, once per comment set / conflict episode, in one message.
+  const meta = readMeta(task.pr_meta);
+  const conflicting = !shouldResolve && pr.mergeable === "CONFLICTING";
+  if (!conflicting && meta.conflict) patchMeta(db, task.id, { conflict: false });
+  if (!shouldResolve && opts.backend && opts.cfg) {
     const sig = threadSignature(pr);
-    if (meta.pushed !== sig) {
-      void deliverComments(db, opts.cfg, opts.backend, task, pr)
+    const work: PrWork = {
+      comments: pr.threads.length > 0 && meta.pushed !== sig,
+      conflict: conflicting && !meta.conflict,
+    };
+    if (work.comments || work.conflict) {
+      void deliverWork(db, opts.cfg, opts.backend, task, pr, work)
         .then((address) => {
-          db.updateTask(task.id, { pr_meta: JSON.stringify({ pushed: sig }) });
-          db.recordMetric("pr.comments_pushed", task.id, {
-            threads: pr.threads.length,
-            to: address ?? "none",
+          patchMeta(db, task.id, {
+            ...(work.comments ? { pushed: sig } : {}),
+            ...(work.conflict ? { conflict: true } : {}),
           });
+          if (work.comments) {
+            db.recordMetric("pr.comments_pushed", task.id, {
+              threads: pr.threads.length,
+              to: address ?? "none",
+            });
+          }
+          if (work.conflict) {
+            db.recordMetric("pr.conflicts_pushed", task.id, { base: pr.base_ref, to: address ?? "none" });
+          }
         })
         .catch(() => undefined);
     }

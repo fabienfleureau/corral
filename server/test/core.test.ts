@@ -201,6 +201,7 @@ test("pr gate: ready only when threads answered, checks green, mergeable", () =>
     deletions: 2,
     changed_files: 3,
     mergeable: "MERGEABLE",
+    base_ref: "main",
     review_decision: null,
     checks: { total: 2, failed: 0, pending: false },
     threads: [],
@@ -321,6 +322,7 @@ test("pr sync: item flips ready->needs work and back, archives on merge", () => 
       deletions: 1,
       changed_files: 1,
       mergeable: "MERGEABLE",
+      base_ref: "main",
       review_decision: null,
       checks: { total: 1, failed: 0, pending: false },
       threads: [],
@@ -377,6 +379,7 @@ test("pr sync: closed without merge resolves but keeps the task", () => {
       deletions: 0,
       changed_files: 0,
       mergeable: null,
+      base_ref: "main",
       review_decision: null,
       checks: { total: 0, failed: 0, pending: false },
       threads: [],
@@ -384,6 +387,78 @@ test("pr sync: closed without merge resolves but keeps the task", () => {
     syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => pr });
     assert.equal(db.listItems({ kind: "pr" })[0].status, "resolved");
     assert.equal(db.getTask("task-1")?.status, "done");
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pr sync: merge conflicts are pushed to the agent once per episode", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-prconflict-"));
+  try {
+    const db = new Db(join(dir, "test.db"));
+    db.insertTask(makeTask({ branch: "feat-x", status: "dispatched", terminal_address: "s1" }));
+    const hub = { broadcast: () => undefined };
+    const { backend, sent, started } = fakeBackend();
+    backend.get = async (address) => ({
+      address,
+      task_id: "task-1",
+      name: "x",
+      harness: "claude",
+      status: "idle",
+      blocked_kind: null,
+      state: "live",
+      turn: 1,
+      cwd: "/tmp/repo",
+      created_ms: Date.now(),
+      exit_code: null,
+      parent: null,
+    });
+    const cfg = { agents: { claude: {} }, host: "127.0.0.1", port: 4787, token: "t" } as never;
+    let current: PrInfo = {
+      url: "https://example.com/pr/7",
+      title: "feat: x",
+      state: "OPEN",
+      number: 7,
+      description: "x",
+      additions: 1,
+      deletions: 1,
+      changed_files: 1,
+      mergeable: "CONFLICTING",
+      base_ref: "develop",
+      review_decision: null,
+      checks: { total: 0, failed: 0, pending: false },
+      threads: [],
+    };
+    const finder = () => current;
+    const settle = () => new Promise((r) => setTimeout(r, 10));
+    const sync = async () => {
+      syncTaskPr(db, hub, db.getTask("task-1")!, { finder, backend, cfg });
+      await settle();
+    };
+
+    await sync();
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].text, /^PR merge conflicts/);
+    assert.match(sent[0].text, /git rebase origin\/develop/);
+    assert.match(db.listItems({ kind: "pr" })[0].summary, /merge conflicts/);
+
+    await sync(); // same episode: not pushed again
+    assert.equal(sent.length, 1);
+
+    current = { ...current, threads: [{ id: "t1", author: "bot", body: "fix" }] };
+    await sync(); // new comments only — conflict not repeated
+    assert.equal(sent.length, 2);
+    assert.match(sent[1].text, /^PR review comments/);
+    assert.doesNotMatch(sent[1].text, /merge conflicts/);
+
+    current = { ...current, mergeable: "MERGEABLE", threads: [] };
+    await sync(); // resolved: episode cleared
+    current = { ...current, mergeable: "CONFLICTING" };
+    await sync(); // new episode: pushed again
+    assert.equal(sent.length, 3);
+    assert.match(sent[2].text, /^PR merge conflicts/);
+    assert.equal(started.length, 0);
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
