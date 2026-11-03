@@ -313,6 +313,18 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, { ok: true, opened: false });
   });
 
+  // ---- worker harnesses (dispatch target picker) ----
+  on("GET", "/api/harnesses", async (_req, res) => {
+    try {
+      const harnesses = state.backend.harnesses
+        ? await state.backend.harnesses()
+        : Object.keys(state.cfg.agents).map((harness) => ({ harness, agents: [] }));
+      json(res, 200, { harnesses });
+    } catch (err) {
+      json(res, 500, { error: String(err) });
+    }
+  });
+
   // ---- pull requests (where the human is awaited) ----
   on("GET", "/api/pulls", (_req, res) => json(res, 200, cachedPulls()));
 

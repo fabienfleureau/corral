@@ -22,6 +22,17 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
     return new URLSearchParams(q).get("import") === "1";
   });
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [targets, setTargets] = useState<string[]>(TARGET_OPTIONS);
+
+  useEffect(() => {
+    api
+      .listHarnesses()
+      .then((res) => {
+        const list = res.harnesses.map((h) => h.harness);
+        if (list.length > 0) setTargets(list);
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     api
@@ -104,7 +115,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={repos} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={repos} targets={targets} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -128,7 +139,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         </div>
 
         {showImport ? <JiraImport onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        {showNew ? <NewTaskForm repos={repos} onDone={() => { setShowNew(false); refresh(); }} /> : null}
+        {showNew ? <NewTaskForm repos={repos} targets={targets} onDone={() => { setShowNew(false); refresh(); }} /> : null}
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
@@ -163,7 +174,7 @@ function parentUrl(members: Task[], parentKey: string): string | null {
 
 // ---- one task row ----
 
-function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh: () => void }) {
+function TaskRow({ task, repos, targets, refresh }: { task: Task; repos: Repo[]; targets: string[]; refresh: () => void }) {
   const [showDispatch, setShowDispatch] = useState(false);
   const [target, setTarget] = useState(task.target || "claude");
   const [useWorktree, setUseWorktree] = useState(true);
@@ -285,7 +296,7 @@ function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh:
             <label className="field-inline">
               <span>Target</span>
               <select value={target} onChange={(e) => setTarget(e.target.value)}>
-                {TARGET_OPTIONS.map((t) => (
+                {targets.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
@@ -375,7 +386,7 @@ function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh:
 
 // ---- new task form ----
 
-function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
+function NewTaskForm({ repos, targets, onDone }: { repos: Repo[]; targets: string[]; onDone: () => void }) {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [repoChoice, setRepoChoice] = useState("");
@@ -445,7 +456,7 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
           <span>Target</span>
           <select value={target} onChange={(e) => setTarget(e.target.value)}>
             <option value="">suggested</option>
-            {TARGET_OPTIONS.map((t) => (
+            {targets.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>

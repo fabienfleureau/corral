@@ -137,6 +137,10 @@ export const api = {
   patchIdea: (id: string, input: { status?: Idea["status"]; tag?: Idea["tag"] }): Promise<{ ok: boolean }> =>
     patch<{ ok: boolean }>(`/api/ideas/${id}`, input),
 
+  // ---- worker harnesses ----
+  listHarnesses: (): Promise<{ harnesses: { harness: string; agents: { id: string; name: string }[] }[] }> =>
+    get<{ harnesses: { harness: string; agents: { id: string; name: string }[] }[] }>("/api/harnesses"),
+
   // ---- pull requests ----
   listPulls: (): Promise<{ pulls: Pull[]; fetched_ms: number }> =>
     get<{ pulls: Pull[]; fetched_ms: number }>("/api/pulls"),
