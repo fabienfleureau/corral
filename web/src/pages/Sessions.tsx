@@ -49,7 +49,7 @@ export function SessionsPage({ eventVersion }: { eventVersion: number }) {
     setAttachCmd(null);
     try {
       const res = await api.openSession(address);
-      if (!res.opened && res.attach_command) setAttachCmd({ address, cmd: res.attach_command });
+      if (res.url) window.open(res.url, "_blank", "noopener");
     } catch (err) {
       setError(errText(err));
     } finally {

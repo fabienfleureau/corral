@@ -28,6 +28,10 @@ When you receive one, run the loop — **automatically, without asking**:
    threads are answered or resolved and CI is green — that part is not yours to
    report.
 
+If you are a **fresh session continuing someone else's work**, you were given a
+handoff document. Trust it for intent and decisions, verify it against the code
+before fixing, and update the humans through the same report channels.
+
 ## Rules
 
 - Tests green before you push. A push that breaks CI is worse than a late push.

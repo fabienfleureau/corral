@@ -113,7 +113,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
     setAttachCmd(null);
     try {
       const res = await api.openSession(selected.source_ref);
-      if (!res.opened && res.attach_command) setAttachCmd(res.attach_command);
+      if (res.url) window.open(res.url, "_blank", "noopener");
     } catch (err) {
       setActionError(errText(err));
     } finally {

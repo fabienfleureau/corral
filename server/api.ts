@@ -7,11 +7,11 @@ import { extname, join, normalize } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
-import type { HerdrClient } from "./herdr.ts";
+import type { WorkerBackend } from "./worker.ts";
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient } from "./jira.ts";
 import { summarizeText } from "./llm.ts";
-import { dispatchTask, removeWorktree } from "./dispatch.ts";
+import { dispatchTask } from "./dispatch.ts";
 import { addRepo, gitToplevel, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import { syncTaskPr } from "./pr.ts";
 import type { Idea, Item, Task } from "./types.ts";
@@ -19,7 +19,7 @@ import type { Idea, Item, Task } from "./types.ts";
 export interface AppState {
   db: Db;
   cfg: Config;
-  herdr: HerdrClient;
+  backend: WorkerBackend;
   capture: CaptureEngine;
   jira: JiraClient;
   hub: Hub & { clients: Set<ServerResponse> };
@@ -102,7 +102,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!text.trim()) return json(res, 400, { error: "text required" });
     const address = item.source_ref ?? (item.task_id ? state.db.getTask(item.task_id)?.terminal_address : null);
     if (!address) return json(res, 409, { error: "no terminal linked to this item" });
-    await state.herdr.sendText(address, text);
+    await state.backend.send(address, text);
     state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now() });
     state.db.recordMetric("item.replied", item.id, { address });
     state.hub.broadcast("item.updated", state.db.getItem(item.id));
@@ -196,13 +196,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
     if (task.status === "dispatched") return json(res, 409, { error: "task already dispatched" });
-    const b = (body ?? {}) as { target?: string; use_worktree?: boolean };
+    const b = (body ?? {}) as { target?: string; use_worktree?: boolean; model?: string | null; reasoning?: string | null };
     const target = b.target ?? task.target;
     if (!target) return json(res, 400, { error: "target required (claude|codex|opencode)" });
     if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — assign one before dispatching" });
     try {
-      const result = await dispatchTask(state.db, state.cfg, state.herdr, task, target, {
+      const result = await dispatchTask(state.db, state.cfg, state.backend, task, target, {
         useWorktree: b.use_worktree,
+        model: b.model ?? null,
+        reasoning: b.reasoning ?? null,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
       json(res, 200, result);
@@ -211,12 +213,16 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
   });
 
-  on("POST", "/api/tasks/:id/cleanup", (req, res, { params }) => {
+  on("POST", "/api/tasks/:id/cleanup", async (req, res, { params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
     if (!task.worktree_path) return json(res, 400, { error: "task has no worktree" });
+    if (!task.terminal_address || !state.backend.cleanup) {
+      json(res, 501, { error: "this backend cannot remove worktrees" });
+      return;
+    }
     try {
-      removeWorktree(task.repo_path, task.worktree_path);
+      await state.backend.cleanup(task.terminal_address);
       state.db.updateTask(task.id, { worktree_path: null });
       state.db.recordMetric("task.worktree_removed", task.id, {});
       json(res, 200, { ok: true });
@@ -230,7 +236,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!task) return json(res, 404, { error: "task not found" });
     if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
     try {
-      const pr = syncTaskPr(state.db, state.hub, task, { herdr: state.herdr, cfg: state.cfg });
+      const pr = syncTaskPr(state.db, state.hub, task, { backend: state.backend, cfg: state.cfg });
       json(res, 200, { pr, task: state.db.getTask(task.id) });
     } catch (err) {
       json(res, 500, { error: String(err) });
@@ -259,65 +265,44 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, item);
   });
 
-  // ---- sessions (live agent terminals) ----
+  // ---- sessions (live agent sessions) ----
   on("GET", "/api/sessions", async (_req, res) => {
-    const tracked = state.db.listTerminals();
     const tasks = new Map(state.db.listTasks().map((t) => [t.id, t]));
-    type HcLike = { address: string; state?: string; status?: unknown; turn?: number; cwd?: string; created_ms?: number; exit_code?: number | null };
-    let liveFacts = new Map<string, HcLike>();
+    let sessions: Awaited<ReturnType<WorkerBackend["list"]>> = [];
     try {
-      const list = await state.herdr.listTerminals(true);
-      liveFacts = new Map((list.terminals as unknown as HcLike[]).map((t) => [t.address, t]));
+      sessions = await state.backend.list();
     } catch {
-      /* core unreachable: report from the db alone */
+      /* backend unreachable: report from the db alone */
     }
-    const sessions = tracked.map((t) => {
-      const facts = liveFacts.get(t.address);
-      const rawStatus = facts?.status;
-      const status =
-        typeof rawStatus === "string"
-          ? rawStatus
-          : rawStatus && typeof rawStatus === "object" && "state" in rawStatus
-            ? String((rawStatus as { state: unknown }).state)
-            : t.last_status;
-      const task = t.task_id ? tasks.get(t.task_id) ?? null : null;
+    const out = sessions.map((s) => {
+      const taskId = s.task_id ?? state.db.getTerminal(s.address)?.task_id ?? null;
+      const task = taskId ? tasks.get(taskId) ?? null : null;
       return {
-        address: t.address,
-        name: t.name,
-        agent: t.agent,
-        task_id: t.task_id,
+        address: s.address,
+        name: s.name,
+        agent: s.harness ?? s.name,
+        task_id: taskId,
         task_title: task?.title ?? null,
-        status: status ?? null,
-        state: facts?.state ?? (task?.status === "done" ? "finished" : "unknown"),
-        turn: facts?.turn ?? t.last_turn,
-        cwd: facts?.cwd ?? "",
-        created_ms: facts?.created_ms ?? t.updated_ms,
-        updated_ms: t.updated_ms,
-        exit_code: facts?.exit_code ?? task?.exit_code ?? null,
+        status: s.status,
+        state: s.state,
+        turn: s.turn,
+        cwd: s.cwd,
+        created_ms: s.created_ms,
+        updated_ms: Date.now(),
+        exit_code: s.exit_code,
       };
     });
-    json(res, 200, sessions);
+    json(res, 200, out);
   });
 
   on("POST", "/api/terminals/:address/open", async (_req, res, { params }) => {
-    const address = params.address;
-    // Give the terminal a pane in the Herdr app, or peek at it — best effort.
-    const attempts = [
-      `herdr-app do terminal.peek '{"terminal":"${address}"}'`,
-      `herdr-app do agent.focus '{"terminal":"${address}"}'`,
-    ];
-    for (const line of attempts) {
-      try {
-        await state.herdr.exec(line, { timeout: 15 });
-        state.db.recordMetric("session.opened", address, { line });
-        json(res, 200, { ok: true, opened: true });
-        return;
-      } catch {
-        /* try the next */
-      }
+    const url = state.backend.inspectUrl?.(params.address) ?? null;
+    if (url) {
+      state.db.recordMetric("session.opened", params.address, { url });
+      json(res, 200, { ok: true, opened: false, url });
+      return;
     }
-    // Fallback: tell the client the attach command so the person can run it.
-    json(res, 200, { ok: true, opened: false, attach_command: `hc attach ${address}` });
+    json(res, 200, { ok: true, opened: false });
   });
 
   // ---- repos ----
@@ -488,8 +473,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       host: cfg.host,
       agents: Object.keys(cfg.agents),
       assistant: cfg.assistant[0],
-      herdrSocket: cfg.herdrSocket,
-      worktreesDir: cfg.worktreesDir,
+      backend: state.backend.name,
+      omnigentUrl: cfg.omnigent.baseUrl,
       jiraConfigured: state.jira.configured,
       jiraJql: cfg.jira.jql,
       token: cfg.token.slice(0, 4) + "…", // masked
