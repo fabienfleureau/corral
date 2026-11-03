@@ -13,6 +13,7 @@ export type PullColor = "green" | "orange" | "red";
 export interface Pull {
   id: string;
   host: "github" | "gitlab";
+  number: number;
   title: string;
   url: string;
   repo: string;
@@ -53,6 +54,7 @@ function githubLogin(): string | null {
 interface GhPullBrief {
   title: string;
   url: string;
+  number: number;
   state: string;
   isDraft: boolean;
   author: { login: string };
@@ -157,7 +159,7 @@ function listGitHub(): Pull[] {
       const d = JSON.parse(
         run("gh", [
           "pr", "view", url,
-          "--json", "title,url,state,isDraft,author,reviewDecision,reviews,statusCheckRollup,mergeable,updatedAt,repository",
+          "--json", "title,url,number,state,isDraft,author,reviewDecision,reviews,statusCheckRollup,mergeable,updatedAt,repository",
         ]),
       ) as GhPullBrief;
       const checks = summarizeChecks(d.statusCheckRollup ?? []);
@@ -174,6 +176,7 @@ function listGitHub(): Pull[] {
       out.push({
         id: d.url,
         host: "github",
+        number: Number(d.number) || Number(d.url.match(/\/pull\/(\d+)/)?.[1] ?? 0),
         title: d.title,
         url: d.url,
         repo: d.repository?.nameWithOwner ?? "",
@@ -205,6 +208,7 @@ function gitlabLogin(): string | null {
 interface GlabMR {
   title: string;
   web_url: string;
+  iid?: number;
   state: string;
   draft?: boolean;
   work_in_progress?: boolean;
@@ -250,6 +254,7 @@ function listGitLab(): Pull[] {
     out.push({
       id: mr.web_url,
       host: "gitlab",
+      number: Number(mr.iid) || Number(mr.web_url.match(/merge_requests\/(\d+)/)?.[1] ?? 0),
       title: mr.title,
       url: mr.web_url,
       repo: mr.web_url.replace(/^https?:\/\/[^/]+\//, "").replace(/\/-\/merge_requests\/.*$/, ""),
