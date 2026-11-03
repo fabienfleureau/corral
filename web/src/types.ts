@@ -56,6 +56,23 @@ export type SessionInfo = {
   exit_code: number | null;
 };
 
+export type PullColor = "green" | "orange" | "red";
+
+export type Pull = {
+  id: string;
+  host: "github" | "gitlab";
+  title: string;
+  url: string;
+  repo: string;
+  state: string; // open | draft | merged | closed
+  author: string;
+  isMine: boolean;
+  awaitingMe: boolean;
+  color: PullColor;
+  reason: string;
+  updated_ms: number;
+};
+
 export type Idea = {
   id: string;
   text: string;

@@ -8,25 +8,27 @@ import { Spinner } from "./ui";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
 import { SessionsPage } from "./pages/Sessions";
+import { PullsPage } from "./pages/Pulls";
 import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
 
-type Tab = "inbox" | "tasks" | "sessions" | "ideas" | "settings";
+type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "ideas" | "settings";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
   { key: "tasks", label: "Tasks" },
+  { key: "pulls", label: "Pull Requests" },
   { key: "sessions", label: "Sessions" },
   { key: "ideas", label: "Ideas" },
   { key: "settings", label: "Settings" },
 ];
 
-type Counts = { inbox: number; tasks: number; sessions: number; ideas: number };
+type Counts = { inbox: number; tasks: number; pulls: number; sessions: number; ideas: number };
 
 export function App() {
   const [unauthorized, setUnauthorized] = useState(false);
   const [tab, setTab] = useState<Tab>("inbox");
-  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, sessions: 0, ideas: 0 });
+  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, pulls: 0, sessions: 0, ideas: 0 });
   const [eventVersion, setEventVersion] = useState(0);
   const [bootError, setBootError] = useState<string | null>(null);
 
@@ -72,12 +74,13 @@ export function App() {
   // Sidebar open counts.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.listItems({ status: "open" }), api.listTasks("open"), api.listIdeas("new"), api.listSessions()])
-      .then(([items, tasks, ideas, sessions]) => {
+    Promise.all([api.listItems({ status: "open" }), api.listTasks("open"), api.listIdeas("new"), api.listSessions(), api.listPulls()])
+      .then(([items, tasks, ideas, sessions, pullsRes]) => {
         if (!cancelled) {
           setCounts({
             inbox: items.length,
             tasks: tasks.length,
+            pulls: pullsRes.pulls.filter((p) => p.color !== "green").length,
             sessions: sessions.filter((s) => s.state === "live").length,
             ideas: ideas.length,
           });
@@ -142,6 +145,7 @@ export function App() {
         ) : null}
         {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
+        {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
         {tab === "ideas" ? <IdeasPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "settings" ? <SettingsPage /> : null}
