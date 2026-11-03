@@ -103,7 +103,11 @@ export class OmnigentBackend implements WorkerBackend {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`omnigent ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`);
+      const hint =
+        res.status === 404
+          ? " (is the omnigent host online? `omnigent host status`)"
+          : "";
+      throw new Error(`omnigent ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}${hint}`);
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
@@ -157,7 +161,19 @@ export class OmnigentBackend implements WorkerBackend {
     if (agentCfg?.harness) body.harness_override = agentCfg.harness;
     if (start.model) body.model_override = start.model;
     if (start.reasoning) body.reasoning_effort = start.reasoning;
-    const created = await this.request<Record<string, unknown>>("POST", "/v1/sessions", body);
+    const created = await (async () => {
+      try {
+        return await this.request<Record<string, unknown>>("POST", "/v1/sessions", body);
+      } catch (err) {
+        // A 404 here usually means the omnigent host was momentarily
+        // unreachable — worth one quiet retry before failing the dispatch.
+        if (/\b404\b/.test(String(err))) {
+          await new Promise((r) => setTimeout(r, 2000));
+          return await this.request<Record<string, unknown>>("POST", "/v1/sessions", body);
+        }
+        throw err;
+      }
+    })();
     const session = this.normalize(created);
     if (start.taskId) this.taskIds.set(session.address, start.taskId);
     // initial_items only records history on external hosts — the prompt must

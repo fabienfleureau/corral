@@ -1372,6 +1372,11 @@ select:focus {
   color: #d43f3f;
 }
 
+/* settings tabs */
+.settings-tabs {
+  margin-bottom: 14px;
+}
+
 .pull-filters {
   display: flex;
   align-items: center;
