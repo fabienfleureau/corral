@@ -4,7 +4,7 @@
 // conflicts appear, Corral feeds them back to the task's agent automatically (the PR loop in
 // skills/pr-loop.md) so the human only ever sees "ready for review".
 
-import { execFileSync } from "node:child_process";
+import { mapLimit, runAsync } from "./exec.ts";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
@@ -38,6 +38,8 @@ export interface PrInfo {
   checks: { total: number; failed: number; pending: boolean };
   /** Unresolved review threads — the "comments to manage". */
   threads: PrThread[];
+  /** False when thread data could not be fetched: readiness stays pending. */
+  threads_known?: boolean;
 }
 
 export interface PrReady {
@@ -52,6 +54,7 @@ export function prReady(pr: PrInfo): PrReady {
   if (pr.threads.length > 0) {
     reasons.push(`${pr.threads.length} unresolved review comment${pr.threads.length === 1 ? "" : "s"}`);
   }
+  if (pr.threads_known === false) reasons.push("review comments unavailable");
   if (pr.checks.pending) reasons.push("checks still running");
   if (pr.checks.failed > 0) reasons.push(`${pr.checks.failed} failing check${pr.checks.failed === 1 ? "" : "s"}`);
   if (pr.mergeable === "CONFLICTING") reasons.push("merge conflicts");
@@ -80,18 +83,13 @@ export function prItemBody(pr: PrInfo): string {
 
 // ---- discovery ----
 
-function run(cmd: string, args: string[], cwd: string): string {
-  return execFileSync(cmd, args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    cwd,
-    timeout: 20_000, // never block the event loop on a stuck gh/glab call
-  }).trim();
+function run(cmd: string, args: string[], cwd: string): Promise<string> {
+  return runAsync(cmd, args, { cwd, timeout: 20_000 });
 }
 
-function repoSlug(repoPath: string): string | null {
+async function repoSlug(repoPath: string): Promise<string | null> {
   try {
-    const url = run("git", ["remote", "get-url", "origin"], repoPath);
+    const url = await run("git", ["remote", "get-url", "origin"], repoPath);
     const m = url.match(/[:/]([^:/]+)\/([^:/]+?)(?:\.git)?$/);
     return m ? `${m[1]}/${m[2]}` : null;
   } catch {
@@ -116,8 +114,16 @@ function summarizeChecks(rollup: unknown[]): PrInfo["checks"] {
   return { total: rollup.length, failed, pending: pending > 0 };
 }
 
-function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
-  const out = run(
+/** GitLab head pipeline status -> checks summary (no pipeline = no checks). */
+export function gitlabPipelineChecks(status: string | null | undefined): PrInfo["checks"] {
+  if (!status) return { total: 0, failed: 0, pending: false };
+  if (status === "success" || status === "skipped" || status === "manual") return { total: 1, failed: 0, pending: false };
+  if (status === "failed" || status === "canceled") return { total: 1, failed: 1, pending: false };
+  return { total: 1, failed: 0, pending: true }; // created, pending, running, preparing, scheduled, …
+}
+
+async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | null> {
+  const out = await run(
     "gh",
     [
       "pr", "view", branch,
@@ -126,8 +132,9 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
     repoPath,
   );
   const d = JSON.parse(out) as Record<string, unknown>;
-  const slug = repoSlug(repoPath);
-  let threads: PrThread[] = [];
+  const slug = await repoSlug(repoPath);
+  const threads: PrThread[] = [];
+  let threadsKnown = false;
   if (slug) {
     // reviewThreads (unresolved) is only on GraphQL.
     const [owner, name] = slug.split("/");
@@ -135,10 +142,11 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
       `query{repository(owner:"${owner}",name:"${name}"){pullRequest(number:${Number(d.number)}){` +
       `reviewThreads(first:50){nodes{id isResolved comments(first:10){nodes{author{login} body}}}}}}}`;
     try {
-      const gql = JSON.parse(run("gh", ["api", "graphql", "-f", `query=${query}`], repoPath)) as {
+      const gql = JSON.parse(await run("gh", ["api", "graphql", "-f", `query=${query}`], repoPath)) as {
         data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: unknown[] } } } };
       };
-      const nodes = gql.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+      const nodes = gql.data?.repository?.pullRequest?.reviewThreads?.nodes;
+      if (!nodes) throw new Error("no thread data");
       for (const raw of nodes) {
         const t = raw as {
           id?: string;
@@ -161,8 +169,9 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
           body: String(first?.body ?? "").slice(0, 2000),
         });
       }
+      threadsKnown = true;
     } catch {
-      /* GraphQL unavailable: treat as no thread data */
+      /* GraphQL unavailable: readiness stays pending (threads_known=false) */
     }
   }
   return {
@@ -179,79 +188,78 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
     review_decision: d.reviewDecision ? String(d.reviewDecision).toUpperCase() : null,
     checks: summarizeChecks((d.statusCheckRollup as unknown[]) ?? []),
     threads,
+    threads_known: threadsKnown,
   };
 }
 
-function findPrGitLab(repoPath: string, branch: string): PrInfo | null {
-  // Best-effort: glab list -> api changes/discussions for stats and threads.
-  const out = run("glab", ["mr", "list", "--source-branch", branch, "--all", "--output", "json"], repoPath);
+async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | null> {
+  const out = await run("glab", ["mr", "list", "--source-branch", branch, "--all", "--output", "json"], repoPath);
   const list = JSON.parse(out) as Record<string, unknown>[];
   if (list.length === 0) return null;
   const mr = list[0];
   const iid = Number(mr.iid ?? 0);
-  let description = String(mr.description ?? "");
+  const api = (path: string) => run("glab", ["api", `projects/:id/merge_requests/${iid}${path}`], repoPath);
+
+  // Each fetch is independent: a failing one degrades only its own field.
+  const [full, changes, discussions] = await Promise.all([
+    api("").then((s) => JSON.parse(s) as { description?: string; head_pipeline?: { status?: string } | null }).catch(() => null),
+    api("/changes").then((s) => JSON.parse(s) as { changes?: { diff?: string }[] }).catch(() => null),
+    api("/discussions?per_page=100")
+      .then((s) => JSON.parse(s) as {
+        id?: string;
+        notes?: { resolvable?: boolean; resolved?: boolean; author?: { username?: string }; body?: string }[];
+      }[])
+      .catch(() => null),
+  ]);
+
   let additions = 0;
   let deletions = 0;
-  let changed = 0;
-  const threads: PrThread[] = [];
-  try {
-    const changes = JSON.parse(run("glab", ["api", `projects/:id/merge_requests/${iid}/changes`], repoPath)) as {
-      changes?: { additions?: string; deletions?: string }[];
-    };
-    const diff = changes.changes ?? [];
-    changed = diff.length;
-    for (const c of diff) {
-      additions += (c.additions ?? "").split("\n").filter((l) => l.startsWith("+")).length || 0;
-      deletions += (c.deletions ?? "").split("\n").filter((l) => l.startsWith("-")).length || 0;
+  const diff = changes?.changes ?? [];
+  for (const c of diff) {
+    for (const line of (c.diff ?? "").split("\n")) {
+      if (line.startsWith("+") && !line.startsWith("+++")) additions++;
+      else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
     }
-    if (!description) {
-      const full = JSON.parse(run("glab", ["api", `projects/:id/merge_requests/${iid}`], repoPath)) as {
-        description?: string;
-      };
-      description = full.description ?? "";
-    }
-    const discussions = JSON.parse(run("glab", ["api", `projects/:id/merge_requests/${iid}/discussions`], repoPath)) as {
-      id?: string;
-      notes?: { resolvable?: boolean; resolved?: boolean; author?: { username?: string }; body?: string }[];
-    }[];
-    for (const d of discussions) {
-      const note = d.notes?.[0];
-      if (!note?.resolvable || note.resolved) continue;
-      threads.push({
-        id: String(d.id ?? randomUUID()),
-        author: String(note.author?.username ?? "reviewer"),
-        body: String(note.body ?? "").slice(0, 2000),
-      });
-    }
-  } catch {
-    /* degraded metadata is fine */
   }
+  const threads: PrThread[] = [];
+  for (const d of discussions ?? []) {
+    const note = d.notes?.[0];
+    if (!note?.resolvable || note.resolved) continue;
+    threads.push({
+      id: String(d.id ?? randomUUID()),
+      author: String(note.author?.username ?? "reviewer"),
+      body: String(note.body ?? "").slice(0, 2000),
+    });
+  }
+  // Pipeline unknown (MR fetch failed) = pending, never "no checks".
+  const checks = full ? gitlabPipelineChecks(full.head_pipeline?.status) : { total: 1, failed: 0, pending: true };
   return {
     url: String(mr.web_url ?? ""),
     title: String(mr.title ?? ""),
     state: String(mr.state ?? "opened").toUpperCase() === "OPENED" ? "OPEN" : String(mr.state).toUpperCase(),
     number: iid,
-    description,
+    description: String(mr.description ?? "") || full?.description || "",
     additions,
     deletions,
-    changed_files: changed,
+    changed_files: diff.length,
     mergeable: mr.has_conflicts === true ? "CONFLICTING" : mr.has_conflicts === false ? "MERGEABLE" : null,
     base_ref: mr.target_branch ? String(mr.target_branch) : null,
     review_decision: null,
-    checks: { total: 0, failed: 0, pending: false },
+    checks,
     threads,
+    threads_known: discussions !== null,
   };
 }
 
-export function findPr(repoPath: string, branch: string): PrInfo | null {
+export async function findPr(repoPath: string, branch: string): Promise<PrInfo | null> {
   if (!repoPath || !branch) return null;
   try {
-    return findPrGitHub(repoPath, branch);
+    return await findPrGitHub(repoPath, branch);
   } catch {
     /* not GitHub or gh missing — try GitLab */
   }
   try {
-    return findPrGitLab(repoPath, branch);
+    return await findPrGitLab(repoPath, branch);
   } catch {
     return null;
   }
@@ -422,7 +430,7 @@ export interface SyncOptions {
   backend?: WorkerBackend;
   cfg?: Config;
   /** Injected for tests. */
-  finder?: (repoPath: string, branch: string) => PrInfo | null;
+  finder?: (repoPath: string, branch: string) => PrInfo | null | Promise<PrInfo | null>;
 }
 
 /**
@@ -435,10 +443,12 @@ export interface SyncOptions {
  *  - the item auto-resolves when the PR closes; on merge the task and all
  *    its inbox items are archived (the work is over, the inbox stays clean).
  */
-export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {}): PrInfo | null {
+export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOptions = {}): Promise<PrInfo | null> {
   const finder = opts.finder ?? findPr;
-  const pr = finder(task.repo_path, task.branch ?? "");
+  const pr = await finder(staleTask.repo_path, staleTask.branch ?? "");
   if (!pr) return null;
+  // The platform calls take seconds: work from the task as it is now.
+  const task = db.getTask(staleTask.id) ?? staleTask;
 
   if (task.pr_url !== pr.url) {
     db.updateTask(task.id, { pr_url: pr.url });
@@ -577,26 +587,26 @@ export function prCandidateTasks(db: Db): Task[] {
 }
 
 let lastSyncAll = 0;
+let syncAllRunning = false;
 
 /** Sync every candidate task's PR (or only those with a known PR, which is
- *  all a merge check needs). Throttled so opening the inbox repeatedly
- *  does not hammer gh/glab (each call blocks for up to 20s). */
-export function syncAllPrs(
+ *  all a merge check needs). Throttled and single-flight so opening the
+ *  inbox repeatedly does not hammer gh/glab; a few tasks at a time. */
+export async function syncAllPrs(
   db: Db,
   hub: Hub,
   opts: SyncOptions & { knownPrsOnly?: boolean } = {},
   minIntervalMs = 30_000,
-): boolean {
+): Promise<boolean> {
   const now = Date.now();
-  if (now - lastSyncAll < minIntervalMs) return false;
+  if (syncAllRunning || now - lastSyncAll < minIntervalMs) return false;
   lastSyncAll = now;
-  const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url);
-  for (const task of tasks) {
-    try {
-      syncTaskPr(db, hub, task, opts);
-    } catch {
-      /* best effort */
-    }
+  syncAllRunning = true;
+  try {
+    const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url);
+    await mapLimit(tasks, 4, (task) => syncTaskPr(db, hub, task, opts).catch(() => null));
+  } finally {
+    syncAllRunning = false;
   }
   return true;
 }

@@ -78,6 +78,35 @@ function tokenOf(req: IncomingMessage, url: URL): string | null {
   return m ? m[1] : null;
 }
 
+interface ItemElicitation {
+  id: string;
+  kind: string;
+  field?: string | null;
+}
+
+function parseElicitation(raw: string | null | undefined): ItemElicitation | null {
+  if (!raw) return null;
+  try {
+    const e = JSON.parse(raw) as ItemElicitation;
+    return e?.id ? e : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Map an inbox reply onto an elicitation verdict. Free text that is not a
+ *  plain yes/no on a binary ask declines it and is forwarded as a message. */
+export function elicitationVerdict(
+  e: ItemElicitation,
+  text: string,
+): { action: "accept" | "decline"; content?: Record<string, unknown>; forward: boolean } {
+  const t = text.trim().toLowerCase();
+  if (e.field && e.kind !== "permission") return { action: "accept", content: { [e.field]: text.trim() }, forward: false };
+  if (/^(y|yes|ok|allow|approve|accept|accepted)\b/.test(t)) return { action: "accept", forward: false };
+  if (/^(n|no|deny|decline|reject|refuse)\b/.test(t)) return { action: "decline", forward: false };
+  return { action: "decline", forward: true };
+}
+
 export function createHttpServer(state: AppState): ReturnType<typeof createServer> {
   const routes: { method: string; pattern: RegExp; keys: string[]; handler: Handler }[] = [];
 
@@ -111,7 +140,16 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!text.trim()) return json(res, 400, { error: "text required" });
     const address = item.source_ref ?? (item.task_id ? state.db.getTask(item.task_id)?.terminal_address : null);
     if (!address) return json(res, 409, { error: "no terminal linked to this item" });
-    await state.backend.send(address, text);
+    const elicitation = parseElicitation(item.elicitation);
+    if (elicitation) {
+      // A captured permission/question is answered on the elicitation itself;
+      // a plain message would leave it pending in the backend.
+      const verdict = elicitationVerdict(elicitation, text);
+      await state.backend.resolveElicitation(address, elicitation.id, verdict.action, verdict.content);
+      if (verdict.forward) await state.backend.send(address, text);
+    } else {
+      await state.backend.send(address, text);
+    }
     state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now() });
     state.db.recordMetric("item.replied", item.id, { address });
     state.hub.broadcast("item.updated", state.db.getItem(item.id));
@@ -248,12 +286,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
   });
 
-  on("POST", "/api/tasks/:id/check-pr", (req, res, { params }) => {
+  on("POST", "/api/tasks/:id/check-pr", async (req, res, { params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
     if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
     try {
-      const pr = syncTaskPr(state.db, state.hub, task, { backend: state.backend, cfg: state.cfg });
+      const pr = await syncTaskPr(state.db, state.hub, task, { backend: state.backend, cfg: state.cfg });
       json(res, 200, { pr, task: state.db.getTask(task.id) });
     } catch (err) {
       json(res, 500, { error: String(err) });
@@ -261,8 +299,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   // Inbox open: re-check PRs so merged ones are archived before the human looks.
-  on("POST", "/api/prs/sync", (_req, res) => {
-    const ran = syncAllPrs(state.db, state.hub, { backend: state.backend, cfg: state.cfg, knownPrsOnly: true });
+  on("POST", "/api/prs/sync", async (_req, res) => {
+    const ran = await syncAllPrs(state.db, state.hub, { backend: state.backend, cfg: state.cfg, knownPrsOnly: true });
     json(res, 200, { ok: true, ran });
   });
 
@@ -343,7 +381,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   // ---- pull requests (where the human is awaited) ----
   on("GET", "/api/pulls", (_req, res) => json(res, 200, cachedPulls()));
 
-  on("POST", "/api/pulls/refresh", (_req, res) => json(res, 200, { pulls: refreshPulls() }));
+  on("POST", "/api/pulls/refresh", async (_req, res) => {
+    await refreshPulls(state.hub);
+    json(res, 200, cachedPulls());
+  });
 
   // ---- repos ----
   on("GET", "/api/repos", (_req, res) => json(res, 200, state.db.listRepos()));

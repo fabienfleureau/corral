@@ -307,7 +307,7 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
   }
 });
 
-test("pr sync: item flips ready->needs work and back, archives on merge", () => {
+test("pr sync: item flips ready->needs work and back, archives on merge", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-prsync-"));
   try {
     const db = new Db(join(dir, "test.db"));
@@ -330,13 +330,13 @@ test("pr sync: item flips ready->needs work and back, archives on merge", () => 
       threads: [],
     };
     const finder = () => current;
-    syncTaskPr(db, hub, makeTask({ branch: "feat-x", status: "dispatched", repo_path: "/tmp/repo", id: "task-1" }), { finder });
+    await syncTaskPr(db, hub, makeTask({ branch: "feat-x", status: "dispatched", repo_path: "/tmp/repo", id: "task-1" }), { finder });
     let item = db.listItems({ kind: "pr" })[0];
     assert.equal(item.ready, 1);
     assert.match(item.title, /PR ready for review/);
 
     current = { ...current, threads: [{ id: "t1", author: "bot", body: "fix" }] };
-    syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
+    await syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
     item = db.listItems({ kind: "pr" })[0];
     assert.equal(item.ready, 0);
     assert.match(item.title, /PR needs work/);
@@ -353,7 +353,7 @@ test("pr sync: item flips ready->needs work and back, archives on merge", () => 
     db.insertItem(question);
 
     current = { ...current, state: "MERGED", threads: [] };
-    syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
+    await syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
     item = db.listItems({ kind: "pr" })[0];
     assert.equal(item.status, "archived");
     assert.match(item.title, /PR merged/);
@@ -365,7 +365,7 @@ test("pr sync: item flips ready->needs work and back, archives on merge", () => 
   }
 });
 
-test("pr sync: closed without merge resolves but keeps the task", () => {
+test("pr sync: closed without merge resolves but keeps the task", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-prclose-"));
   try {
     const db = new Db(join(dir, "test.db"));
@@ -386,7 +386,7 @@ test("pr sync: closed without merge resolves but keeps the task", () => {
       checks: { total: 0, failed: 0, pending: false },
       threads: [],
     };
-    syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => pr });
+    await syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => pr });
     assert.equal(db.listItems({ kind: "pr" })[0].status, "resolved");
     assert.equal(db.getTask("task-1")?.status, "done");
     db.close();
@@ -435,7 +435,7 @@ test("pr sync: merge conflicts are pushed to the agent once per episode", async 
     const finder = () => current;
     const settle = () => new Promise((r) => setTimeout(r, 10));
     const sync = async () => {
-      syncTaskPr(db, hub, db.getTask("task-1")!, { finder, backend, cfg });
+      await syncTaskPr(db, hub, db.getTask("task-1")!, { finder, backend, cfg });
       await settle();
     };
 
@@ -534,7 +534,7 @@ test("pr sync: failed delivery is retried; respawn keeps harness and moves sourc
     };
     const settle = () => new Promise((r) => setTimeout(r, 10));
     const sync = async () => {
-      syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => pr, backend, cfg });
+      await syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => pr, backend, cfg });
       await settle();
     };
 
@@ -580,8 +580,10 @@ test("pr sync: concurrent syncs deliver once", async () => {
       threads: [{ id: "t1", author: "bot", body: "fix" }],
     };
     const opts = { finder: () => pr, backend, cfg };
-    syncTaskPr(db, hub, db.getTask("task-1")!, opts);
-    syncTaskPr(db, hub, db.getTask("task-1")!, opts);
+    await Promise.all([
+      syncTaskPr(db, hub, db.getTask("task-1")!, opts),
+      syncTaskPr(db, hub, db.getTask("task-1")!, opts),
+    ]);
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(started.length, 1);
     db.close();

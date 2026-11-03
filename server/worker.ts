@@ -56,6 +56,8 @@ export interface WorkerElicitation {
   prompt: string;
   /** Choice labels when the elicitation offers options. */
   choices: string[];
+  /** First requestedSchema property: where a typed answer goes on accept. */
+  field?: string | null;
 }
 
 export type WorkerEventType = "created" | "status" | "finished" | "removed";

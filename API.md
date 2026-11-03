@@ -5,7 +5,7 @@ either `Authorization: Bearer <token>` or the `corral_token` cookie. The web app
 served at `/`; visiting `/?token=<token>` sets the cookie and redirects to `/`.
 On 401 the UI shows a token-entry screen (send the token as `?token=` once).
 
-Live updates: `GET /api/events` (SSE). Events: `event: item.created|item.updated|task.updated|idea.created`
+Live updates: `GET /api/events` (SSE). Events: `event: item.created|item.updated|task.updated|idea.created|session.updated|pulls.updated`
 with the entity JSON as `data`. Use `item.created` for desktop notifications.
 
 ## Entities
