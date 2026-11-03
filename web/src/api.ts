@@ -78,7 +78,8 @@ export type DispatchResult = {
 };
 
 export type NewTaskInput = {
-  title: string;
+  /** Omit to let omnigent title the session after dispatch. */
+  title?: string;
   prompt?: string;
   repo_path?: string;
   target?: string;
@@ -113,7 +114,10 @@ export const api = {
     get<Task[]>(`/api/tasks${query({ status })}`),
   createTask: (input: NewTaskInput): Promise<Task> => post<Task>("/api/tasks", input),
   patchTask: (id: string, input: Partial<Task>): Promise<Task> => patch<Task>(`/api/tasks/${id}`, input),
-  dispatchTask: (id: string, input: { target?: string; use_worktree?: boolean }): Promise<DispatchResult> =>
+  dispatchTask: (
+    id: string,
+    input: { target?: string; use_worktree?: boolean; agent?: string | null },
+  ): Promise<DispatchResult> =>
     post<DispatchResult>(`/api/tasks/${id}/dispatch`, input),
   cleanupTask: (id: string): Promise<{ ok: boolean }> => post<{ ok: boolean }>(`/api/tasks/${id}/cleanup`),
   checkPr: (id: string): Promise<{ pr: unknown; task: Task }> =>
@@ -136,6 +140,10 @@ export const api = {
     post<Idea>("/api/ideas", input),
   patchIdea: (id: string, input: { status?: Idea["status"]; tag?: Idea["tag"] }): Promise<{ ok: boolean }> =>
     patch<{ ok: boolean }>(`/api/ideas/${id}`, input),
+
+  // ---- worker harnesses ----
+  listHarnesses: (): Promise<{ harnesses: { harness: string; agents: { id: string; name: string }[] }[] }> =>
+    get<{ harnesses: { harness: string; agents: { id: string; name: string }[] }[] }>("/api/harnesses"),
 
   // ---- pull requests ----
   listPulls: (): Promise<{ pulls: Pull[]; fetched_ms: number }> =>

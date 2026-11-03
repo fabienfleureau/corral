@@ -11,6 +11,7 @@ import type { Db } from "./db.ts";
 import { gitToplevel } from "./repos.ts";
 import type { WorkerBackend, WorkerSession } from "./worker.ts";
 import type { Task } from "./types.ts";
+import { taskLabel } from "./types.ts";
 
 export function slugify(s: string, max = 40): string {
   const slug = s
@@ -81,7 +82,12 @@ export async function dispatchTask(
   backend: WorkerBackend,
   task: Task,
   target: string,
-  opts: { useWorktree?: boolean; model?: string | null; reasoning?: string | null } = {},
+  opts: {
+    useWorktree?: boolean;
+    model?: string | null;
+    reasoning?: string | null;
+    agent?: string | null;
+  } = {},
 ): Promise<DispatchResult> {
   if (!task.repo_path?.trim()) {
     throw new Error("task has no repo assigned — assign one before dispatching");
@@ -93,7 +99,7 @@ export async function dispatchTask(
   }
 
   const useWorktree = opts.useWorktree !== false;
-  const branch = task.branch ?? `${slugify(task.title, 32)}-${task.id.slice(0, 6)}`;
+  const branch = task.branch ?? `${slugify(taskLabel(task), 32)}-${task.id.slice(0, 6)}`;
 
   if (useWorktree && target === "claude") {
     // omnigent places the tree at `<repo>-worktrees/<branch>` (sibling of the repo)
@@ -101,7 +107,8 @@ export async function dispatchTask(
     trustClaudeWorkspace(`${task.repo_path}-worktrees/${branch.replaceAll("/", "-")}`);
   }
 
-  const name = `corral-${slugify(task.title, 24)}`;
+  // Untitled task: send no title so omnigent generates one; capture adopts it.
+  const name = task.title.trim() ? `corral-${slugify(task.title, 24)}` : null;
   const fullPrompt = `${task.prompt.trim()}\n\n---\n${questionConvention(cfg, task)}`;
 
   let session: WorkerSession;
@@ -113,6 +120,7 @@ export async function dispatchTask(
       git: useWorktree ? { branch, base: task.base_branch } : null,
       prompt: fullPrompt,
       harness: target,
+      agent: opts.agent ?? null,
       model: opts.model ?? null,
       reasoning: opts.reasoning ?? null,
       env: {
@@ -136,7 +144,7 @@ export async function dispatchTask(
   db.upsertTerminal({
     address: session.address,
     task_id: task.id,
-    name: session.name ?? name,
+    name: session.name ?? name ?? null,
     agent: target,
     last_status: session.status,
     last_turn: session.turn ?? 0,

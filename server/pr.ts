@@ -11,6 +11,7 @@ import type { Db } from "./db.ts";
 import type { WorkerBackend } from "./worker.ts";
 import type { Hub } from "./capture.ts";
 import type { Item, Task } from "./types.ts";
+import { taskLabel } from "./types.ts";
 import { questionConvention, slugify } from "./dispatch.ts";
 
 export interface PrThread {
@@ -285,7 +286,7 @@ async function respawnForComments(
 ): Promise<string | null> {
   const target = task.target && cfg.agents[task.target] ? task.target : "claude";
   const prompt = [
-    `Task follow-up: review comments on your PR for "${task.title}".`,
+    `Task follow-up: review comments on your PR for "${taskLabel(task)}".`,
     "",
     task.handoff ? `## Handoff from the previous run\n\n${task.handoff}\n` : "",
     commentsMessage(pr),
@@ -295,7 +296,7 @@ async function respawnForComments(
   ].join("\n");
   const session = await backend.start({
     taskId: task.id,
-    name: `corral-${slugify(task.title, 20)}-review`,
+    name: `corral-${slugify(taskLabel(task), 20)}-review`,
     repoPath: task.worktree_path ?? task.repo_path,
     git: task.branch
       ? { branch: task.branch, base: null, existingWorktree: Boolean(task.worktree_path) }
@@ -401,10 +402,10 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
   }
 
   const title = shouldResolve
-    ? `PR ${pr.state.toLowerCase()}: ${task.title}`
+    ? `PR ${pr.state.toLowerCase()}: ${taskLabel(task)}`
     : ready
-      ? `PR ready for review: ${task.title}`
-      : `PR needs work: ${task.title}`;
+      ? `PR ready for review: ${taskLabel(task)}`
+      : `PR needs work: ${taskLabel(task)}`;
 
   if (!existing) {
     const item: Item = {

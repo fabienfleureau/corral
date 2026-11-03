@@ -22,6 +22,19 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
     return new URLSearchParams(q).get("import") === "1";
   });
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [targets, setTargets] = useState<string[]>(TARGET_OPTIONS);
+  const [agentOptions, setAgentOptions] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    api
+      .listHarnesses()
+      .then((res) => {
+        const list = res.harnesses.map((h) => h.harness);
+        if (list.length > 0) setTargets(list);
+        setAgentOptions(res.harnesses.flatMap((h) => h.agents));
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     api
@@ -104,7 +117,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={repos} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={repos} targets={targets} agentOptions={agentOptions} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -163,9 +176,22 @@ function parentUrl(members: Task[], parentKey: string): string | null {
 
 // ---- one task row ----
 
-function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh: () => void }) {
+function TaskRow({
+  task,
+  repos,
+  targets,
+  agentOptions,
+  refresh,
+}: {
+  task: Task;
+  repos: Repo[];
+  targets: string[];
+  agentOptions: { id: string; name: string }[];
+  refresh: () => void;
+}) {
   const [showDispatch, setShowDispatch] = useState(false);
   const [target, setTarget] = useState(task.target || "claude");
+  const [agent, setAgent] = useState("");
   const [useWorktree, setUseWorktree] = useState(true);
   const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
   const [showComment, setShowComment] = useState(false);
@@ -196,7 +222,11 @@ function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh:
     setError(null);
     setMsg(null);
     try {
-      const result = await api.dispatchTask(task.id, { target, use_worktree: useWorktree });
+      const result = await api.dispatchTask(task.id, {
+        target,
+        use_worktree: useWorktree,
+        agent: agent || null,
+      });
       setDispatchResult(result);
       setShowDispatch(false);
       refresh();
@@ -218,7 +248,13 @@ function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh:
     <div className="task-row">
       <div className="task-main">
         <div className="task-title">
-          <span>{task.title}</span>
+          {task.title ? (
+            <span>{task.title}</span>
+          ) : (
+            <span className="muted" title="Title comes from the agent session once dispatched">
+              {firstLine(task.prompt) || "Untitled task"}
+            </span>
+          )}
           {task.jira_key && task.jira_url ? (
             <a href={task.jira_url} target="_blank" rel="noreferrer" className="meta-link" title={task.jira_url}>
               {task.jira_key}
@@ -228,10 +264,7 @@ function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh:
         </div>
         <div className="task-sub">
           <span className={`badge status-${task.status}`}>{task.status}</span>
-          <span className={`badge badge-target ${task.target ? "" : "badge-mute"}`}>
-            {task.target || "target: suggested"}
-          </span>
-          {task.target && task.target_state === "suggested" ? <span className="muted">(suggested)</span> : null}
+          {task.target ? <span className="badge badge-target">{task.target}</span> : null}
           {task.branch ? <span className="mono">{task.branch}</span> : null}
           {task.pr_url ? (
             <a href={task.pr_url} target="_blank" rel="noreferrer" className="meta-link">
@@ -285,9 +318,20 @@ function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh:
             <label className="field-inline">
               <span>Target</span>
               <select value={target} onChange={(e) => setTarget(e.target.value)}>
-                {TARGET_OPTIONS.map((t) => (
+                {targets.map((t) => (
                   <option key={t} value={t}>
                     {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-inline">
+              <span>Agent</span>
+              <select value={agent} onChange={(e) => setAgent(e.target.value)}>
+                <option value="">— none (bare harness) —</option>
+                {agentOptions.map((a) => (
+                  <option key={a.id} value={a.name}>
+                    {a.name}
                   </option>
                 ))}
               </select>
@@ -375,26 +419,27 @@ function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh:
 
 // ---- new task form ----
 
+function firstLine(text: string): string {
+  return text.trim().split("\n")[0].slice(0, 120);
+}
+
+// No title (omnigent names the session) and no target (picked at dispatch).
 function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
-  const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [repoChoice, setRepoChoice] = useState("");
   const [repoPath, setRepoPath] = useState("");
-  const [target, setTarget] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!title.trim() || busy) return;
+    if (!prompt.trim() || busy) return;
     setBusy(true);
     setError(null);
     try {
       const input: NewTaskInput = {
-        title: title.trim(),
         prompt,
         repo_path: repoChoice === "__custom__" ? repoPath.trim() : repoChoice,
-        target,
         base_branch: baseBranch.trim() || null,
       };
       await api.createTask(input);
@@ -410,16 +455,13 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
     <div className="panel-form">
       <h2 className="panel-title">New task</h2>
       <label className="field">
-        <span>Title</span>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What should the agent do?" />
-      </label>
-      <label className="field">
         <span>Prompt</span>
         <textarea
-          rows={4}
+          rows={6}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Extra context for the agent…"
+          placeholder="What should the agent do?"
+          autoFocus
         />
       </label>
       <div className="field-row">
@@ -442,24 +484,13 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
           </label>
         ) : null}
         <label className="field">
-          <span>Target</span>
-          <select value={target} onChange={(e) => setTarget(e.target.value)}>
-            <option value="">suggested</option>
-            {TARGET_OPTIONS.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
           <span>Base branch (optional)</span>
           <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
         </label>
       </div>
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
-        <button className="btn btn-primary" onClick={() => void submit()} disabled={busy || !title.trim()}>
+        <button className="btn btn-primary" onClick={() => void submit()} disabled={busy || !prompt.trim()}>
           {busy ? <Spinner /> : null}
           {busy ? "Creating…" : "Create task"}
         </button>

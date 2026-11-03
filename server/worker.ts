@@ -5,8 +5,9 @@
 
 export interface WorkerStart {
   taskId: string | null;
-  /** Human label for the session (task slug etc.). */
-  name: string;
+  /** Human label for the session (task slug etc.). null = let the backend
+   *  generate a title (omnigent names the session from its first turn). */
+  name: string | null;
   /** Source repo directory (or a direct working directory when no git request). */
   repoPath: string;
   /** Worktree request: the backend prepares the worktree (omnigent does it
@@ -14,8 +15,10 @@ export interface WorkerStart {
    *  existingWorktree: repoPath IS the worktree already (bind mode). */
   git: { branch: string; base: string | null; existingWorktree?: boolean } | null;
   prompt: string;
-  /** Harness id: "claude" | "codex" | "opencode" | custom. */
+  /** Harness id: "claude" | "codex" | "opencode" | … (bare harness by default). */
   harness: string;
+  /** Explicit agent choice (omnigent registry name/id) — null = bare harness. */
+  agent?: string | null;
   /** Model pin — null = "let the backend route it" (omnigent smart routing). */
   model: string | null;
   /** Raw per-harness reasoning value — null = backend decides. */
@@ -41,6 +44,8 @@ export interface WorkerSession {
   exit_code: number | null;
   /** Parent session address in a sub-agent tree (null = top). */
   parent: string | null;
+  /** Backend-provided session title (omnigent auto-titles untitled sessions). */
+  title?: string | null;
 }
 
 export interface WorkerElicitation {
@@ -67,6 +72,8 @@ export interface WorkerEvent {
   exit_code?: number | null;
   parent?: string | null;
   turn?: number;
+  /** Session title on created/status events — lets an untitled task adopt it. */
+  title?: string | null;
 }
 
 export interface WorkerEventSubscription {
@@ -100,5 +107,7 @@ export interface WorkerBackend {
   tree(): Promise<{ address: string; children: string[] }[]>;
   /** Where to inspect this session in the backend's own UI (null = none). */
   inspectUrl?(address: string): string | null;
+  /** Harness dimension of the backend's registry (for target pickers). */
+  harnesses?(): Promise<{ harness: string; agents: { id: string; name: string }[] }[]>;
   onEvent(cb: (e: WorkerEvent) => void): WorkerEventSubscription;
 }
