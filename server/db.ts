@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS items (
   created_ms INTEGER NOT NULL,
   updated_ms INTEGER NOT NULL,
   resolved_ms INTEGER,
-  snooze_until_ms INTEGER
+  snooze_until_ms INTEGER,
+  elicitation TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_task ON items(task_id);
@@ -105,6 +106,7 @@ export class Db {
     if (!names.has("context")) this.raw.exec(`ALTER TABLE items ADD COLUMN context TEXT NOT NULL DEFAULT ''`);
     if (!names.has("options")) this.raw.exec(`ALTER TABLE items ADD COLUMN options TEXT`);
     if (!names.has("ready")) this.raw.exec(`ALTER TABLE items ADD COLUMN ready INTEGER NOT NULL DEFAULT 1`);
+    if (!names.has("elicitation")) this.raw.exec(`ALTER TABLE items ADD COLUMN elicitation TEXT`);
     const taskCols = this.raw.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
     const taskNames = new Set(taskCols.map((c) => c.name));
     if (!taskNames.has("pr_url")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
@@ -164,12 +166,12 @@ export class Db {
     this.raw
       .prepare(
         `INSERT INTO items (id, kind, status, title, summary, body, context, options, ready, source_ref, task_id, structured,
-          created_ms, updated_ms, resolved_ms, snooze_until_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          created_ms, updated_ms, resolved_ms, snooze_until_ms, elicitation)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         i.id, i.kind, i.status, i.title, i.summary, i.body, i.context, i.options, i.ready, i.source_ref, i.task_id, i.structured,
-        i.created_ms, i.updated_ms, i.resolved_ms, i.snooze_until_ms,
+        i.created_ms, i.updated_ms, i.resolved_ms, i.snooze_until_ms, i.elicitation ?? null,
       );
   }
 

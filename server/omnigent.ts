@@ -119,7 +119,9 @@ function normalizeElicitations(raw: unknown): WorkerElicitation[] {
     const choices = Array.isArray(rawChoices)
       ? rawChoices.map((c) => (typeof c === "string" ? c : str((c as Record<string, unknown>)?.label) ?? str((c as Record<string, unknown>)?.value) ?? JSON.stringify(c))).slice(0, 8)
       : [];
-    out.push({ id, kind, prompt: prompt.slice(0, 4000), choices });
+    const schema = (params.requestedSchema ?? params.requested_schema ?? null) as { properties?: Record<string, unknown> } | null;
+    const field = schema?.properties ? (Object.keys(schema.properties)[0] ?? null) : null;
+    out.push({ id, kind, prompt: prompt.slice(0, 4000), choices, field });
   }
   return out;
 }
@@ -129,6 +131,7 @@ export class OmnigentBackend implements WorkerBackend {
   private cfg: OmnigentConfig;
   private last = new Map<string, string>(); // address -> signature of status/elicitations
   private timer: ReturnType<typeof setInterval> | null = null;
+  private ticking = false; // one tick at a time: an overlapping tick's stale view would emit false "finished"
   private subs = new Set<(e: WorkerEvent) => void>();
   private taskIds = new Map<string, string | null>();
 
@@ -470,6 +473,16 @@ export class OmnigentBackend implements WorkerBackend {
   // ---- events via polling ----
 
   private async tick(): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      await this.pollOnce();
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  private async pollOnce(): Promise<void> {
     let sessions: WorkerSession[] = [];
     try {
       sessions = await this.list();

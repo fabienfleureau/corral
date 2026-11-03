@@ -1,10 +1,10 @@
 // PR/MR readiness: Corral verifies — from the platform APIs — that a task's PR
 // is actually ready for human review (exists, threads resolved, checks green,
-// mergeable) before it is shown as such. And when review comments appear,
-// Corral feeds them back to the task's agent automatically (the PR loop in
+// mergeable) before it is shown as such. And when review comments or merge
+// conflicts appear, Corral feeds them back to the task's agent automatically (the PR loop in
 // skills/pr-loop.md) so the human only ever sees "ready for review".
 
-import { execFileSync } from "node:child_process";
+import { mapLimit, runAsync } from "./exec.ts";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
@@ -31,10 +31,14 @@ export interface PrInfo {
   changed_files: number;
   /** MERGEABLE | CONFLICTING | UNKNOWN (null when the platform says nothing) */
   mergeable: string | null;
+  /** Branch the PR merges into (rebase target when conflicting). */
+  base_ref: string | null;
   review_decision: string | null;
   checks: { total: number; failed: number; pending: boolean };
   /** Unresolved review threads — the "comments to manage". */
   threads: PrThread[];
+  /** False when thread data could not be fetched: readiness stays pending. */
+  threads_known?: boolean;
 }
 
 export interface PrReady {
@@ -49,9 +53,11 @@ export function prReady(pr: PrInfo): PrReady {
   if (pr.threads.length > 0) {
     reasons.push(`${pr.threads.length} unresolved review comment${pr.threads.length === 1 ? "" : "s"}`);
   }
+  if (pr.threads_known === false) reasons.push("review comments unavailable");
   if (pr.checks.pending) reasons.push("checks still running");
   if (pr.checks.failed > 0) reasons.push(`${pr.checks.failed} failing check${pr.checks.failed === 1 ? "" : "s"}`);
   if (pr.mergeable === "CONFLICTING") reasons.push("merge conflicts");
+  else if (pr.state === "OPEN" && pr.mergeable !== "MERGEABLE") reasons.push("mergeability unknown");
   if (pr.review_decision === "CHANGES_REQUESTED") reasons.push("changes requested");
   return { ready: reasons.length === 0, reasons };
 }
@@ -76,18 +82,13 @@ export function prItemBody(pr: PrInfo): string {
 
 // ---- discovery ----
 
-function run(cmd: string, args: string[], cwd: string): string {
-  return execFileSync(cmd, args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    cwd,
-    timeout: 20_000, // never block the event loop on a stuck gh/glab call
-  }).trim();
+function run(cmd: string, args: string[], cwd: string): Promise<string> {
+  return runAsync(cmd, args, { cwd, timeout: 20_000 });
 }
 
-function repoSlug(repoPath: string): string | null {
+async function repoSlug(repoPath: string): Promise<string | null> {
   try {
-    const url = run("git", ["remote", "get-url", "origin"], repoPath);
+    const url = await run("git", ["remote", "get-url", "origin"], repoPath);
     const m = url.match(/[:/]([^:/]+)\/([^:/]+?)(?:\.git)?$/);
     return m ? `${m[1]}/${m[2]}` : null;
   } catch {
@@ -112,18 +113,27 @@ function summarizeChecks(rollup: unknown[]): PrInfo["checks"] {
   return { total: rollup.length, failed, pending: pending > 0 };
 }
 
-function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
-  const out = run(
+/** GitLab head pipeline status -> checks summary (no pipeline = no checks). */
+export function gitlabPipelineChecks(status: string | null | undefined): PrInfo["checks"] {
+  if (!status) return { total: 0, failed: 0, pending: false };
+  if (status === "success" || status === "skipped" || status === "manual") return { total: 1, failed: 0, pending: false };
+  if (status === "failed" || status === "canceled") return { total: 1, failed: 1, pending: false };
+  return { total: 1, failed: 0, pending: true }; // created, pending, running, preparing, scheduled, …
+}
+
+async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | null> {
+  const out = await run(
     "gh",
     [
       "pr", "view", branch,
-      "--json", "url,title,state,number,body,additions,deletions,changedFiles,mergeable,reviewDecision,statusCheckRollup",
+      "--json", "url,title,state,number,body,additions,deletions,changedFiles,mergeable,baseRefName,reviewDecision,statusCheckRollup",
     ],
     repoPath,
   );
   const d = JSON.parse(out) as Record<string, unknown>;
-  const slug = repoSlug(repoPath);
-  let threads: PrThread[] = [];
+  const slug = await repoSlug(repoPath);
+  const threads: PrThread[] = [];
+  let threadsKnown = false;
   if (slug) {
     // reviewThreads (unresolved) is only on GraphQL.
     const [owner, name] = slug.split("/");
@@ -131,10 +141,11 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
       `query{repository(owner:"${owner}",name:"${name}"){pullRequest(number:${Number(d.number)}){` +
       `reviewThreads(first:50){nodes{id isResolved comments(first:10){nodes{author{login} body}}}}}}}`;
     try {
-      const gql = JSON.parse(run("gh", ["api", "graphql", "-f", `query=${query}`], repoPath)) as {
+      const gql = JSON.parse(await run("gh", ["api", "graphql", "-f", `query=${query}`], repoPath)) as {
         data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: unknown[] } } } };
       };
-      const nodes = gql.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+      const nodes = gql.data?.repository?.pullRequest?.reviewThreads?.nodes;
+      if (!nodes) throw new Error("no thread data");
       for (const raw of nodes) {
         const t = raw as {
           id?: string;
@@ -157,8 +168,9 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
           body: String(first?.body ?? "").slice(0, 2000),
         });
       }
+      threadsKnown = true;
     } catch {
-      /* GraphQL unavailable: treat as no thread data */
+      /* GraphQL unavailable: readiness stays pending (threads_known=false) */
     }
   }
   return {
@@ -171,81 +183,82 @@ function findPrGitHub(repoPath: string, branch: string): PrInfo | null {
     deletions: Number(d.deletions ?? 0),
     changed_files: Number(d.changedFiles ?? 0),
     mergeable: d.mergeable ? String(d.mergeable).toUpperCase() : null,
+    base_ref: d.baseRefName ? String(d.baseRefName) : null,
     review_decision: d.reviewDecision ? String(d.reviewDecision).toUpperCase() : null,
     checks: summarizeChecks((d.statusCheckRollup as unknown[]) ?? []),
     threads,
+    threads_known: threadsKnown,
   };
 }
 
-function findPrGitLab(repoPath: string, branch: string): PrInfo | null {
-  // Best-effort: glab list -> api changes/discussions for stats and threads.
-  const out = run("glab", ["mr", "list", "--source-branch", branch, "--all", "--output", "json"], repoPath);
+async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | null> {
+  const out = await run("glab", ["mr", "list", "--source-branch", branch, "--all", "--output", "json"], repoPath);
   const list = JSON.parse(out) as Record<string, unknown>[];
   if (list.length === 0) return null;
   const mr = list[0];
   const iid = Number(mr.iid ?? 0);
-  let description = String(mr.description ?? "");
+  const api = (path: string) => run("glab", ["api", `projects/:id/merge_requests/${iid}${path}`], repoPath);
+
+  // Each fetch is independent: a failing one degrades only its own field.
+  const [full, changes, discussions] = await Promise.all([
+    api("").then((s) => JSON.parse(s) as { description?: string; head_pipeline?: { status?: string } | null }).catch(() => null),
+    api("/changes").then((s) => JSON.parse(s) as { changes?: { diff?: string }[] }).catch(() => null),
+    api("/discussions?per_page=100")
+      .then((s) => JSON.parse(s) as {
+        id?: string;
+        notes?: { resolvable?: boolean; resolved?: boolean; author?: { username?: string }; body?: string }[];
+      }[])
+      .catch(() => null),
+  ]);
+
   let additions = 0;
   let deletions = 0;
-  let changed = 0;
-  const threads: PrThread[] = [];
-  try {
-    const changes = JSON.parse(run("glab", ["api", `projects/:id/merge_requests/${iid}/changes`], repoPath)) as {
-      changes?: { additions?: string; deletions?: string }[];
-    };
-    const diff = changes.changes ?? [];
-    changed = diff.length;
-    for (const c of diff) {
-      additions += (c.additions ?? "").split("\n").filter((l) => l.startsWith("+")).length || 0;
-      deletions += (c.deletions ?? "").split("\n").filter((l) => l.startsWith("-")).length || 0;
+  const diff = changes?.changes ?? [];
+  for (const c of diff) {
+    for (const line of (c.diff ?? "").split("\n")) {
+      if (line.startsWith("+") && !line.startsWith("+++")) additions++;
+      else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
     }
-    if (!description) {
-      const full = JSON.parse(run("glab", ["api", `projects/:id/merge_requests/${iid}`], repoPath)) as {
-        description?: string;
-      };
-      description = full.description ?? "";
-    }
-    const discussions = JSON.parse(run("glab", ["api", `projects/:id/merge_requests/${iid}/discussions`], repoPath)) as {
-      id?: string;
-      notes?: { resolvable?: boolean; resolved?: boolean; author?: { username?: string }; body?: string }[];
-    }[];
-    for (const d of discussions) {
-      const note = d.notes?.[0];
-      if (!note?.resolvable || note.resolved) continue;
-      threads.push({
-        id: String(d.id ?? randomUUID()),
-        author: String(note.author?.username ?? "reviewer"),
-        body: String(note.body ?? "").slice(0, 2000),
-      });
-    }
-  } catch {
-    /* degraded metadata is fine */
   }
+  const threads: PrThread[] = [];
+  for (const d of discussions ?? []) {
+    const note = d.notes?.[0];
+    if (!note?.resolvable || note.resolved) continue;
+    threads.push({
+      id: String(d.id ?? randomUUID()),
+      author: String(note.author?.username ?? "reviewer"),
+      body: String(note.body ?? "").slice(0, 2000),
+    });
+  }
+  // Pipeline unknown (MR fetch failed) = pending, never "no checks".
+  const checks = full ? gitlabPipelineChecks(full.head_pipeline?.status) : { total: 1, failed: 0, pending: true };
   return {
     url: String(mr.web_url ?? ""),
     title: String(mr.title ?? ""),
     state: String(mr.state ?? "opened").toUpperCase() === "OPENED" ? "OPEN" : String(mr.state).toUpperCase(),
     number: iid,
-    description,
+    description: String(mr.description ?? "") || full?.description || "",
     additions,
     deletions,
-    changed_files: changed,
-    mergeable: null,
+    changed_files: diff.length,
+    mergeable: mr.has_conflicts === true ? "CONFLICTING" : mr.has_conflicts === false ? "MERGEABLE" : null,
+    base_ref: mr.target_branch ? String(mr.target_branch) : null,
     review_decision: null,
-    checks: { total: 0, failed: 0, pending: false },
+    checks,
     threads,
+    threads_known: discussions !== null,
   };
 }
 
-export function findPr(repoPath: string, branch: string): PrInfo | null {
+export async function findPr(repoPath: string, branch: string): Promise<PrInfo | null> {
   if (!repoPath || !branch) return null;
   try {
-    return findPrGitHub(repoPath, branch);
+    return await findPrGitHub(repoPath, branch);
   } catch {
     /* not GitHub or gh missing — try GitLab */
   }
   try {
-    return findPrGitLab(repoPath, branch);
+    return await findPrGitLab(repoPath, branch);
   } catch {
     return null;
   }
@@ -257,7 +270,7 @@ function threadSignature(pr: PrInfo): string {
   return pr.threads.map((t) => t.id).sort().join(",");
 }
 
-function commentsMessage(pr: PrInfo): string {
+function commentsSection(pr: PrInfo): string {
   const parts = pr.threads.map(
     (t, i) => `[${i + 1}] ${t.author} (thread ${t.id}):\n${t.body}`,
   );
@@ -268,34 +281,67 @@ function commentsMessage(pr: PrInfo): string {
     "  gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"<thread id>\"}){thread{isResolved}}}'",
     "run your tests, commit and push. Do not ask for permission. Do not merge the PR.",
     "",
-    `PR: ${pr.url}`,
-    "",
     ...parts,
   ].join("\n");
 }
 
-/** Spawn a fresh agent on the task's worktree to handle review comments,
+function conflictSection(pr: PrInfo, task: Task): string {
+  // The base ref lands in a shell command the agent runs: allow plain ref
+  // names only (git permits `;`, `$`, backticks in branch names).
+  const safe = (r: string | null) => (r && /^[A-Za-z0-9._][A-Za-z0-9._\/-]*$/.test(r) ? r : null);
+  const base = safe(pr.base_ref) ?? safe(task.base_branch) ?? "main";
+  return [
+    `PR merge conflicts need handling — the PR no longer merges cleanly into \`${base}\`.`,
+    "Rebase and resolve them, automatically, without asking:",
+    `  git fetch origin && git rebase origin/${base}`,
+    "resolve each conflict keeping the intent of both sides (git add, git rebase --continue),",
+    "run your tests, then push: git push --force-with-lease.",
+    "Only if a conflict needs a product decision you cannot make, report a question for that one.",
+    "Do not merge the PR.",
+  ].join("\n");
+}
+
+/** What to push to the agent: review comments, merge conflicts, or both. */
+export interface PrWork {
+  comments: boolean;
+  conflict: boolean;
+}
+
+function workMessage(pr: PrInfo, task: Task, work: PrWork): string {
+  const sections: string[] = [];
+  if (work.conflict) sections.push(conflictSection(pr, task));
+  if (work.comments) sections.push(commentsSection(pr));
+  return [sections.join("\n\n"), "", `PR: ${pr.url}`].join("\n");
+}
+
+/** Spawn a fresh agent on the task's worktree to handle PR work,
  *  seeded with the handoff document from the original run. */
-async function respawnForComments(
+async function respawnForWork(
   db: Db,
   cfg: Config,
   backend: WorkerBackend,
   task: Task,
-  pr: PrInfo,
+  message: string,
+  work: PrWork,
 ): Promise<string | null> {
-  const target = task.target && cfg.agents[task.target] ? task.target : "claude";
+  // Keep the task's harness: dispatch accepts registry harnesses that are
+  // not in cfg.agents, so checking that map would silently fall back.
+  const target = task.target || "claude";
+  const what = [work.conflict ? "merge conflicts" : "", work.comments ? "review comments" : ""]
+    .filter(Boolean)
+    .join(" and ");
   const prompt = [
-    `Task follow-up: review comments on your PR for "${task.title}".`,
+    `Task follow-up: ${what} on your PR for "${task.title}".`,
     "",
     task.handoff ? `## Handoff from the previous run\n\n${task.handoff}\n` : "",
-    commentsMessage(pr),
+    message,
     "",
     "---",
     questionConvention(cfg, task),
   ].join("\n");
   const session = await backend.start({
     taskId: task.id,
-    name: `corral-${slugify(task.title, 20)}-review`,
+    name: `corral-${slugify(task.title, 20)}-${work.comments ? "review" : "rebase"}`,
     repoPath: task.worktree_path ?? task.repo_path,
     git: task.branch
       ? { branch: task.branch, base: null, existingWorktree: Boolean(task.worktree_path) }
@@ -323,14 +369,15 @@ async function respawnForComments(
   return session.address;
 }
 
-async function deliverComments(
+async function deliverWork(
   db: Db,
   cfg: Config,
   backend: WorkerBackend,
   task: Task,
   pr: PrInfo,
+  work: PrWork,
 ): Promise<string | null> {
-  const message = commentsMessage(pr);
+  const message = workMessage(pr, task, work);
   // Live session? Push into it (its prompt includes the PR loop skill).
   if (task.terminal_address) {
     try {
@@ -345,11 +392,36 @@ async function deliverComments(
   }
   // Otherwise respawn the agent on the worktree so the loop still runs.
   try {
-    return await respawnForComments(db, cfg, backend, task, pr);
+    return await respawnForWork(db, cfg, backend, task, message, work);
   } catch {
     return null;
   }
 }
+
+interface PrMeta {
+  /** Thread signature last pushed to the agent. */
+  pushed?: string;
+  /** Set once conflicts were pushed; cleared when the PR merges cleanly again. */
+  conflict?: boolean;
+}
+
+function readMeta(raw: string | null): PrMeta {
+  try {
+    return JSON.parse(raw ?? "{}") as PrMeta;
+  } catch {
+    return {};
+  }
+}
+
+function patchMeta(db: Db, taskId: string, patch: PrMeta): void {
+  const meta = { ...readMeta(db.getTask(taskId)?.pr_meta ?? null), ...patch };
+  if (meta.conflict === false) delete meta.conflict;
+  db.updateTask(taskId, { pr_meta: JSON.stringify(meta) });
+}
+
+/** Tasks with a delivery underway: blocks a concurrent sync (periodic,
+ *  /check-pr, finish event) from respawning a second agent. */
+const delivering = new Set<string>();
 
 // ---- sync ----
 
@@ -357,7 +429,7 @@ export interface SyncOptions {
   backend?: WorkerBackend;
   cfg?: Config;
   /** Injected for tests. */
-  finder?: (repoPath: string, branch: string) => PrInfo | null;
+  finder?: (repoPath: string, branch: string) => PrInfo | null | Promise<PrInfo | null>;
 }
 
 /**
@@ -366,12 +438,15 @@ export interface SyncOptions {
  *  - one inbox item (kind "pr") per task — "ready for review" only when the
  *    gate passes; otherwise "needs work" with the reasons,
  *  - unresolved comments are fed to the agent automatically (once per set),
+ *  - merge conflicts are fed to the agent as a rebase request (once per episode),
  *  - the item auto-resolves when the PR merges/closes.
  */
-export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {}): PrInfo | null {
+export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOptions = {}): Promise<PrInfo | null> {
   const finder = opts.finder ?? findPr;
-  const pr = finder(task.repo_path, task.branch ?? "");
+  const pr = await finder(staleTask.repo_path, staleTask.branch ?? "");
   if (!pr) return null;
+  // The platform calls take seconds: work from the task as it is now.
+  const task = db.getTask(staleTask.id) ?? staleTask;
 
   if (task.pr_url !== pr.url) {
     db.updateTask(task.id, { pr_url: pr.url });
@@ -387,20 +462,42 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
   const merged = pr.state === "MERGED";
   const doneStatus: Item["status"] = merged ? "archived" : "resolved";
 
-  // The loop: comments to manage go back to the agent — automatically.
-  if (!shouldResolve && pr.threads.length > 0 && opts.backend && opts.cfg) {
-    const meta = JSON.parse(task.pr_meta ?? "{}") as { pushed?: string };
+  // The loop: comments and merge conflicts go back to the agent —
+  // automatically, once per comment set / conflict episode, in one message.
+  const meta = readMeta(task.pr_meta);
+  const conflicting = !shouldResolve && pr.mergeable === "CONFLICTING";
+  // End the episode only on confirmed mergeability or closure: GitHub reports
+  // UNKNOWN while recalculating after a push.
+  if (meta.conflict && (shouldResolve || pr.mergeable === "MERGEABLE")) {
+    patchMeta(db, task.id, { conflict: false });
+  }
+  if (!shouldResolve && opts.backend && opts.cfg && !delivering.has(task.id)) {
     const sig = threadSignature(pr);
-    if (meta.pushed !== sig) {
-      void deliverComments(db, opts.cfg, opts.backend, task, pr)
+    const work: PrWork = {
+      comments: pr.threads.length > 0 && meta.pushed !== sig,
+      conflict: conflicting && !meta.conflict,
+    };
+    if (work.comments || work.conflict) {
+      delivering.add(task.id);
+      void deliverWork(db, opts.cfg, opts.backend, task, pr, work)
         .then((address) => {
-          db.updateTask(task.id, { pr_meta: JSON.stringify({ pushed: sig }) });
-          db.recordMetric("pr.comments_pushed", task.id, {
-            threads: pr.threads.length,
-            to: address ?? "none",
+          if (!address) return; // not delivered: retry on the next sync
+          patchMeta(db, task.id, {
+            ...(work.comments ? { pushed: sig } : {}),
+            ...(work.conflict ? { conflict: true } : {}),
           });
+          if (work.comments) {
+            db.recordMetric("pr.comments_pushed", task.id, {
+              threads: pr.threads.length,
+              to: address ?? "none",
+            });
+          }
+          if (work.conflict) {
+            db.recordMetric("pr.conflicts_pushed", task.id, { base: pr.base_ref, to: address ?? "none" });
+          }
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => delivering.delete(task.id));
     }
   }
 
@@ -438,6 +535,9 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
 
   const patch: Partial<Item> = {};
   if (existing.title !== title) patch.title = title;
+  // Follow respawns so inbox replies reach the current session.
+  const address = db.getTask(task.id)?.terminal_address ?? null;
+  if (address && existing.source_ref !== address) patch.source_ref = address;
   const body = prItemBody(pr);
   if (existing.body !== body) patch.body = body;
   const summary = ready && !shouldResolve ? "ready for review" : reasons.join(", ") || "ready";
@@ -480,24 +580,25 @@ function archiveMergedTask(db: Db, hub: Hub, task: Task): void {
 }
 
 let lastSyncAll = 0;
+let syncAllRunning = false;
 
-/** Sync every task that may have a PR. minIntervalMs throttles bursts. */
-export function syncAllPrs(
+/** Sync every task that may have a PR. minIntervalMs throttles bursts;
+ *  single-flight, a few tasks at a time. */
+export async function syncAllPrs(
   db: Db,
   hub: Hub,
   opts: SyncOptions & { knownPrsOnly?: boolean } = {},
   minIntervalMs = 30_000,
-): boolean {
+): Promise<boolean> {
   const now = Date.now();
-  if (now - lastSyncAll < minIntervalMs) return false;
+  if (syncAllRunning || now - lastSyncAll < minIntervalMs) return false;
   lastSyncAll = now;
-  const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url);
-  for (const task of tasks) {
-    try {
-      syncTaskPr(db, hub, task, opts);
-    } catch {
-      /* best effort */
-    }
+  syncAllRunning = true;
+  try {
+    const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url);
+    await mapLimit(tasks, 4, (task) => syncTaskPr(db, hub, task, opts).catch(() => null));
+  } finally {
+    syncAllRunning = false;
   }
   return true;
 }

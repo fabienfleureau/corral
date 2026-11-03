@@ -38,23 +38,12 @@ const state: AppState = { db, cfg, backend, capture, jira, hub };
 const subscription = backend.onEvent((e) => void capture.handleEvent(e));
 
 // PR discovery + the PR loop: find review links, feed comments back to agents.
-setInterval(() => syncAllPrs(db, hub, { backend, cfg }, 0), 120_000);
+setInterval(() => void syncAllPrs(db, hub, { backend, cfg }, 0).catch(() => undefined), 120_000);
 
 // Pull Requests page: refresh where the human is awaited (GitHub + GitLab).
-setTimeout(() => {
-  try {
-    refreshPulls();
-  } catch {
-    /* best effort */
-  }
-}, 3_000);
-setInterval(() => {
-  try {
-    refreshPulls();
-  } catch {
-    /* best effort */
-  }
-}, 180_000);
+// Best effort; each refresh broadcasts "pulls.updated" so open pages reload.
+setTimeout(() => void refreshPulls(hub).catch(() => undefined), 3_000);
+setInterval(() => void refreshPulls(hub).catch(() => undefined), 180_000);
 
 const server = createHttpServer(state);
 server.listen(cfg.port, cfg.host, () => {

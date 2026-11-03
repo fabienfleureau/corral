@@ -57,6 +57,9 @@ export interface Item {
   structured: number;
   /** For pr items: 1 = the review gate passes (threads resolved, checks green). */
   ready: number;
+  /** Captured from a backend elicitation: JSON {id, kind}. Replies answer it
+   *  through resolveElicitation instead of a new conversation message. */
+  elicitation?: string | null;
   created_ms: number;
   updated_ms: number;
   resolved_ms: number | null;

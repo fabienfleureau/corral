@@ -6,7 +6,8 @@
 //          (a freshly created PR is orange until automated reviews pass)
 //   green  checks green, reviews passed, nothing unresolved
 
-import { execFileSync } from "node:child_process";
+import type { Hub } from "./capture.ts";
+import { mapLimit, runAsync } from "./exec.ts";
 
 export type PullColor = "green" | "orange" | "red";
 
@@ -28,13 +29,12 @@ export interface Pull {
   updated_ms: number;
 }
 
-function run(cmd: string, args: string[], timeout = 20_000): string {
-  return execFileSync(cmd, args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout,
-  }).trim();
+function run(cmd: string, args: string[], timeout = 20_000): Promise<string> {
+  return runAsync(cmd, args, { timeout });
 }
+
+/** Per-PR platform calls in flight at once. */
+const CONCURRENCY = 4;
 
 function epochMs(v: unknown): number {
   const t = Date.parse(String(v ?? ""));
@@ -43,9 +43,9 @@ function epochMs(v: unknown): number {
 
 // ---- GitHub ----
 
-function githubLogin(): string | null {
+async function githubLogin(): Promise<string | null> {
   try {
-    return (JSON.parse(run("gh", ["api", "user"])) as { login?: string }).login ?? null;
+    return (JSON.parse(await run("gh", ["api", "user"])) as { login?: string }).login ?? null;
   } catch {
     return null;
   }
@@ -63,7 +63,6 @@ interface GhPullBrief {
   statusCheckRollup: unknown[];
   mergeable: string;
   updatedAt: string;
-  repository?: { nameWithOwner?: string };
 }
 
 function colorize(input: {
@@ -73,12 +72,14 @@ function colorize(input: {
   totalChecks: number;
   reviewCount: number;
   changesRequested: boolean;
-  unresolvedThreads: number;
+  /** null = thread data unavailable. */
+  unresolvedThreads: number | null;
 }): { color: PullColor; reason: string } {
   if (input.changesRequested) return { color: "red", reason: "changes requested" };
   if (input.failingChecks > 0) return { color: "red", reason: `${input.failingChecks} failing check${input.failingChecks === 1 ? "" : "s"}` };
   if (input.draft) return { color: "orange", reason: "draft" };
   if (input.pendingChecks > 0) return { color: "orange", reason: "checks running" };
+  if (input.unresolvedThreads === null) return { color: "orange", reason: "review comments unavailable" };
   if (input.unresolvedThreads > 0) return { color: "orange", reason: `${input.unresolvedThreads} unresolved review comment${input.unresolvedThreads === 1 ? "" : "s"}` };
   if (input.totalChecks === 0 && input.reviewCount === 0) {
     // The "freshly created" rule: no automated review has passed yet.
@@ -105,18 +106,26 @@ function summarizeChecks(rollup: unknown[]): { failing: number; pending: number;
   return { failing, pending, total: rollup.length };
 }
 
-function githubUnresolvedThreads(url: string): number {
+/** "owner/repo" from https://github.com/owner/repo/pull/123 */
+export function githubRepoFromUrl(url: string): string {
+  const m = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\//);
+  return m ? `${m[1]}/${m[2]}` : "";
+}
+
+/** Unresolved, unanswered threads; null when the query fails. */
+async function githubUnresolvedThreads(url: string): Promise<number | null> {
   // https://github.com/owner/repo/pull/123
   const m = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-  if (!m) return 0;
+  if (!m) return null;
   const query =
     `query{repository(owner:"${m[1]}",name:"${m[2]}"){pullRequest(number:${Number(m[3])}){` +
     `reviewThreads(first:50){nodes{isResolved comments(first:5){nodes{author{login}}}}}}}`;
   try {
-    const gql = JSON.parse(run("gh", ["api", "graphql", "-f", `query=${query}`])) as {
+    const gql = JSON.parse(await run("gh", ["api", "graphql", "-f", `query=${query}`])) as {
       data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: { isResolved?: boolean; comments?: { nodes?: { author?: { login?: string } }[] } }[] } } } };
     };
-    const nodes = gql.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    const nodes = gql.data?.repository?.pullRequest?.reviewThreads?.nodes;
+    if (!nodes) return null;
     let unresolved = 0;
     for (const t of nodes) {
       if (t.isResolved) continue;
@@ -128,78 +137,71 @@ function githubUnresolvedThreads(url: string): number {
     }
     return unresolved;
   } catch {
-    return 0;
+    return null;
   }
 }
 
-function listGitHub(): Pull[] {
-  const login = githubLogin();
-  if (!login) return [];
-  const urls = new Set<string>();
-  for (const q of [
-    `gh search prs --review-requested=${login} --state=open --json url --limit 50`,
-  ]) {
-    try {
-      for (const r of JSON.parse(run("gh", q.split(" ").slice(1))) as { url: string }[]) urls.add(r.url);
-    } catch {
-      /* search unavailable */
-    }
-  }
+async function searchUrls(args: string[]): Promise<string[]> {
   try {
-    for (const r of JSON.parse(run("gh", ["search", "prs", `--author=${login}`, "--state=open", "--json", "url", "--limit", "50"])) as { url: string }[]) {
-      urls.add(r.url);
-    }
+    return (JSON.parse(await run("gh", ["search", "prs", ...args, "--state=open", "--json", "url", "--limit", "50"])) as { url: string }[]).map((r) => r.url);
   } catch {
-    /* search unavailable */
+    return []; // search unavailable
   }
+}
 
-  const out: Pull[] = [];
-  for (const url of urls) {
-    try {
-      const d = JSON.parse(
-        run("gh", [
-          "pr", "view", url,
-          "--json", "title,url,number,state,isDraft,author,reviewDecision,reviews,statusCheckRollup,mergeable,updatedAt,repository",
-        ]),
-      ) as GhPullBrief;
-      const checks = summarizeChecks(d.statusCheckRollup ?? []);
-      const { color, reason } = colorize({
-        draft: Boolean(d.isDraft),
-        failingChecks: checks.failing,
-        pendingChecks: checks.pending,
-        totalChecks: checks.total,
-        reviewCount: (d.reviews ?? []).length,
-        changesRequested: d.reviewDecision === "CHANGES_REQUESTED",
-        unresolvedThreads: githubUnresolvedThreads(d.url),
-      });
-      const author = d.author?.login ?? "";
-      out.push({
-        id: d.url,
-        host: "github",
-        number: Number(d.number) || Number(d.url.match(/\/pull\/(\d+)/)?.[1] ?? 0),
-        title: d.title,
-        url: d.url,
-        repo: d.repository?.nameWithOwner ?? "",
-        state: d.isDraft ? "draft" : d.state.toLowerCase(),
-        author,
-        isMine: author === login,
-        awaitingMe: true, // discovered via review-requested or author
-        color,
-        reason,
-        updated_ms: epochMs(d.updatedAt),
-      });
-    } catch {
-      /* skip unreadable PR */
-    }
+async function githubPull(url: string, login: string): Promise<Pull | null> {
+  try {
+    const d = JSON.parse(
+      await run("gh", [
+        "pr", "view", url,
+        "--json", "title,url,number,state,isDraft,author,reviewDecision,reviews,statusCheckRollup,mergeable,updatedAt",
+      ]),
+    ) as GhPullBrief;
+    const checks = summarizeChecks(d.statusCheckRollup ?? []);
+    const { color, reason } = colorize({
+      draft: Boolean(d.isDraft),
+      failingChecks: checks.failing,
+      pendingChecks: checks.pending,
+      totalChecks: checks.total,
+      reviewCount: (d.reviews ?? []).length,
+      changesRequested: d.reviewDecision === "CHANGES_REQUESTED",
+      unresolvedThreads: await githubUnresolvedThreads(d.url),
+    });
+    const author = d.author?.login ?? "";
+    return {
+      id: d.url,
+      host: "github",
+      number: Number(d.number) || Number(d.url.match(/\/pull\/(\d+)/)?.[1] ?? 0),
+      title: d.title,
+      url: d.url,
+      repo: githubRepoFromUrl(d.url),
+      state: d.isDraft ? "draft" : d.state.toLowerCase(),
+      author,
+      isMine: author === login,
+      awaitingMe: true, // discovered via review-requested or author
+      color,
+      reason,
+      updated_ms: epochMs(d.updatedAt),
+    };
+  } catch {
+    return null; // skip unreadable PR
   }
-  return out;
+}
+
+async function listGitHub(): Promise<Pull[]> {
+  const login = await githubLogin();
+  if (!login) return [];
+  const found = await Promise.all([searchUrls([`--review-requested=${login}`]), searchUrls([`--author=${login}`])]);
+  const urls = [...new Set(found.flat())];
+  const pulls = await mapLimit(urls, CONCURRENCY, (url) => githubPull(url, login));
+  return pulls.filter((p): p is Pull => p !== null);
 }
 
 // ---- GitLab ----
 
-function gitlabLogin(): string | null {
+async function gitlabLogin(): Promise<string | null> {
   try {
-    return (JSON.parse(run("glab", ["api", "user"])) as { username?: string }).username ?? null;
+    return (JSON.parse(await run("glab", ["api", "user"])) as { username?: string }).username ?? null;
   } catch {
     return null;
   }
@@ -209,6 +211,7 @@ interface GlabMR {
   title: string;
   web_url: string;
   iid?: number;
+  project_id?: number;
   state: string;
   draft?: boolean;
   work_in_progress?: boolean;
@@ -219,69 +222,84 @@ interface GlabMR {
   updated_at: string;
 }
 
-function listGitLab(): Pull[] {
-  const login = gitlabLogin();
+async function gitlabPull(mr: GlabMR, login: string): Promise<Pull> {
+  const draft = Boolean(mr.draft ?? mr.work_in_progress);
+  const base = `projects/${mr.project_id}/merge_requests/${mr.iid}`;
+  // The list endpoint carries no pipeline and no approvals: fetch both.
+  const [full, approvals] = await Promise.all([
+    run("glab", ["api", base]).then((s) => JSON.parse(s) as GlabMR).catch(() => null),
+    run("glab", ["api", `${base}/approvals`])
+      .then((s) => JSON.parse(s) as { approved_by?: unknown[] })
+      .catch(() => null),
+  ]);
+  const pipeline = full ? (full.head_pipeline?.status ?? null) : "unknown";
+  const failing = pipeline === "failed" || pipeline === "canceled";
+  const pending = pipeline !== null && !failing && pipeline !== "success" && pipeline !== "skipped" && pipeline !== "manual";
+  const unresolved = mr.blocking_discussions_resolved === false ? 1 : 0;
+  const { color, reason } = colorize({
+    draft,
+    failingChecks: failing ? 1 : 0,
+    pendingChecks: pending ? 1 : 0,
+    totalChecks: pipeline ? 1 : 0,
+    reviewCount: approvals?.approved_by?.length ?? 0,
+    changesRequested: full?.detailed_merge_status === "requested_changes",
+    unresolvedThreads: unresolved,
+  });
+  const author = mr.author?.username ?? "";
+  return {
+    id: mr.web_url,
+    host: "gitlab",
+    number: Number(mr.iid) || Number(mr.web_url.match(/merge_requests\/(\d+)/)?.[1] ?? 0),
+    title: mr.title,
+    url: mr.web_url,
+    repo: mr.web_url.replace(/^https?:\/\/[^/]+\//, "").replace(/\/-\/merge_requests\/.*$/, ""),
+    state: draft ? "draft" : mr.state.toLowerCase() === "opened" ? "open" : mr.state.toLowerCase(),
+    author,
+    isMine: author === login,
+    awaitingMe: true,
+    color,
+    reason: pipeline ? reason : reason === "reviewed, no checks configured" ? "no pipeline yet" : reason,
+    updated_ms: epochMs(mr.updated_at),
+  };
+}
+
+async function listGitLab(): Promise<Pull[]> {
+  const login = await gitlabLogin();
   if (!login) return [];
   const seen = new Map<string, GlabMR>();
-  for (const q of [
-    `merge_requests?scope=all&state=opened&author_username=${login}&per_page=50`,
-    `merge_requests?scope=all&state=opened&reviewer_username=${login}&per_page=50`,
-  ]) {
-    try {
-      for (const mr of JSON.parse(run("glab", ["api", q])) as GlabMR[]) seen.set(mr.web_url, mr);
-    } catch {
-      /* list unavailable */
-    }
-  }
-
-  const out: Pull[] = [];
-  for (const mr of seen.values()) {
-    const draft = Boolean(mr.draft ?? mr.work_in_progress);
-    const pipeline = mr.head_pipeline?.status ?? null;
-    const failing = pipeline === "failed" || pipeline === "canceled";
-    const pending = pipeline === "running" || pipeline === "pending" || pipeline === "created" || pipeline === "waiting_for_resource";
-    const unresolved = mr.blocking_discussions_resolved === false ? 1 : 0;
-    const { color, reason } = colorize({
-      draft,
-      failingChecks: failing ? 1 : 0,
-      pendingChecks: pending ? 1 : 0,
-      totalChecks: pipeline ? 1 : 0,
-      reviewCount: mr.detailed_merge_status ? 1 : 0, // approvals surface via merge status
-      changesRequested: mr.detailed_merge_status === "discussions_not_resolved" && unresolved > 0,
-      unresolvedThreads: unresolved,
-    });
-    const author = mr.author?.username ?? "";
-    out.push({
-      id: mr.web_url,
-      host: "gitlab",
-      number: Number(mr.iid) || Number(mr.web_url.match(/merge_requests\/(\d+)/)?.[1] ?? 0),
-      title: mr.title,
-      url: mr.web_url,
-      repo: mr.web_url.replace(/^https?:\/\/[^/]+\//, "").replace(/\/-\/merge_requests\/.*$/, ""),
-      state: draft ? "draft" : mr.state.toLowerCase() === "opened" ? "open" : mr.state.toLowerCase(),
-      author,
-      isMine: author === login,
-      awaitingMe: true,
-      color,
-      reason: pipeline ? reason : reason === "reviewed, no checks configured" ? "no pipeline yet" : reason,
-      updated_ms: epochMs(mr.updated_at),
-    });
-  }
-  return out;
+  const lists = await Promise.all(
+    [
+      `merge_requests?scope=all&state=opened&author_username=${login}&per_page=50`,
+      `merge_requests?scope=all&state=opened&reviewer_username=${login}&per_page=50`,
+    ].map((q) => run("glab", ["api", q]).then((s) => JSON.parse(s) as GlabMR[]).catch(() => [] as GlabMR[])),
+  );
+  for (const mr of lists.flat()) seen.set(mr.web_url, mr);
+  return mapLimit([...seen.values()], CONCURRENCY, (mr) => gitlabPull(mr, login));
 }
 
 // ---- cache ----
 
 let cache: Pull[] = [];
 let lastMs = 0;
+let inflight: Promise<Pull[]> | null = null;
 
-export function refreshPulls(): Pull[] {
-  const pulls = [...listGitHub(), ...listGitLab()];
+/** Refresh from both platforms (single-flight) and tell open pages. */
+export function refreshPulls(hub?: Hub): Promise<Pull[]> {
+  inflight ??= doRefresh(hub).finally(() => {
+    inflight = null;
+  });
+  return inflight;
+}
+
+async function doRefresh(hub?: Hub): Promise<Pull[]> {
+  const [gh, gl] = await Promise.all([listGitHub(), listGitLab()]);
+  const pulls = [...gh, ...gl];
   // Awaiting-my-review first, then color severity, then recency.
   const rank: Record<PullColor, number> = { red: 0, orange: 1, green: 2 };
   pulls.sort((a, b) => rank[a.color] - rank[b.color] || b.updated_ms - a.updated_ms);
   cache = pulls;
   lastMs = Date.now();
+  hub?.broadcast("pulls.updated", { fetched_ms: lastMs });
   return cache;
 }
 

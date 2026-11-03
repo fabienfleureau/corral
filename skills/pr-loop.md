@@ -28,6 +28,20 @@ When you receive one, run the loop — **automatically, without asking**:
    threads are answered or resolved and CI is green — that part is not yours to
    report.
 
+## When the PR has merge conflicts
+
+When the PR stops merging cleanly into its base, Corral pushes a message
+starting with **"PR merge conflicts"** (it may be combined with review
+comments in one message). Handle it **automatically, without asking**:
+
+1. `git fetch origin && git rebase origin/<base>` (the message names the base).
+2. Resolve each conflict keeping the intent of both sides, then
+   `git add` + `git rebase --continue`.
+3. Run the tests you touched. They must pass.
+4. `git push --force-with-lease`.
+5. Only if a conflict needs a product decision you cannot make, post a
+   `kind= "question"` report for that one conflict.
+
 If you are a **fresh session continuing someone else's work**, you were given a
 handoff document. Trust it for intent and decisions, verify it against the code
 before fixing, and update the humans through the same report channels.

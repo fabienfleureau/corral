@@ -1,8 +1,8 @@
 // App shell — sidebar navigation, auth gate, live SSE updates + notifications.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { ApiError, api, setUnauthorizedHandler, subscribeEvents } from "./api";
+import { ApiError, api, setCacheStateHandler, setUnauthorizedHandler, subscribeEvents } from "./api";
 import { errText } from "./util";
 import { Spinner } from "./ui";
 import { InboxPage } from "./pages/Inbox";
@@ -65,17 +65,21 @@ export function App() {
   }, []);
 
   // Live updates: one SSE connection feeds every page + desktop notifications.
+  // PR items start unready and flip via item.updated once the gate passes.
+  const notified = useRef(new Set<string>());
   useEffect(() => {
     const close = subscribeEvents((event) => {
-      if (
-        event.type === "item.created" &&
-        event.item.status === "open" &&
-        (event.item.kind === "question" || (event.item.kind === "pr" && event.item.ready === 1))
-      ) {
+      const item = event.type === "item.created" || event.type === "item.updated" ? event.item : null;
+      const notify =
+        item !== null &&
+        item.status === "open" &&
+        ((event.type === "item.created" && item.kind === "question") || (item.kind === "pr" && item.ready === 1));
+      if (notify && !notified.current.has(item.id)) {
+        notified.current.add(item.id);
         if (typeof Notification !== "undefined" && Notification.permission === "granted") {
           try {
-            new Notification(event.item.title, {
-              body: event.item.summary || event.item.body.slice(0, 120),
+            new Notification(item.title, {
+              body: item.summary || item.body.slice(0, 120),
             });
           } catch {
             /* notification construction can fail in some environments */
@@ -124,6 +128,12 @@ export function App() {
       window.removeEventListener("offline", down);
     };
   }, []);
+  // Online but the server answered from the worker's cache (unreachable/slow).
+  const [stale, setStale] = useState(false);
+  useEffect(() => {
+    setCacheStateHandler(setStale);
+    return () => setCacheStateHandler(null);
+  }, []);
 
   if (unauthorized) return <TokenScreen />;
 
@@ -153,10 +163,10 @@ export function App() {
         {bootError ? <div className="sidebar-foot inline-error">{bootError}</div> : <div className="sidebar-foot muted">live</div>}
       </aside>
       <main className="content">
-        {!online ? (
+        {!online || stale ? (
           <div className="offline-banner">
-            Offline — showing cached data. Actions will fail until the connection
-            is back.
+            {online ? "Corral is unreachable" : "Offline"} — showing cached data. Actions
+            will fail until the connection is back.
           </div>
         ) : null}
         {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} /> : null}
