@@ -36,7 +36,7 @@ const DEFAULTS: Filters = {
   author: "all",
   host: "all",
   repo: "all",
-  sort: "color",
+  sort: "updated",
   q: "",
 };
 
