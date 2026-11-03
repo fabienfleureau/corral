@@ -23,50 +23,52 @@
   --shadow: 0 1px 2px rgba(16, 20, 26, 0.06);
 }
 
-/* Dark palette: explicit choice, or the OS when the theme is "system". */
+/* Dark palette: explicit choice, or the OS when the theme is "system".
+   Mirrors omnigent's default dark theme (web/src/themePalettes.generated.css,
+   `.dark:not([data-theme])`); keep both dark blocks in sync. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --bg: #23262c;
-    --bg-sunken: #1b1e23;
-    --bg-hover: #2b2f36;
-    --chip-bg: #31363e;
-    --code-bg: #272b32;
-    --border: #3a4048;
-    --text: #e9ebee;
-    --muted: #a6adb7;
-    --faint: #7c838d;
-    --accent: #7c93ee;
-    --accent-ink: #a9bbff;
-    --accent-soft: #2b3350;
-    --danger-ink: #ff9d96;
-    --danger-soft: #43292b;
-    --warn-ink: #e8c175;
-    --warn-soft: #423823;
-    --ok-ink: #8ce3b2;
-    --ok-soft: #22382e;
+    --bg: #181f25;
+    --bg-sunken: #0e1013;
+    --bg-hover: #1f272d;
+    --chip-bg: color-mix(in srgb, #92a4b3 15%, #262f36);
+    --code-bg: oklch(0.38 0.005 240);
+    --border: oklch(0.28 0.005 240);
+    --text: oklch(0.965 0.003 240);
+    --muted: #92a4b3;
+    --faint: #a1a1aa;
+    --accent: oklch(0.64 0.22 254);
+    --accent-ink: #4299e0;
+    --accent-soft: #04355d;
+    --danger-ink: #e65b77;
+    --danger-soft: color-mix(in srgb, #f04858 18%, #181f25);
+    --warn-ink: #d4972a;
+    --warn-soft: color-mix(in srgb, #d4972a 18%, #181f25);
+    --ok-ink: #2ea65c;
+    --ok-soft: color-mix(in srgb, #2ea65c 18%, #181f25);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #23262c;
-  --bg-sunken: #1b1e23;
-  --bg-hover: #2b2f36;
-  --chip-bg: #31363e;
-  --code-bg: #272b32;
-  --border: #3a4048;
-  --text: #e9ebee;
-  --muted: #a6adb7;
-  --faint: #7c838d;
-  --accent: #7c93ee;
-  --accent-ink: #a9bbff;
-  --accent-soft: #2b3350;
-  --danger-ink: #ff9d96;
-  --danger-soft: #43292b;
-  --warn-ink: #e8c175;
-  --warn-soft: #423823;
-  --ok-ink: #8ce3b2;
-  --ok-soft: #22382e;
+  --bg: #181f25;
+  --bg-sunken: #0e1013;
+  --bg-hover: #1f272d;
+  --chip-bg: color-mix(in srgb, #92a4b3 15%, #262f36);
+  --code-bg: oklch(0.38 0.005 240);
+  --border: oklch(0.28 0.005 240);
+  --text: oklch(0.965 0.003 240);
+  --muted: #92a4b3;
+  --faint: #a1a1aa;
+  --accent: oklch(0.64 0.22 254);
+  --accent-ink: #4299e0;
+  --accent-soft: #04355d;
+  --danger-ink: #e65b77;
+  --danger-soft: color-mix(in srgb, #f04858 18%, #181f25);
+  --warn-ink: #d4972a;
+  --warn-soft: color-mix(in srgb, #d4972a 18%, #181f25);
+  --ok-ink: #2ea65c;
+  --ok-soft: color-mix(in srgb, #2ea65c 18%, #181f25);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
