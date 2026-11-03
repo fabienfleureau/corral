@@ -139,8 +139,8 @@ export const api = {
 
   // ---- sessions ----
   listSessions: (): Promise<SessionInfo[]> => get<SessionInfo[]>("/api/sessions"),
-  openSession: (address: string): Promise<{ ok: boolean; opened: boolean; attach_command?: string }> =>
-    post<{ ok: boolean; opened: boolean; attach_command?: string }>(`/api/terminals/${encodeURIComponent(address)}/open`),
+  openSession: (address: string): Promise<{ ok: boolean; opened: boolean; url?: string }> =>
+    post<{ ok: boolean; opened: boolean; url?: string }>(`/api/terminals/${encodeURIComponent(address)}/open`),
 
   // ---- repos ----
   listRepos: (): Promise<Repo[]> => get<Repo[]>("/api/repos"),

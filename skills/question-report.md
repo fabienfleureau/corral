@@ -13,13 +13,18 @@ tests pass, **do all of this without asking permission**:
 2. **Push** the branch to `origin`.
 3. **Open the PR/MR**: `gh pr create` (GitHub) or `glab mr create` (GitLab) with a
    title and a body covering what changed, why, and how to test it.
-4. **Report the result** so it reaches the human's inbox with the link:
+4. **Write the handoff document** — a fresh session may need to continue this
+   work (e.g. handle PR review comments) without your context. Keep it short
+   and factual: what was done and why, key decisions and their reasons, current
+   branch/PR state, anything unfinished or risky. Include it in your final
+   report's `body` under a `## Handoff` heading.
+5. **Report the result** so it reaches the human's inbox with the link:
 
 ```sh
-curl -s -X POST "$CORRAL_URL/api/reports" \
-  -H "Authorization: Bearer $CORRAL_TOKEN" \
+curl -s -X POST "{corral_url}/api/reports" \
+  -H "Authorization: Bearer {corral_token}" \
   -H "Content-Type: application/json" \
-  -d "{\"task_id\":\"$CORRAL_TASK_ID\",\"kind\":\"done\",\"title\":\"<PR title or: work complete>\",\"body\":\"<2-5 sentences: what was done, how to test it>\\n\\nPR: <url>\"}"
+  -d "{\"task_id\":\"{task_id}\",\"kind\":\"done\",\"title\":\"<PR title or: work complete>\",\"body\":\"<2-5 sentences: what was done, how to test it>\\n\\nPR: <url>\"}"
 ```
 
 Only report a question (below) if finishing is genuinely **blocked** — no remote
@@ -32,10 +37,10 @@ When you are blocked on a question, a decision, or a permission **while working*
 stop and ask. Do not pick an option on the human's behalf.
 
 ```sh
-curl -s -X POST "$CORRAL_URL/api/reports" \
-  -H "Authorization: Bearer $CORRAL_TOKEN" \
+curl -s -X POST "{corral_url}/api/reports" \
+  -H "Authorization: Bearer {corral_token}" \
   -H "Content-Type: application/json" \
-  -d "{\"task_id\":\"$CORRAL_TASK_ID\",\"kind\":\"question\",\"title\":\"<one-line question>\",\"body\":\"<the FULL question, markdown>\",\"options\":[\"<option A>\",\"<option B>\",\"none\"]}"
+  -d "{\"task_id\":\"{task_id}\",\"kind\":\"question\",\"title\":\"<one-line question>\",\"body\":\"<the FULL question, markdown>\",\"options\":[\"<option A>\",\"<option B>\",\"none\"]}"
 ```
 
 Then **wait** for the answer to arrive as input. Keep working only on parts that

@@ -23,6 +23,8 @@ export interface Task {
   pr_url: string | null;
   /** JSON state for the PR loop, e.g. {"pushed":"<thread ids>"} (dedupe). */
   pr_meta: string | null;
+  /** Handoff document from the last completed run — injected into follow-up sessions. */
+  handoff?: string | null;
   status: TaskStatus;
   terminal_address: string | null;
   exit_code: number | null;

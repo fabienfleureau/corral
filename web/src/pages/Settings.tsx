@@ -110,10 +110,10 @@ export function SettingsPage() {
                 <dd className="mono">{config.agents.join(", ") || "—"}</dd>
                 <dt>Assistant</dt>
                 <dd className="mono">{config.assistant || "—"}</dd>
-                <dt>herdr socket</dt>
-                <dd className="mono">{config.herdrSocket || "—"}</dd>
-                <dt>Worktrees dir</dt>
-                <dd className="mono">{config.worktreesDir || "—"}</dd>
+                <dt>Agent backend</dt>
+                <dd className="mono">{config.backend || "—"}</dd>
+                <dt>omnigent</dt>
+                <dd className="mono">{config.omnigentUrl || "—"}</dd>
                 <dt>API token</dt>
                 <dd className="mono">{config.token}</dd>
                 <dt>Jira</dt>

@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
-import type { HerdrClient } from "./herdr.ts";
+import type { WorkerBackend } from "./worker.ts";
 import type { Hub } from "./capture.ts";
 import type { Item, Task } from "./types.ts";
 import { questionConvention, slugify } from "./dispatch.ts";
@@ -274,70 +274,78 @@ function commentsMessage(pr: PrInfo): string {
   ].join("\n");
 }
 
-/** Spawn a fresh agent on the task's worktree to handle review comments. */
-async function respawnForComments(db: Db, cfg: Config, herdr: HerdrClient, task: Task, pr: PrInfo): Promise<string | null> {
+/** Spawn a fresh agent on the task's worktree to handle review comments,
+ *  seeded with the handoff document from the original run. */
+async function respawnForComments(
+  db: Db,
+  cfg: Config,
+  backend: WorkerBackend,
+  task: Task,
+  pr: PrInfo,
+): Promise<string | null> {
   const target = task.target && cfg.agents[task.target] ? task.target : "claude";
-  const agentCmd = cfg.agents[target];
-  if (!agentCmd) return null;
   const prompt = [
     `Task follow-up: review comments on your PR for "${task.title}".`,
     "",
+    task.handoff ? `## Handoff from the previous run\n\n${task.handoff}\n` : "",
     commentsMessage(pr),
     "",
     "---",
     questionConvention(cfg, task),
   ].join("\n");
-  const argv = agentCmd.map((p) => p.replaceAll("{prompt}", prompt));
-  const term = await herdr.run({
-    argv,
-    cwd: task.worktree_path ?? task.repo_path,
+  const session = await backend.start({
+    taskId: task.id,
     name: `corral-${slugify(task.title, 20)}-review`,
-    labels: { "corral.task": task.id, "corral.target": target },
+    repoPath: task.worktree_path ?? task.repo_path,
+    git: task.branch
+      ? { branch: task.branch, base: null, existingWorktree: Boolean(task.worktree_path) }
+      : null,
+    prompt,
+    harness: target,
+    model: null,
+    reasoning: null,
     env: {
       CORRAL_URL: `http://${cfg.host}:${cfg.port}`,
       CORRAL_TOKEN: cfg.token,
       CORRAL_TASK_ID: task.id,
     },
-    outlive_parent: true,
-    no_parent: true,
-    keep: true,
   });
-  db.updateTask(task.id, { terminal_address: term.address });
+  db.updateTask(task.id, { terminal_address: session.address });
   db.upsertTerminal({
-    address: term.address,
+    address: session.address,
     task_id: task.id,
-    name: term.name ?? null,
+    name: session.name ?? null,
     agent: target,
-    last_status: null,
-    last_turn: 0,
+    last_status: session.status,
+    last_turn: session.turn ?? 0,
     updated_ms: Date.now(),
   });
-  return term.address;
+  return session.address;
 }
 
 async function deliverComments(
   db: Db,
   cfg: Config,
-  herdr: HerdrClient,
+  backend: WorkerBackend,
   task: Task,
   pr: PrInfo,
 ): Promise<string | null> {
   const message = commentsMessage(pr);
-  // Live terminal? Push into it (its prompt includes the PR loop skill).
+  // Live session? Push into it (its prompt includes the PR loop skill).
   if (task.terminal_address) {
     try {
-      const t = await herdr.getTerminal(task.terminal_address);
-      if (t.state === "live") {
-        await herdr.sendText(task.terminal_address, message);
+      const s = await backend.get(task.terminal_address);
+      if (s && s.state === "live") {
+        await backend.send(task.terminal_address, message);
         return task.terminal_address;
       }
     } catch {
-      /* terminal gone — fall through */
+      /* session gone — fall through */
     }
   }
   // Otherwise respawn the agent on the worktree so the loop still runs.
   try {
-    return await respawnForComments(db, cfg, herdr, task, pr);
+    return await respawnForComments(db, cfg, backend, task, pr);
   } catch {
     return null;
   }
@@ -346,7 +354,7 @@ async function deliverComments(
 // ---- sync ----
 
 export interface SyncOptions {
-  herdr?: HerdrClient;
+  backend?: WorkerBackend;
   cfg?: Config;
   /** Injected for tests. */
   finder?: (repoPath: string, branch: string) => PrInfo | null;
@@ -376,11 +384,11 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
   const shouldResolve = pr.state !== "OPEN";
 
   // The loop: comments to manage go back to the agent — automatically.
-  if (!shouldResolve && pr.threads.length > 0 && opts.herdr && opts.cfg) {
+  if (!shouldResolve && pr.threads.length > 0 && opts.backend && opts.cfg) {
     const meta = JSON.parse(task.pr_meta ?? "{}") as { pushed?: string };
     const sig = threadSignature(pr);
     if (meta.pushed !== sig) {
-      void deliverComments(db, opts.cfg, opts.herdr, task, pr)
+      void deliverComments(db, opts.cfg, opts.backend, task, pr)
         .then((address) => {
           db.updateTask(task.id, { pr_meta: JSON.stringify({ pushed: sig }) });
           db.recordMetric("pr.comments_pushed", task.id, {

@@ -1,73 +1,61 @@
-// Capture & lifecycle: turn herdr events into inbox items and auto-resolve them.
+// Capture & lifecycle: turn worker events into inbox items and auto-resolve
+// them.
 //
-//  - agent goes `blocked`  -> question item (fallback capture; structured reports
-//    coming through POST /api/reports take precedence)
-//  - agent leaves `blocked` -> its open question item auto-resolves (you answered)
-//  - agent terminal finishes -> linked task marked done, open questions resolve
-//  - a periodic reconcile() catches anything the stream missed.
+//  - session blocked on an elicitation -> question item (prompt + choices as
+//    quick-reply buttons) — the structured path
+//  - session blocked without elicitation data -> question item with a raw
+//    output tail — the fallback path
+//  - session leaves blocked -> its open question item auto-resolves
+//  - session finished -> linked task marked done, open questions resolve
+//  - a `kind=done` report marks the task done and stores its handoff document
 
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
-import type { HerdrClient } from "./herdr.ts";
+import type { WorkerBackend, WorkerElicitation, WorkerEvent } from "./worker.ts";
 import { syncTaskPr } from "./pr.ts";
-import type { HcEvent, HcTerminal, Item } from "./types.ts";
+import type { Item } from "./types.ts";
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
 
 const TAIL_LINES = 40;
 
-function statusState(t: { status?: unknown }): string | null {
-  const s = t?.status;
-  if (!s) return null;
-  if (typeof s === "string") return s;
-  if (typeof s === "object" && "state" in s && typeof (s as { state?: unknown }).state === "string") {
-    return (s as { state: string }).state;
-  }
-  return null;
-}
-
 export class CaptureEngine {
-  private lastState = new Map<string, string | null>();
   private db: Db;
-  private herdr: HerdrClient;
+  private backend: WorkerBackend;
   private hub: Hub;
   private cfg: Config | null;
 
-  constructor(db: Db, herdr: HerdrClient, hub: Hub, cfg: Config | null = null) {
+  constructor(db: Db, backend: WorkerBackend, hub: Hub, cfg: Config | null = null) {
     this.db = db;
-    this.herdr = herdr;
+    this.backend = backend;
     this.hub = hub;
     this.cfg = cfg;
   }
 
-  async handleEvent(e: HcEvent): Promise<void> {
+  async handleEvent(e: WorkerEvent): Promise<void> {
     try {
       switch (e.type) {
-        case "created":
-        case "labels":
-        case "restarted": {
-          const labels = (e.data.labels ?? {}) as Record<string, string>;
-          const taskId = labels["corral.task"];
-          if (taskId) {
+        case "created": {
+          if (e.task_id) {
             this.db.upsertTerminal({
-              address: e.terminal,
-              task_id: taskId,
-              name: (e.data.name as string) ?? null,
-              agent: labels["corral.target"] ?? null,
-              last_status: null,
-              last_turn: Number(e.data.turn ?? 0),
+              address: e.address,
+              task_id: e.task_id,
+              name: null,
+              agent: null,
+              last_status: e.status ?? null,
+              last_turn: e.turn ?? 0,
               updated_ms: Date.now(),
             });
           }
           break;
         }
         case "status": {
-          await this.onStatusChange(e.terminal, e.data);
+          await this.onStatus(e);
           break;
         }
         case "finished": {
-          await this.onFinished(e.terminal, Number(e.data.exit_code ?? -1), (e.data.reason as string) ?? null);
+          await this.onFinished(e);
           break;
         }
         default:
@@ -78,52 +66,85 @@ export class CaptureEngine {
     }
   }
 
-  private async onStatusChange(address: string, data: Record<string, unknown>): Promise<void> {
-    const tracked = this.db.getTerminal(address);
-    if (!tracked) return;
-    const state = statusState(data as { status?: unknown });
-    const prev = this.lastState.get(address) ?? tracked.last_status ?? null;
-    this.lastState.set(address, state);
-    this.db.upsertTerminal({ ...tracked, last_status: state, updated_ms: Date.now() });
+  private async onStatus(e: WorkerEvent): Promise<void> {
+    const tracked = this.db.getTerminal(e.address);
+    const taskId = e.task_id ?? tracked?.task_id ?? null;
+    if (!tracked && !taskId) return; // not a Corral session
+    const blocked = e.status === "blocked";
+    this.db.upsertTerminal({
+      address: e.address,
+      task_id: taskId,
+      name: tracked?.name ?? null,
+      agent: tracked?.agent ?? null,
+      last_status: e.status ?? null,
+      last_turn: e.turn ?? tracked?.last_turn ?? 0,
+      updated_ms: Date.now(),
+    });
 
-    if (state === "blocked" && prev !== "blocked") {
-      await this.ensureQuestionItem(address, tracked.task_id);
-    } else if (state && state !== "blocked" && prev === "blocked") {
-      this.resolveOpenQuestion(address, "auto");
+    if (blocked) {
+      await this.ensureQuestionItem(e, taskId);
+    } else {
+      this.resolveOpenQuestion(e.address, "auto");
     }
   }
 
-  private async ensureQuestionItem(address: string, taskId: string | null): Promise<Item | null> {
-    const existing = this.db.openQuestionItemForTerminal(address);
+  private async ensureQuestionItem(e: WorkerEvent, taskId: string | null): Promise<Item | null> {
+    const existing = this.db.openQuestionItemForTerminal(e.address);
     if (existing) return existing;
-    let tail = "";
-    try {
-      const read = await this.herdr.readTerminal(address, TAIL_LINES);
-      tail = read.text;
-    } catch {
-      tail = "(output unavailable)";
-    }
+
     const task = taskId ? this.db.getTask(taskId) : null;
+    const elicitations: WorkerElicitation[] = e.elicitations ?? [];
+    let title: string;
+    let summary = "";
+    let body: string;
+    let options: string | null = null;
+    let structured = 0;
+
+    if (elicitations.length > 0) {
+      structured = 1;
+      const first = elicitations[0];
+      title = first.prompt.split("\n")[0].slice(0, 120) || (task ? `${task.title} — needs you` : "Agent needs you");
+      body = elicitations
+        .map((el) => {
+          const lines = [`**${el.kind}**: ${el.prompt}`];
+          if (el.choices.length > 0) lines.push("", ...el.choices.map((c) => `- ${c}`));
+          return lines.join("\n");
+        })
+        .join("\n\n---\n\n");
+      if (first.choices.length > 0) options = JSON.stringify(first.choices.slice(0, 8));
+    } else {
+      try {
+        body = (await this.backend.read(e.address, TAIL_LINES)) || "(output unavailable)";
+      } catch {
+        body = "(output unavailable)";
+      }
+      title = task ? `${task.title} — needs you` : `Agent ${e.address} needs you`;
+    }
+
     const item: Item = {
       id: randomUUID(),
       kind: "question",
       status: "open",
-      title: task ? `${task.title} — needs you` : `Agent ${address} needs you`,
-      summary: "",
-      body: tail,
+      title,
+      summary,
+      body,
       context: "",
-      options: null,
+      options,
       ready: 1,
-      source_ref: address,
+      source_ref: e.address,
       task_id: taskId,
-      structured: 0,
+      structured,
       created_ms: Date.now(),
       updated_ms: Date.now(),
       resolved_ms: null,
       snooze_until_ms: null,
     };
     this.db.insertItem(item);
-    this.db.recordMetric("item.created", item.id, { kind: "question", capture: "blocked-fallback", task_id: taskId });
+    this.db.recordMetric("item.created", item.id, {
+      kind: "question",
+      capture: elicitations.length > 0 ? "elicitation" : "blocked-fallback",
+      task_id: taskId,
+    });
     this.hub.broadcast("item.created", item);
     return item;
   }
@@ -136,33 +157,30 @@ export class CaptureEngine {
     this.hub.broadcast("item.updated", this.db.getItem(item.id));
   }
 
-  private async onFinished(address: string, exitCode: number, reason: string | null): Promise<void> {
-    const tracked = this.db.getTerminal(address);
-    this.resolveOpenQuestion(address, "auto");
-    if (tracked?.task_id) {
-      const task = this.db.getTask(tracked.task_id);
+  private async onFinished(e: WorkerEvent): Promise<void> {
+    this.resolveOpenQuestion(e.address, "auto");
+    const taskId = e.task_id ?? this.db.getTerminal(e.address)?.task_id ?? null;
+    if (taskId) {
+      const task = this.db.getTask(taskId);
       if (task && (task.status === "dispatched" || task.status === "open")) {
-        this.db.updateTask(task.id, { status: "done", exit_code: exitCode });
-        this.db.recordMetric("task.finished", task.id, { exit_code: exitCode, reason });
+        this.db.updateTask(task.id, { status: "done", exit_code: e.exit_code ?? null });
+        this.db.recordMetric("task.finished", task.id, { exit_code: e.exit_code ?? null });
         const updated = this.db.getTask(task.id);
         this.hub.broadcast("task.updated", updated);
-        // Look for the PR this task's branch produced (the agent may have
-        // opened it, or been interrupted before its completion report).
         if (updated) {
           try {
-            syncTaskPr(this.db, this.hub, updated, { herdr: this.herdr, cfg: this.cfg ?? undefined });
+            syncTaskPr(this.db, this.hub, updated, { backend: this.backend, cfg: this.cfg ?? undefined });
           } catch {
             /* PR discovery is best effort */
           }
         }
       }
     }
-    this.lastState.delete(address);
   }
 
   /** Called from POST /api/reports: a structured report from an agent.
-   *  kind "question" -> question item; kind "done"/"pr" -> pr item (the link
-   *  to review). Completion reports supersede nothing — every PR is its own item. */
+   *  kind "question" -> question item; kind "done"/"pr" -> pr item + task
+   *  completion (with its handoff document stored for follow-up sessions). */
   async createStructuredQuestion(opts: {
     kind?: string;
     taskId?: string | null;
@@ -171,7 +189,8 @@ export class CaptureEngine {
     body: string;
     options?: string[];
   }): Promise<Item> {
-    const itemKind: Item["kind"] = opts.kind === "done" || opts.kind === "pr" ? "pr" : "question";
+    const isDone = opts.kind === "done" || opts.kind === "pr";
+    const itemKind: Item["kind"] = isDone ? "pr" : "question";
     const taskId = opts.taskId ?? null;
     const address =
       opts.terminal ??
@@ -179,17 +198,32 @@ export class CaptureEngine {
     let context = "";
     if (address) {
       try {
-        context = (await this.herdr.readTerminal(address, 60)).text;
+        context = (await this.backend.read(address, 60)) ?? "";
       } catch {
         context = "";
       }
     }
     const optionsJson = opts.options?.length ? JSON.stringify(opts.options) : null;
-    // A structured question supersedes a pending fallback capture for this
-    // terminal. Completion ("done"/"pr") reports always create their own item.
+
+    // Completion: the task is done, and its handoff document lives on for any
+    // fresh session that continues the work (PR loop).
+    if (isDone && taskId) {
+      const task = this.db.getTask(taskId);
+      if (task) {
+        const handoff = /##\s*handoff/i.test(opts.body)
+          ? opts.body.split(/##\s*handoff/i).slice(1).join("## Handoff").trim()
+          : opts.body.trim();
+        this.db.updateTask(task.id, { status: "done", handoff });
+        this.hub.broadcast("task.updated", this.db.getTask(task.id));
+      }
+    }
+
+    // A structured question supersedes any pending capture for this terminal
+    // (fallback tail or elicitation) — the agent's own framing is authoritative.
+    // Completion reports always create their own item.
     if (address && itemKind === "question") {
       const existing = this.db.openQuestionItemForTerminal(address);
-      if (existing && existing.structured === 0) {
+      if (existing) {
         this.db.updateItem(existing.id, {
           title: opts.title,
           summary: opts.body,
@@ -204,7 +238,6 @@ export class CaptureEngine {
         this.hub.broadcast("item.updated", updated);
         return updated!;
       }
-      if (existing) return existing;
     }
     const item: Item = {
       id: randomUUID(),
@@ -228,33 +261,5 @@ export class CaptureEngine {
     this.db.recordMetric("item.created", item.id, { kind: itemKind, capture: "structured", task_id: taskId });
     this.hub.broadcast("item.created", item);
     return item;
-  }
-
-  /** Periodic safety net: re-read tracked terminals and reconcile their state. */
-  async reconcile(): Promise<void> {
-    let live: HcTerminal[] = [];
-    try {
-      const res = await this.herdr.listTerminals(true);
-      live = res.terminals ?? [];
-    } catch {
-      return; // core unreachable; the stream will reconnect
-    }
-    const seen = new Set<string>();
-    for (const t of live) {
-      seen.add(t.address);
-      const tracked = this.db.getTerminal(t.address);
-      if (!tracked) continue;
-      const state = statusState(t);
-      const prev = this.lastState.get(t.address) ?? tracked.last_status ?? null;
-      if (state !== prev) {
-        this.lastState.set(t.address, state);
-        this.db.upsertTerminal({ ...tracked, last_status: state, updated_ms: Date.now() });
-        if (state === "blocked") await this.ensureQuestionItem(t.address, tracked.task_id);
-        else if (state && prev === "blocked") this.resolveOpenQuestion(t.address, "auto");
-      }
-      if (t.state === "finished") {
-        await this.onFinished(t.address, Number(t.exit_code ?? -1), t.reason);
-      }
-    }
   }
 }

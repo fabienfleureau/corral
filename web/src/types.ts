@@ -104,8 +104,8 @@ export type Config = {
   host: string;
   agents: string[];
   assistant: string;
-  herdrSocket: string;
-  worktreesDir: string;
+  backend: string;
+  omnigentUrl: string;
   jiraConfigured: boolean;
   jiraJql: string;
   token: string; // masked
