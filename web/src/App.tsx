@@ -25,14 +25,30 @@ const TABS: { key: Tab; label: string }[] = [
 
 type Counts = { inbox: number; tasks: number; pulls: number; sessions: number; ideas: number };
 
+function tabFromHash(): Tab {
+  const h = window.location.hash.replace(/^#\/?/, "");
+  return TABS.some((t) => t.key === h) ? (h as Tab) : "inbox";
+}
+
 export function App() {
   const [unauthorized, setUnauthorized] = useState(false);
-  const [tab, setTab] = useState<Tab>("inbox");
+  const [tab, setTab] = useState<Tab>(tabFromHash);
   const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, pulls: 0, sessions: 0, ideas: 0 });
   const [eventVersion, setEventVersion] = useState(0);
   const [bootError, setBootError] = useState<string | null>(null);
 
   const refresh = useCallback(() => setEventVersion((v) => v + 1), []);
+
+  // Hash routing: every page has a stable, shareable link (#/pulls, #/settings…).
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const selectTab = (t: Tab) => {
+    window.location.hash = `/${t}`;
+    setTab(t);
+  };
 
   // Auth probe + global 401 handling.
   useEffect(() => {
@@ -123,7 +139,7 @@ export function App() {
             <button
               key={t.key}
               className={`nav-item ${tab === t.key ? "nav-active" : ""}`}
-              onClick={() => setTab(t.key)}
+              onClick={() => selectTab(t.key)}
             >
               <span>{t.label}</span>
               {t.key !== "settings" ? (
