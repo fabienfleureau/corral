@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { api } from "../api";
 import type { Item, Task } from "../types";
-import { errText, formatTs, snoozeUntil, timeAgo } from "../util";
-import { KindIcon, Spinner } from "../ui";
+import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
+import { ExternalLinkIcon, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
 
 type StatusFilter = "open" | "resolved" | "archived";
@@ -18,7 +18,7 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
 
 export function InboxPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
-  const [items, setItems] = useState<Item[]>([]);
+  const [allItems, setAllItems] = useState<Item[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,10 +39,10 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([api.listItems({ status: statusFilter }), api.listTasks()])
+    Promise.all([api.listItems(), api.listTasks()])
       .then(([itemList, taskList]) => {
         if (cancelled) return;
-        setItems(itemList);
+        setAllItems(itemList);
         setTasks(taskList);
         setError(null);
         setSelected((prev) => (prev ? itemList.find((i) => i.id === prev.id) ?? prev : prev));
@@ -56,7 +56,20 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
     return () => {
       cancelled = true;
     };
-  }, [statusFilter, eventVersion]);
+  }, [eventVersion]);
+
+  // Opening the inbox re-checks PRs: merged ones get archived (server
+  // broadcasts the changes, which bumps eventVersion and reloads the list).
+  useEffect(() => {
+    api.syncPrs().catch(() => undefined);
+  }, []);
+
+  const items = useMemo(() => allItems.filter((i) => i.status === statusFilter), [allItems, statusFilter]);
+  const counts = useMemo(() => {
+    const c: Record<StatusFilter, number> = { open: 0, resolved: 0, archived: 0 };
+    for (const i of allItems) c[i.status]++;
+    return c;
+  }, [allItems]);
 
   // Auto-select the first row when nothing is selected.
   useEffect(() => {
@@ -71,7 +84,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
 
   const applyItem = (updated: Item) => {
     setSelected(updated);
-    setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    setAllItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
     refresh();
   };
 
@@ -148,6 +161,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
   };
 
   const linkedTask = selected?.task_id ? tasksById[selected.task_id] ?? null : null;
+  const prUrl = selected ? itemPrUrl(selected.body, linkedTask?.pr_url) : null;
   const now = Date.now();
 
   return (
@@ -162,6 +176,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                 onClick={() => changeFilter(f.key)}
               >
                 {f.label}
+                <span className="chip-count">{counts[f.key]}</span>
               </button>
             ))}
           </div>
@@ -178,11 +193,21 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
             items.map((item) => {
               const needsYou = item.status === "open" && item.kind === "question";
               const snoozed = item.snooze_until_ms !== null && item.snooze_until_ms > Date.now();
+              const rowPr = itemPrUrl(item.body, item.task_id ? tasksById[item.task_id]?.pr_url : null);
               return (
-                <button
+                <div
                   key={item.id}
+                  role="button"
+                  tabIndex={0}
                   className={`item-row ${needsYou ? "needs-you" : ""} ${selected?.id === item.id ? "selected" : ""}`}
                   onClick={() => setSelected(item)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelected(item);
+                    }
+                  }}
                 >
                   <KindIcon kind={item.kind} />
                   <span className="item-row-main">
@@ -206,8 +231,21 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                     </span>
                     {needsYou ? <span className="badge badge-urgent">needs you</span> : null}
                     {snoozed ? <span className="badge badge-snoozed">snoozed</span> : null}
+                    {rowPr ? (
+                      <a
+                        href={rowPr}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="pr-pill"
+                        title={rowPr}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {prLabel(rowPr)}
+                        <ExternalLinkIcon />
+                      </a>
+                    ) : null}
                   </span>
-                </button>
+                </div>
               );
             })
           )}
@@ -220,7 +258,15 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
         ) : (
           <>
             <div className="detail-head">
-              <h2 className="detail-title">{selected.title}</h2>
+              <div className="detail-title-row">
+                <h2 className="detail-title">{selected.title}</h2>
+                {prUrl ? (
+                  <a href={prUrl} target="_blank" rel="noreferrer" className="btn btn-primary pr-open" title={prUrl}>
+                    Open {prLabel(prUrl)}
+                    <ExternalLinkIcon />
+                  </a>
+                ) : null}
+              </div>
               <div className="detail-meta">
                 <span className="chip chip-static">{selected.kind}</span>
                 <span className="chip chip-static">

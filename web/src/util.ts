@@ -31,3 +31,20 @@ export function snoozeUntil(preset: "1h" | "tomorrow" | "nextweek"): number {
 export function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+const PR_URL_RE = /https?:\/\/\S+?\/(?:pull|merge_requests)\/\d+/;
+
+/** The PR/MR link for an inbox item: the task's known PR first, else the
+ *  first PR/MR URL in the item body (done reports carry "PR: <url>"). */
+export function itemPrUrl(body: string, taskPrUrl: string | null | undefined): string | null {
+  if (taskPrUrl) return taskPrUrl;
+  return body.match(PR_URL_RE)?.[0] ?? null;
+}
+
+/** "PR #42" for GitHub, "MR !42" for GitLab, "PR" when the number is unknown. */
+export function prLabel(url: string): string {
+  const gl = url.match(/merge_requests\/(\d+)/);
+  if (gl) return `MR !${gl[1]}`;
+  const gh = url.match(/\/pull\/(\d+)/);
+  return gh ? `PR #${gh[1]}` : "PR";
+}
