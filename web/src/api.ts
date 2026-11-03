@@ -106,6 +106,7 @@ export const api = {
   summarizeItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/summarize`),
   resolveItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/resolve`),
   archiveItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/archive`),
+  syncPrs: (): Promise<{ ok: boolean; ran: boolean }> => post<{ ok: boolean; ran: boolean }>("/api/prs/sync"),
   snoozeItem: (id: string, untilMs: number): Promise<Item> =>
     post<Item>(`/api/items/${id}/snooze`, { until_ms: untilMs }),
 

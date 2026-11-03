@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
 import type { JiraSearchResult, Repo, Task } from "../types";
-import { errText, formatTs, timeAgo } from "../util";
+import { errText, formatTs, prLabel, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 
 const TARGET_OPTIONS = ["claude", "codex", "opencode"];
@@ -267,8 +267,8 @@ function TaskRow({
           {task.target ? <span className="badge badge-target">{task.target}</span> : null}
           {task.branch ? <span className="mono">{task.branch}</span> : null}
           {task.pr_url ? (
-            <a href={task.pr_url} target="_blank" rel="noreferrer" className="meta-link">
-              PR
+            <a href={task.pr_url} target="_blank" rel="noreferrer" className="pr-pill" title={task.pr_url}>
+              {prLabel(task.pr_url)}
               <ExternalLinkIcon />
             </a>
           ) : null}

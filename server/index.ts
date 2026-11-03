@@ -6,7 +6,7 @@ import { Db } from "./db.ts";
 import { OmnigentBackend } from "./omnigent.ts";
 import { CaptureEngine } from "./capture.ts";
 import { JiraClient } from "./jira.ts";
-import { prCandidateTasks, syncTaskPr } from "./pr.ts";
+import { syncAllPrs } from "./pr.ts";
 import { refreshPulls } from "./pulls.ts";
 import { createHttpServer, type AppState } from "./api.ts";
 import type { ServerResponse } from "node:http";
@@ -38,15 +38,7 @@ const state: AppState = { db, cfg, backend, capture, jira, hub };
 const subscription = backend.onEvent((e) => void capture.handleEvent(e));
 
 // PR discovery + the PR loop: find review links, feed comments back to agents.
-setInterval(() => {
-  for (const task of prCandidateTasks(db)) {
-    try {
-      syncTaskPr(db, hub, task, { backend, cfg });
-    } catch {
-      /* best effort */
-    }
-  }
-}, 120_000);
+setInterval(() => syncAllPrs(db, hub, { backend, cfg }, 0), 120_000);
 
 // Pull Requests page: refresh where the human is awaited (GitHub + GitLab).
 setTimeout(() => {

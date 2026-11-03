@@ -304,7 +304,7 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
   }
 });
 
-test("pr sync: item flips ready->needs work and back, resolves on merge", () => {
+test("pr sync: item flips ready->needs work and back, archives on merge", () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-prsync-"));
   try {
     const db = new Db(join(dir, "test.db"));
@@ -338,11 +338,52 @@ test("pr sync: item flips ready->needs work and back, resolves on merge", () => 
     assert.match(item.title, /PR needs work/);
     assert.match(item.summary, /1 unresolved review comment/);
 
+    const question: Item = {
+      ...item,
+      id: "q-1",
+      kind: "question",
+      status: "resolved",
+      title: "which cache?",
+      resolved_ms: Date.now(),
+    };
+    db.insertItem(question);
+
     current = { ...current, state: "MERGED", threads: [] };
     syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
     item = db.listItems({ kind: "pr" })[0];
-    assert.equal(item.status, "resolved");
+    assert.equal(item.status, "archived");
     assert.match(item.title, /PR merged/);
+    assert.equal(db.getItem("q-1")?.status, "archived");
+    assert.equal(db.getTask("task-1")?.status, "archived");
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pr sync: closed without merge resolves but keeps the task", () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-prclose-"));
+  try {
+    const db = new Db(join(dir, "test.db"));
+    db.insertTask(makeTask({ branch: "feat-y", status: "done", repo_path: "/tmp/repo" }));
+    const hub = { broadcast: () => undefined };
+    const pr: PrInfo = {
+      url: "https://example.com/pr/8",
+      title: "feat: y",
+      state: "CLOSED",
+      number: 8,
+      description: "",
+      additions: 0,
+      deletions: 0,
+      changed_files: 0,
+      mergeable: null,
+      review_decision: null,
+      checks: { total: 0, failed: 0, pending: false },
+      threads: [],
+    };
+    syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => pr });
+    assert.equal(db.listItems({ kind: "pr" })[0].status, "resolved");
+    assert.equal(db.getTask("task-1")?.status, "done");
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

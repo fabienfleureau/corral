@@ -226,7 +226,8 @@ export class CaptureEngine {
         const handoff = /##\s*handoff/i.test(opts.body)
           ? opts.body.split(/##\s*handoff/i).slice(1).join("## Handoff").trim()
           : opts.body.trim();
-        this.db.updateTask(task.id, { status: "done", handoff });
+        // A merged PR already archived the task: keep it archived.
+        this.db.updateTask(task.id, task.status === "archived" ? { handoff } : { status: "done", handoff });
         this.hub.broadcast("task.updated", this.db.getTask(task.id));
       }
     }
