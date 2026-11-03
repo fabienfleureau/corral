@@ -26,7 +26,7 @@ const TABS: { key: Tab; label: string }[] = [
 type Counts = { inbox: number; tasks: number; pulls: number; sessions: number; ideas: number };
 
 function tabFromHash(): Tab {
-  const h = window.location.hash.replace(/^#\/?/, "");
+  const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
   return TABS.some((t) => t.key === h) ? (h as Tab) : "inbox";
 }
 
