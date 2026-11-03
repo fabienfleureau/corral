@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { ApiError, api, setUnauthorizedHandler, subscribeEvents } from "./api";
+import { ApiError, api, setCacheStateHandler, setUnauthorizedHandler, subscribeEvents } from "./api";
 import { errText } from "./util";
 import { Spinner } from "./ui";
 import { InboxPage } from "./pages/Inbox";
@@ -124,6 +124,12 @@ export function App() {
       window.removeEventListener("offline", down);
     };
   }, []);
+  // Online but the server answered from the worker's cache (unreachable/slow).
+  const [stale, setStale] = useState(false);
+  useEffect(() => {
+    setCacheStateHandler(setStale);
+    return () => setCacheStateHandler(null);
+  }, []);
 
   if (unauthorized) return <TokenScreen />;
 
@@ -153,10 +159,10 @@ export function App() {
         {bootError ? <div className="sidebar-foot inline-error">{bootError}</div> : <div className="sidebar-foot muted">live</div>}
       </aside>
       <main className="content">
-        {!online ? (
+        {!online || stale ? (
           <div className="offline-banner">
-            Offline — showing cached data. Actions will fail until the connection
-            is back.
+            {online ? "Corral is unreachable" : "Offline"} — showing cached data. Actions
+            will fail until the connection is back.
           </div>
         ) : null}
         {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} /> : null}

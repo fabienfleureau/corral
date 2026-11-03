@@ -305,7 +305,11 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                   ) : null}
                 </>
               ) : (
-                <pre className="body-text body-raw">{selected.body}</pre>
+                <>
+                  {/* Auto-captured: an LLM summary (if any) above the raw body. */}
+                  {selected.summary ? <Markdown text={selected.summary} className="body-text" /> : null}
+                  <pre className="body-text body-raw">{selected.body}</pre>
+                </>
               )}
               {selected.context ? (
                 <details className="context-drawer">

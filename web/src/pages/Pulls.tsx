@@ -84,7 +84,8 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
   const load = async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
-      const res = await api.listPulls();
+      // Manual: ask the server to re-query GitHub/GitLab, not just its cache.
+      const res = manual ? await api.refreshPulls() : await api.listPulls();
       setPulls(res.pulls);
       setFetchedMs(res.fetched_ms);
       setError(null);

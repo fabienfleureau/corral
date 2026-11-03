@@ -99,10 +99,12 @@ function parseBlocks(src: string): Block[] {
 
     const fence = FENCE_RE.exec(line);
     if (fence) {
-      const marker = fence[1][0] === "`" ? "```" : "~~~";
+      // Closes only on the same marker, at least as long, nothing after it.
+      const open = fence[1];
+      const close = new RegExp(`^ {0,3}${open[0] === "`" ? "`" : "~"}{${open.length},}\\s*$`);
       const code: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].trimStart().startsWith(marker)) {
+      while (i < lines.length && !close.test(lines[i])) {
         code.push(lines[i]);
         i++;
       }

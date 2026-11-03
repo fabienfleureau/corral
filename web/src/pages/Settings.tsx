@@ -97,13 +97,9 @@ export function SettingsPage() {
 
   const applyTheme = (value: string) => {
     setTheme(value);
-    if (value === "system") {
-      localStorage.removeItem("corral-theme");
-      document.documentElement.dataset.theme = "system";
-    } else {
-      localStorage.setItem("corral-theme", value);
-      document.documentElement.dataset.theme = value;
-    }
+    // Persist "system" too: a missing preference means the light default.
+    localStorage.setItem("corral-theme", value);
+    document.documentElement.dataset.theme = value;
   };
 
   return (
