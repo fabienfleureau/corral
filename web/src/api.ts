@@ -1,7 +1,7 @@
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
-import type { Config, Idea, Item, JiraImportResult, JiraSearchResult, Repo, Task } from "./types";
+import type { Config, Idea, Item, JiraImportResult, JiraSearchResult, Pull, Repo, SessionInfo, Task } from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -116,6 +116,8 @@ export const api = {
   dispatchTask: (id: string, input: { target?: string; use_worktree?: boolean }): Promise<DispatchResult> =>
     post<DispatchResult>(`/api/tasks/${id}/dispatch`, input),
   cleanupTask: (id: string): Promise<{ ok: boolean }> => post<{ ok: boolean }>(`/api/tasks/${id}/cleanup`),
+  checkPr: (id: string): Promise<{ pr: unknown; task: Task }> =>
+    post<{ pr: unknown; task: Task }>(`/api/tasks/${id}/check-pr`),
 
   // ---- jira ----
   jiraSearch: (q: string): Promise<JiraSearchResult[]> =>
@@ -134,6 +136,16 @@ export const api = {
     post<Idea>("/api/ideas", input),
   patchIdea: (id: string, input: { status?: Idea["status"]; tag?: Idea["tag"] }): Promise<{ ok: boolean }> =>
     patch<{ ok: boolean }>(`/api/ideas/${id}`, input),
+
+  // ---- pull requests ----
+  listPulls: (): Promise<{ pulls: Pull[]; fetched_ms: number }> =>
+    get<{ pulls: Pull[]; fetched_ms: number }>("/api/pulls"),
+  refreshPulls: (): Promise<{ pulls: Pull[] }> => post<{ pulls: Pull[] }>("/api/pulls/refresh"),
+
+  // ---- sessions ----
+  listSessions: (): Promise<SessionInfo[]> => get<SessionInfo[]>("/api/sessions"),
+  openSession: (address: string): Promise<{ ok: boolean; opened: boolean; url?: string }> =>
+    post<{ ok: boolean; opened: boolean; url?: string }>(`/api/terminals/${encodeURIComponent(address)}/open`),
 
   // ---- repos ----
   listRepos: (): Promise<Repo[]> => get<Repo[]>("/api/repos"),

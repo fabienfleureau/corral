@@ -20,6 +20,11 @@ export interface Task {
   jira_key: string | null;
   jira_url: string | null;
   jira_parent_key: string | null;
+  pr_url: string | null;
+  /** JSON state for the PR loop, e.g. {"pushed":"<thread ids>"} (dedupe). */
+  pr_meta: string | null;
+  /** Handoff document from the last completed run — injected into follow-up sessions. */
+  handoff?: string | null;
   status: TaskStatus;
   terminal_address: string | null;
   exit_code: number | null;
@@ -37,9 +42,15 @@ export interface Item {
   title: string;
   summary: string;
   body: string;
+  /** Raw recent terminal output captured at report time (context drawer). */
+  context: string;
+  /** JSON array of quick-reply options the agent offered, e.g. ["all","none"]. */
+  options: string | null;
   source_ref: string | null;
   task_id: string | null;
   structured: number;
+  /** For pr items: 1 = the review gate passes (threads resolved, checks green). */
+  ready: number;
   created_ms: number;
   updated_ms: number;
   resolved_ms: number | null;
@@ -122,4 +133,21 @@ export interface MetricEvent {
   name: string;
   ref: string | null;
   data: string | null;
+}
+
+export interface SessionInfo {
+  address: string;
+  name: string | null;
+  agent: string | null;
+  task_id: string | null;
+  task_title: string | null;
+  /** OSC 7501 state: working | blocked | idle | done | error (null when none reported). */
+  status: string | null;
+  /** live | finished */
+  state: string;
+  turn: number;
+  cwd: string;
+  created_ms: number;
+  updated_ms: number;
+  exit_code: number | null;
 }

@@ -7,28 +7,48 @@ import { errText } from "./util";
 import { Spinner } from "./ui";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
+import { SessionsPage } from "./pages/Sessions";
+import { PullsPage } from "./pages/Pulls";
 import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
 
-type Tab = "inbox" | "tasks" | "ideas" | "settings";
+type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "ideas" | "settings";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
   { key: "tasks", label: "Tasks" },
+  { key: "pulls", label: "Pull Requests" },
+  { key: "sessions", label: "Sessions" },
   { key: "ideas", label: "Ideas" },
   { key: "settings", label: "Settings" },
 ];
 
-type Counts = { inbox: number; tasks: number; ideas: number };
+type Counts = { inbox: number; tasks: number; pulls: number; sessions: number; ideas: number };
+
+function tabFromHash(): Tab {
+  const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
+  return TABS.some((t) => t.key === h) ? (h as Tab) : "inbox";
+}
 
 export function App() {
   const [unauthorized, setUnauthorized] = useState(false);
-  const [tab, setTab] = useState<Tab>("inbox");
-  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, ideas: 0 });
+  const [tab, setTab] = useState<Tab>(tabFromHash);
+  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, pulls: 0, sessions: 0, ideas: 0 });
   const [eventVersion, setEventVersion] = useState(0);
   const [bootError, setBootError] = useState<string | null>(null);
 
   const refresh = useCallback(() => setEventVersion((v) => v + 1), []);
+
+  // Hash routing: every page has a stable, shareable link (#/pulls, #/settings…).
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const selectTab = (t: Tab) => {
+    window.location.hash = `/${t}`;
+    setTab(t);
+  };
 
   // Auth probe + global 401 handling.
   useEffect(() => {
@@ -47,7 +67,11 @@ export function App() {
   // Live updates: one SSE connection feeds every page + desktop notifications.
   useEffect(() => {
     const close = subscribeEvents((event) => {
-      if (event.type === "item.created" && event.item.kind === "question") {
+      if (
+        event.type === "item.created" &&
+        event.item.status === "open" &&
+        (event.item.kind === "question" || (event.item.kind === "pr" && event.item.ready === 1))
+      ) {
         if (typeof Notification !== "undefined" && Notification.permission === "granted") {
           try {
             new Notification(event.item.title, {
@@ -66,9 +90,17 @@ export function App() {
   // Sidebar open counts.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.listItems({ status: "open" }), api.listTasks("open"), api.listIdeas("new")])
-      .then(([items, tasks, ideas]) => {
-        if (!cancelled) setCounts({ inbox: items.length, tasks: tasks.length, ideas: ideas.length });
+    Promise.all([api.listItems({ status: "open" }), api.listTasks("open"), api.listIdeas("new"), api.listSessions(), api.listPulls()])
+      .then(([items, tasks, ideas, sessions, pullsRes]) => {
+        if (!cancelled) {
+          setCounts({
+            inbox: items.length,
+            tasks: tasks.length,
+            pulls: pullsRes.pulls.filter((p) => p.color !== "green").length,
+            sessions: sessions.filter((s) => s.state === "live").length,
+            ideas: ideas.length,
+          });
+        }
       })
       .catch(() => {
         /* 401 surfaces globally; other errors are non-fatal for counts */
@@ -77,6 +109,21 @@ export function App() {
       cancelled = true;
     };
   }, [eventVersion]);
+
+  // Offline mode: track connectivity (the service worker serves cached data).
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
 
   if (unauthorized) return <TokenScreen />;
 
@@ -92,7 +139,7 @@ export function App() {
             <button
               key={t.key}
               className={`nav-item ${tab === t.key ? "nav-active" : ""}`}
-              onClick={() => setTab(t.key)}
+              onClick={() => selectTab(t.key)}
             >
               <span>{t.label}</span>
               {t.key !== "settings" ? (
@@ -106,8 +153,16 @@ export function App() {
         {bootError ? <div className="sidebar-foot inline-error">{bootError}</div> : <div className="sidebar-foot muted">live</div>}
       </aside>
       <main className="content">
+        {!online ? (
+          <div className="offline-banner">
+            Offline — showing cached data. Actions will fail until the connection
+            is back.
+          </div>
+        ) : null}
         {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
+        {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
+        {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
         {tab === "ideas" ? <IdeasPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "settings" ? <SettingsPage /> : null}
       </main>

@@ -10,6 +10,7 @@ export function SettingsPage() {
   const [config, setConfig] = useState<Config | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<string>(() => localStorage.getItem("corral-theme") ?? "light");
 
   const [baseUrl, setBaseUrl] = useState("");
   const [email, setEmail] = useState("");
@@ -85,6 +86,17 @@ export function SettingsPage() {
     }
   };
 
+  const applyTheme = (value: string) => {
+    setTheme(value);
+    if (value === "system") {
+      localStorage.removeItem("corral-theme");
+      document.documentElement.dataset.theme = "system";
+    } else {
+      localStorage.setItem("corral-theme", value);
+      document.documentElement.dataset.theme = value;
+    }
+  };
+
   return (
     <div className="page settings-page">
       <div className="page-scroll">
@@ -110,10 +122,10 @@ export function SettingsPage() {
                 <dd className="mono">{config.agents.join(", ") || "—"}</dd>
                 <dt>Assistant</dt>
                 <dd className="mono">{config.assistant || "—"}</dd>
-                <dt>herdr socket</dt>
-                <dd className="mono">{config.herdrSocket || "—"}</dd>
-                <dt>Worktrees dir</dt>
-                <dd className="mono">{config.worktreesDir || "—"}</dd>
+                <dt>Agent backend</dt>
+                <dd className="mono">{config.backend || "—"}</dd>
+                <dt>omnigent</dt>
+                <dd className="mono">{config.omnigentUrl || "—"}</dd>
                 <dt>API token</dt>
                 <dd className="mono">{config.token}</dd>
                 <dt>Jira</dt>
@@ -167,6 +179,26 @@ export function SettingsPage() {
             </section>
 
             <ReposSection />
+
+            <section className="panel-form">
+              <h2 className="panel-title">Theme</h2>
+              <p className="muted">Light is the default. Dark follows your OS only when set to "system".</p>
+              <div className="chip-row">
+                {[
+                  { key: "light", label: "Light" },
+                  { key: "dark", label: "Dark" },
+                  { key: "system", label: "System" },
+                ].map((t) => (
+                  <button
+                    key={t.key}
+                    className={`chip ${theme === t.key ? "chip-active" : ""}`}
+                    onClick={() => applyTheme(t.key)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </section>
 
             <section className="panel-form">
               <h2 className="panel-title">Desktop notifications</h2>

@@ -16,7 +16,11 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [showNew, setShowNew] = useState(false);
-  const [showImport, setShowImport] = useState(false);
+  const [showImport, setShowImport] = useState(() => {
+    // Deep link: #/tasks?import=1 opens the Jira import panel directly.
+    const q = window.location.hash.split("?")[1] ?? "";
+    return new URLSearchParams(q).get("import") === "1";
+  });
   const [repos, setRepos] = useState<Repo[]>([]);
 
   useEffect(() => {
@@ -229,6 +233,12 @@ function TaskRow({ task, repos, refresh }: { task: Task; repos: Repo[]; refresh:
           </span>
           {task.target && task.target_state === "suggested" ? <span className="muted">(suggested)</span> : null}
           {task.branch ? <span className="mono">{task.branch}</span> : null}
+          {task.pr_url ? (
+            <a href={task.pr_url} target="_blank" rel="noreferrer" className="meta-link">
+              PR
+              <ExternalLinkIcon />
+            </a>
+          ) : null}
           {task.repo_path ? <span className="mono muted">{task.repo_path}</span> : null}
           <span className="time muted" title={formatTs(task.updated_ms)}>
             {timeAgo(task.updated_ms)}
@@ -477,6 +487,21 @@ function JiraImport({ onImported, onClose }: { onImported: () => void; onClose: 
     () => (results ?? []).filter((r) => selectedKeys.has(r.jira_key)),
     [results, selectedKeys],
   );
+
+  // Prefill with the configured default JQL (Settings) so it is visible and
+  // editable instead of hidden server-side behavior.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getConfig()
+      .then((cfg) => {
+        if (!cancelled && cfg.jiraJql) setQ((prev) => prev || cfg.jiraJql);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const search = async () => {
     if (busy) return;

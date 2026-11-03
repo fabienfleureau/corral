@@ -13,6 +13,16 @@ export interface JiraConfig {
   jql: string;
 }
 
+export interface OmnigentConfig {
+  baseUrl: string;
+  /** Bearer token (machine token / login token); empty = unauthenticated. */
+  token: string;
+  /** Host id for worktree creation (session create with git options needs it). */
+  hostId: string;
+  /** harness id -> omnigent agent registration + optional harness override. */
+  agents: Record<string, { agentId?: string; harness?: string }>;
+}
+
 export interface Config {
   port: number;
   host: string;
@@ -28,6 +38,7 @@ export interface Config {
   /** Corral's own LLM calls (summarization). "{prompt}" placeholder. */
   assistant: string[];
   jira: JiraConfig;
+  omnigent: OmnigentConfig;
 }
 
 function defaultConfig(): Config {
@@ -49,6 +60,16 @@ function defaultConfig(): Config {
     },
     assistant: ["claude", "-p", "{prompt}"],
     jira: { baseUrl: "", email: "", token: "", jql: "" },
+    omnigent: {
+      baseUrl: "http://127.0.0.1:6767",
+      token: "",
+      hostId: "",
+      agents: {
+        claude: { harness: "claude-native" },
+        codex: { harness: "codex-native" },
+        opencode: { harness: "opencode-native" },
+      },
+    },
   };
 }
 

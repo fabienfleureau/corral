@@ -14,6 +14,7 @@ export type Task = {
   jira_key: string | null;
   jira_url: string | null;
   jira_parent_key: string | null;
+  pr_url: string | null;
   status: "open" | "dispatched" | "done" | "archived";
   terminal_address: string | null;
   exit_code: number | null;
@@ -28,13 +29,49 @@ export type Item = {
   title: string;
   summary: string; // structured summary ("" until summarized)
   body: string; // raw tail / structured body — shown when summary is empty
+  context: string; // raw agent output captured at report time (context drawer)
+  options: string | null; // JSON array of quick-reply options
   source_ref: string | null; // herdr terminal address for question items
   task_id: string | null;
   structured: number; // 1 = agent reported it, 0 = blocked-status fallback
+  ready: number; // for pr items: 1 = review gate passes (threads resolved, checks green)
   created_ms: number;
   updated_ms: number;
   resolved_ms: number | null;
   snooze_until_ms: number | null;
+};
+
+export type SessionInfo = {
+  address: string;
+  name: string | null;
+  agent: string | null;
+  task_id: string | null;
+  task_title: string | null;
+  status: string | null; // working | blocked | idle | done | error | null
+  state: string; // live | finished | unknown
+  turn: number;
+  cwd: string;
+  created_ms: number;
+  updated_ms: number;
+  exit_code: number | null;
+};
+
+export type PullColor = "green" | "orange" | "red";
+
+export type Pull = {
+  id: string;
+  host: "github" | "gitlab";
+  number: number;
+  title: string;
+  url: string;
+  repo: string;
+  state: string; // open | draft | merged | closed
+  author: string;
+  isMine: boolean;
+  awaitingMe: boolean;
+  color: PullColor;
+  reason: string;
+  updated_ms: number;
 };
 
 export type Idea = {
@@ -85,8 +122,8 @@ export type Config = {
   host: string;
   agents: string[];
   assistant: string;
-  herdrSocket: string;
-  worktreesDir: string;
+  backend: string;
+  omnigentUrl: string;
   jiraConfigured: boolean;
   jiraJql: string;
   token: string; // masked

@@ -6,6 +6,7 @@ import { api } from "../api";
 import type { Item, Task } from "../types";
 import { errText, formatTs, snoozeUntil, timeAgo } from "../util";
 import { KindIcon, Spinner } from "../ui";
+import { Markdown } from "../markdown";
 
 type StatusFilter = "open" | "resolved" | "archived";
 
@@ -30,6 +31,8 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [summarizeBusy, setSummarizeBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [openBusy, setOpenBusy] = useState(false);
+  const [attachCmd, setAttachCmd] = useState<string | null>(null);
 
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -85,13 +88,14 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
     }
   };
 
-  const sendReply = async () => {
-    if (!selected || !replyText.trim() || replyBusy) return;
+  const sendReply = async (override?: string) => {
+    const text = (override ?? replyText).trim();
+    if (!selected || !text || replyBusy) return;
     setReplyBusy(true);
     setReplyError(null);
     setReplyOk(null);
     try {
-      const res = await api.replyItem(selected.id, replyText);
+      const res = await api.replyItem(selected.id, text);
       setReplyOk(`Sent to ${res.sent_to}`);
       setReplyText("");
       applyItem({ ...selected, status: "resolved", resolved_ms: Date.now() });
@@ -99,6 +103,21 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
       setReplyError(errText(err));
     } finally {
       setReplyBusy(false);
+    }
+  };
+
+  const openConversation = async () => {
+    if (!selected?.source_ref || openBusy) return;
+    setOpenBusy(true);
+    setActionError(null);
+    setAttachCmd(null);
+    try {
+      const res = await api.openSession(selected.source_ref);
+      if (res.url) window.open(res.url, "_blank", "noopener");
+    } catch (err) {
+      setActionError(errText(err));
+    } finally {
+      setOpenBusy(false);
     }
   };
 
@@ -172,6 +191,13 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                       <span className="kind-label">{item.kind}</span>
                       <span>·</span>
                       <span>{item.structured ? "structured" : "auto-captured"}</span>
+                      {item.kind === "pr" && item.status === "open" ? (
+                        item.ready === 1 ? (
+                          <span className="badge badge-ready">ready for review</span>
+                        ) : (
+                          <span className="badge badge-wait">needs work</span>
+                        )
+                      ) : null}
                     </span>
                   </span>
                   <span className="item-row-side">
@@ -200,6 +226,13 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                 <span className="chip chip-static">
                   {selected.structured ? "structured report" : "auto-captured"}
                 </span>
+                {selected.kind === "pr" && selected.status === "open" ? (
+                  selected.ready === 1 ? (
+                    <span className="badge badge-ready">ready for review</span>
+                  ) : (
+                    <span className="badge badge-wait">needs work — {selected.summary || "see body"}</span>
+                  )
+                ) : null}
                 <span className={`chip chip-static status-${selected.status}`}>{selected.status}</span>
                 {linkedTask ? (
                   <span className="meta-task">
@@ -218,11 +251,22 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
             </div>
 
             <div className="detail-body">
-              {selected.summary ? (
-                <div className="body-text">{selected.summary}</div>
+              {selected.structured ? (
+                <>
+                  {selected.summary ? <Markdown text={selected.summary} className="body-text" /> : null}
+                  {selected.body && selected.body !== selected.summary ? (
+                    <Markdown text={selected.body} className="body-text" />
+                  ) : null}
+                </>
               ) : (
                 <pre className="body-text body-raw">{selected.body}</pre>
               )}
+              {selected.context ? (
+                <details className="context-drawer">
+                  <summary>Recent agent output</summary>
+                  <pre className="body-text body-raw">{selected.context}</pre>
+                </details>
+              ) : null}
               {!selected.summary && selected.kind === "question" ? (
                 <div className="summarize-row">
                   <button className="btn" onClick={() => void summarize()} disabled={summarizeBusy}>
@@ -236,6 +280,12 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
 
             <div className="detail-actions">
               <div className="action-row">
+                {selected.source_ref ? (
+                  <button className="btn btn-primary" onClick={() => void openConversation()} disabled={openBusy}>
+                    {openBusy ? <Spinner /> : null}
+                    {openBusy ? "Opening…" : "Open conversation"}
+                  </button>
+                ) : null}
                 <button
                   className="btn"
                   onClick={() => void runAction(() => api.resolveItem(selected.id))}
@@ -274,8 +324,36 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                 </button>
               </div>
               {actionError ? <div className="inline-error">{actionError}</div> : null}
+              {attachCmd ? (
+                <div className="inline-ok">
+                  Open it yourself: <code className="mono">{attachCmd}</code>
+                </div>
+              ) : null}
 
               <div className="reply-block">
+                {(() => {
+                  let options: string[] = [];
+                  try {
+                    options = selected.options ? (JSON.parse(selected.options) as string[]) : [];
+                  } catch {
+                    options = [];
+                  }
+                  return options.length > 0 ? (
+                    <div className="option-row">
+                      {options.map((opt) => (
+                        <button
+                          key={opt}
+                          className="btn option-btn"
+                          onClick={() => void sendReply(opt)}
+                          disabled={replyBusy || selected.status !== "open"}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                      <span className="muted">…or type below</span>
+                    </div>
+                  ) : null;
+                })()}
                 <textarea
                   ref={replyRef}
                   className="reply-input"
