@@ -10,8 +10,7 @@ import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import { gitToplevel } from "./repos.ts";
 import type { WorkerBackend, WorkerSession } from "./worker.ts";
-import type { Task } from "./types.ts";
-import { taskLabel } from "./types.ts";
+import { taskLabel, type Task } from "./types.ts";
 
 export function slugify(s: string, max = 40): string {
   const slug = s

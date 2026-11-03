@@ -11,7 +11,6 @@ import type { Db } from "./db.ts";
 import type { WorkerBackend } from "./worker.ts";
 import type { Hub } from "./capture.ts";
 import type { Item, Task } from "./types.ts";
-import { taskLabel } from "./types.ts";
 import { questionConvention, slugify } from "./dispatch.ts";
 
 export interface PrThread {
@@ -332,7 +331,7 @@ async function respawnForWork(
     .filter(Boolean)
     .join(" and ");
   const prompt = [
-    `Task follow-up: ${what} on your PR for "${taskLabel(task)}".`,
+    `Task follow-up: ${what} on your PR for "${task.title}".`,
     "",
     task.handoff ? `## Handoff from the previous run\n\n${task.handoff}\n` : "",
     message,
@@ -342,7 +341,7 @@ async function respawnForWork(
   ].join("\n");
   const session = await backend.start({
     taskId: task.id,
-    name: `corral-${slugify(taskLabel(task), 20)}-${work.comments ? "review" : "rebase"}`,
+    name: `corral-${slugify(task.title, 20)}-${work.comments ? "review" : "rebase"}`,
     repoPath: task.worktree_path ?? task.repo_path,
     git: task.branch
       ? { branch: task.branch, base: null, existingWorktree: Boolean(task.worktree_path) }
@@ -440,8 +439,7 @@ export interface SyncOptions {
  *    gate passes; otherwise "needs work" with the reasons,
  *  - unresolved comments are fed to the agent automatically (once per set),
  *  - merge conflicts are fed to the agent as a rebase request (once per episode),
- *  - the item auto-resolves when the PR closes; on merge the task and all
- *    its inbox items are archived (the work is over, the inbox stays clean).
+ *  - the item auto-resolves when the PR merges/closes.
  */
 export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOptions = {}): Promise<PrInfo | null> {
   const finder = opts.finder ?? findPr;
@@ -459,6 +457,8 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   const { ready, reasons } = prReady(pr);
   const existing = db.listItems({ kind: "pr" }).find((i) => i.task_id === task.id) ?? null;
   const shouldResolve = pr.state !== "OPEN";
+  // A merged PR means the work is over: its items go to "archived" (and the
+  // task follows) — a closed PR is just "resolved".
   const merged = pr.state === "MERGED";
   const doneStatus: Item["status"] = merged ? "archived" : "resolved";
 
@@ -502,10 +502,10 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   }
 
   const title = shouldResolve
-    ? `PR ${pr.state.toLowerCase()}: ${taskLabel(task)}`
+    ? `PR ${pr.state.toLowerCase()}: ${task.title}`
     : ready
-      ? `PR ready for review: ${taskLabel(task)}`
-      : `PR needs work: ${taskLabel(task)}`;
+      ? `PR ready for review: ${task.title}`
+      : `PR needs work: ${task.title}`;
 
   if (!existing) {
     const item: Item = {
@@ -579,19 +579,11 @@ function archiveMergedTask(db: Db, hub: Hub, task: Task): void {
   }
 }
 
-/** Tasks whose branch may have a PR: dispatched/done, with a repo and branch. */
-export function prCandidateTasks(db: Db): Task[] {
-  return db
-    .listTasks()
-    .filter((t) => (t.status === "dispatched" || t.status === "done") && t.branch && t.repo_path);
-}
-
 let lastSyncAll = 0;
 let syncAllRunning = false;
 
-/** Sync every candidate task's PR (or only those with a known PR, which is
- *  all a merge check needs). Throttled and single-flight so opening the
- *  inbox repeatedly does not hammer gh/glab; a few tasks at a time. */
+/** Sync every task that may have a PR. minIntervalMs throttles bursts;
+ *  single-flight, a few tasks at a time. */
 export async function syncAllPrs(
   db: Db,
   hub: Hub,
@@ -609,4 +601,11 @@ export async function syncAllPrs(
     syncAllRunning = false;
   }
   return true;
+}
+
+/** Tasks whose branch may have a PR: dispatched/done, with a repo and branch. */
+export function prCandidateTasks(db: Db): Task[] {
+  return db
+    .listTasks()
+    .filter((t) => (t.status === "dispatched" || t.status === "done") && t.branch && t.repo_path);
 }

@@ -215,12 +215,12 @@ export class OmnigentBackend implements WorkerBackend {
       created_ms: epochMs(raw.created_ms) ?? epochMs(raw.created_at) ?? Date.now(),
       exit_code: live === "failed" ? 1 : null,
       parent: str(raw.parent_session_id),
-      title: str(raw.title),
     };
   }
 
   async start(start: WorkerStart): Promise<WorkerSession> {
     const meta: Record<string, unknown> = {
+      // No title = omnigent generates one (untitled tasks).
       ...(start.name ? { title: start.name } : {}),
       labels: {
         "corral.task": start.taskId ?? "",
@@ -500,13 +500,12 @@ export class OmnigentBackend implements WorkerBackend {
           /* detail is best effort */
         }
       }
-      // Title in the signature so a late auto-title reaches untitled tasks.
-      const sig = JSON.stringify([s.status, s.blocked_kind, elicitations.map((e) => e.id), s.title ?? null]);
+      const sig = JSON.stringify([s.status, s.blocked_kind, elicitations.map((e) => e.id)]);
       const prev = this.last.get(s.address);
       if (prev === undefined) {
         this.last.set(s.address, sig);
         if (s.task_id) this.taskIds.set(s.address, s.task_id);
-        this.emit({ type: "created", address: s.address, task_id: s.task_id, parent: s.parent, status: s.status, elicitations, title: s.title ?? null });
+        this.emit({ type: "created", address: s.address, task_id: s.task_id, parent: s.parent, status: s.status, elicitations });
       } else if (prev !== sig) {
         this.last.set(s.address, sig);
         this.emit({
@@ -517,7 +516,6 @@ export class OmnigentBackend implements WorkerBackend {
           blocked_kind: s.blocked_kind,
           elicitations,
           parent: s.parent,
-          title: s.title ?? null,
         });
       }
     }

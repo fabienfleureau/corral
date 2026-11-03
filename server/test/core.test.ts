@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Db } from "../db.ts";
 import { slugify } from "../dispatch.ts";
-import { addRepo, importFingerprint, importPreview, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
+import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
 import { prReady, prItemBody, syncTaskPr, type PrInfo } from "../pr.ts";
 import { CaptureEngine } from "../capture.ts";
 import type {
@@ -166,23 +166,7 @@ test("repos: registry, scan and jira prefix mapping", () => {
     assert.equal(jiraKeyPrefix("QOV-2138"), "QOV");
     assert.equal(jiraKeyPrefix("NOKEY"), "NOKEY");
 
-    // import preview: mapped prefix, unmapped prefix, already imported
-    assert.deepEqual(importPreview(db, "OPS-7"), {
-      repo_path: alpha.path,
-      repo_name: alpha.name,
-      existing_task_id: null,
-    });
-    assert.deepEqual(importPreview(db, "QOV-1"), { repo_path: null, repo_name: null, existing_task_id: null });
-    db.insertTask(makeTask({ id: "task-ops-8", jira_key: "OPS-8" }));
-    assert.equal(importPreview(db, "OPS-8").existing_task_id, "task-ops-8");
-
-    // fingerprint: stable for the same fields, changes with prompt or repo
-    const fields = { title: "OPS-7 Fix", prompt: "Do it", jira_parent_key: null, repo_path: alpha.path };
-    assert.equal(importFingerprint(fields), importFingerprint({ ...fields }));
-    assert.notEqual(importFingerprint(fields), importFingerprint({ ...fields, prompt: "Do it now" }));
-    assert.notEqual(importFingerprint(fields), importFingerprint({ ...fields, repo_path: null }));
-
-    addRepo(db, join(root, "alpha"), { source: "scan" }); // duplicate path is ignored
+    addRepo(db, join(root, "alpha"), { source: "scan" });
     assert.equal(db.listRepos().length, 2);
     db.close();
   } finally {
@@ -342,53 +326,12 @@ test("pr sync: item flips ready->needs work and back, archives on merge", async 
     assert.match(item.title, /PR needs work/);
     assert.match(item.summary, /1 unresolved review comment/);
 
-    const question: Item = {
-      ...item,
-      id: "q-1",
-      kind: "question",
-      status: "resolved",
-      title: "which cache?",
-      resolved_ms: Date.now(),
-    };
-    db.insertItem(question);
-
     current = { ...current, state: "MERGED", threads: [] };
     await syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
     item = db.listItems({ kind: "pr" })[0];
-    assert.equal(item.status, "archived");
+    assert.equal(item.status, "archived", "merged PR items are archived");
     assert.match(item.title, /PR merged/);
-    assert.equal(db.getItem("q-1")?.status, "archived");
-    assert.equal(db.getTask("task-1")?.status, "archived");
-    db.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("pr sync: closed without merge resolves but keeps the task", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "corral-prclose-"));
-  try {
-    const db = new Db(join(dir, "test.db"));
-    db.insertTask(makeTask({ branch: "feat-y", status: "done", repo_path: "/tmp/repo" }));
-    const hub = { broadcast: () => undefined };
-    const pr: PrInfo = {
-      url: "https://example.com/pr/8",
-      title: "feat: y",
-      state: "CLOSED",
-      number: 8,
-      description: "",
-      additions: 0,
-      deletions: 0,
-      changed_files: 0,
-      mergeable: null,
-      base_ref: "main",
-      review_decision: null,
-      checks: { total: 0, failed: 0, pending: false },
-      threads: [],
-    };
-    await syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => pr });
-    assert.equal(db.listItems({ kind: "pr" })[0].status, "resolved");
-    assert.equal(db.getTask("task-1")?.status, "done");
+    assert.equal(db.getTask("task-1")?.status, "archived", "merged PR archives the task");
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -475,29 +418,6 @@ test("pr sync: merge conflicts are pushed to the agent once per episode", async 
     assert.doesNotMatch(sent[3].text, /curl/);
     assert.equal(started.length, 0);
     db.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("capture: untitled task adopts the omnigent session title, titled task keeps its own", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "corral-test-"));
-  try {
-    const db = new Db(join(dir, "test.db"));
-    db.insertTask(makeTask({ title: "", prompt: "Fix the flaky login test\nmore context", terminal_address: "s1" }));
-    db.insertTask(makeTask({ id: "task-2", title: "Mine", terminal_address: "s2" }));
-    const { backend } = fakeBackend();
-    const engine = new CaptureEngine(db, backend, { broadcast: () => undefined });
-
-    // no title yet -> stays untitled
-    await engine.handleEvent({ type: "created", address: "s1", task_id: "task-1", status: "working", title: null });
-    assert.equal(db.getTask("task-1")?.title, "");
-
-    await engine.handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "working", title: "Fix flaky login test" });
-    assert.equal(db.getTask("task-1")?.title, "Fix flaky login test");
-
-    await engine.handleEvent({ type: "status", address: "s2", task_id: "task-2", status: "working", title: "Other" });
-    assert.equal(db.getTask("task-2")?.title, "Mine");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

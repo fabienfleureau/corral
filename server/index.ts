@@ -6,7 +6,7 @@ import { Db } from "./db.ts";
 import { OmnigentBackend } from "./omnigent.ts";
 import { CaptureEngine } from "./capture.ts";
 import { JiraClient } from "./jira.ts";
-import { syncAllPrs } from "./pr.ts";
+import { prCandidateTasks, syncAllPrs, syncTaskPr } from "./pr.ts";
 import { refreshPulls } from "./pulls.ts";
 import { createHttpServer, type AppState } from "./api.ts";
 import type { ServerResponse } from "node:http";
