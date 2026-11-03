@@ -1,4 +1,5 @@
-/* Corral — dense "mail app" UI. Neutral palette, dark-mode aware. */
+/* Corral — dense "mail app" UI. Neutral palette. Light is the default theme;
+   dark is opt-in (explicitly, or "system" following the OS). */
 
 :root {
   --bg: #ffffff;
@@ -22,28 +23,51 @@
   --shadow: 0 1px 2px rgba(16, 20, 26, 0.06);
 }
 
+/* Dark palette: explicit choice, or the OS when the theme is "system". */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #181a1f;
-    --bg-sunken: #111318;
-    --bg-hover: #22262d;
-    --chip-bg: #272b32;
-    --code-bg: #20242b;
-    --border: #2b3038;
-    --text: #e6e8eb;
-    --muted: #979ea8;
-    --faint: #6b727c;
-    --accent: #4a63d8;
-    --accent-ink: #9db1ff;
-    --accent-soft: #232a44;
-    --danger-ink: #ff8f88;
-    --danger-soft: #3b2325;
-    --warn-ink: #e0b45c;
-    --warn-soft: #3a3121;
-    --ok-ink: #7ddba4;
-    --ok-soft: #1e3229;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --bg: #23262c;
+    --bg-sunken: #1b1e23;
+    --bg-hover: #2b2f36;
+    --chip-bg: #31363e;
+    --code-bg: #272b32;
+    --border: #3a4048;
+    --text: #e9ebee;
+    --muted: #a6adb7;
+    --faint: #7c838d;
+    --accent: #7c93ee;
+    --accent-ink: #a9bbff;
+    --accent-soft: #2b3350;
+    --danger-ink: #ff9d96;
+    --danger-soft: #43292b;
+    --warn-ink: #e8c175;
+    --warn-soft: #423823;
+    --ok-ink: #8ce3b2;
+    --ok-soft: #22382e;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #23262c;
+  --bg-sunken: #1b1e23;
+  --bg-hover: #2b2f36;
+  --chip-bg: #31363e;
+  --code-bg: #272b32;
+  --border: #3a4048;
+  --text: #e9ebee;
+  --muted: #a6adb7;
+  --faint: #7c838d;
+  --accent: #7c93ee;
+  --accent-ink: #a9bbff;
+  --accent-soft: #2b3350;
+  --danger-ink: #ff9d96;
+  --danger-soft: #43292b;
+  --warn-ink: #e8c175;
+  --warn-soft: #423823;
+  --ok-ink: #8ce3b2;
+  --ok-soft: #22382e;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 *,
