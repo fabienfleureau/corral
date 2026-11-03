@@ -217,6 +217,8 @@ test("pr gate: ready only when threads answered, checks green, mergeable", () =>
   assert.match(prReady({ ...base, checks: { total: 2, failed: 1, pending: false } }).reasons.join(), /1 failing check/);
   assert.match(prReady({ ...base, checks: { total: 2, failed: 0, pending: true } }).reasons.join(), /checks still running/);
   assert.match(prReady({ ...base, mergeable: "CONFLICTING" }).reasons.join(), /merge conflicts/);
+  assert.equal(prReady({ ...base, mergeable: "UNKNOWN" }).ready, false);
+  assert.equal(prReady({ ...base, mergeable: null }).ready, false);
   assert.equal(prReady({ ...base, state: "MERGED" }).ready, false);
 
   const body = prItemBody(base);
@@ -414,7 +416,7 @@ test("pr sync: merge conflicts are pushed to the agent once per episode", async 
       exit_code: null,
       parent: null,
     });
-    const cfg = { agents: { claude: {} }, host: "127.0.0.1", port: 4787, token: "t" } as never;
+    const cfg = { agents: { claude: {} }, configDir: dir, host: "127.0.0.1", port: 4787, token: "t" } as never;
     let current: PrInfo = {
       url: "https://example.com/pr/7",
       title: "feat: x",
@@ -451,6 +453,12 @@ test("pr sync: merge conflicts are pushed to the agent once per episode", async 
     assert.equal(sent.length, 2);
     assert.match(sent[1].text, /^PR review comments/);
     assert.doesNotMatch(sent[1].text, /merge conflicts/);
+
+    current = { ...current, mergeable: "UNKNOWN", threads: [] };
+    await sync(); // recalculating: episode not over
+    current = { ...current, mergeable: "CONFLICTING" };
+    await sync();
+    assert.equal(sent.length, 2);
 
     current = { ...current, mergeable: "MERGEABLE", threads: [] };
     await sync(); // resolved: episode cleared
@@ -490,6 +498,93 @@ test("capture: untitled task adopts the omnigent session title, titled task keep
 
     await engine.handleEvent({ type: "status", address: "s2", task_id: "task-2", status: "working", title: "Other" });
     assert.equal(db.getTask("task-2")?.title, "Mine");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pr sync: failed delivery is retried; respawn keeps harness and moves source_ref", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-prretry-"));
+  try {
+    const db = new Db(join(dir, "test.db"));
+    db.insertTask(makeTask({ branch: "feat-x", status: "dispatched", target: "junie", terminal_address: "old" }));
+    const hub = { broadcast: () => undefined };
+    const { backend, started } = fakeBackend();
+    const realStart = backend.start;
+    let down = true;
+    backend.start = async (s) => {
+      if (down) throw new Error("backend down");
+      return realStart(s);
+    };
+    const cfg = { agents: { claude: {} }, configDir: dir, host: "127.0.0.1", port: 4787, token: "t" } as never;
+    const pr: PrInfo = {
+      url: "https://example.com/pr/7",
+      title: "feat: x",
+      state: "OPEN",
+      number: 7,
+      description: "x",
+      additions: 1,
+      deletions: 1,
+      changed_files: 1,
+      mergeable: "CONFLICTING",
+      base_ref: "main",
+      review_decision: null,
+      checks: { total: 0, failed: 0, pending: false },
+      threads: [],
+    };
+    const settle = () => new Promise((r) => setTimeout(r, 10));
+    const sync = async () => {
+      syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => pr, backend, cfg });
+      await settle();
+    };
+
+    await sync(); // respawn fails: not marked delivered
+    assert.equal(started.length, 0);
+    assert.equal(JSON.parse(db.getTask("task-1")!.pr_meta ?? "{}").conflict, undefined);
+
+    down = false;
+    await sync(); // retried
+    assert.equal(started.length, 1);
+    assert.equal(started[0].harness, "junie");
+    assert.equal(db.getTask("task-1")!.terminal_address, "s1");
+
+    await sync(); // next sync points the PR item at the new session
+    assert.equal(db.listItems({ kind: "pr" })[0].source_ref, "s1");
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pr sync: concurrent syncs deliver once", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-prconc-"));
+  try {
+    const db = new Db(join(dir, "test.db"));
+    db.insertTask(makeTask({ branch: "feat-x", status: "dispatched" }));
+    const hub = { broadcast: () => undefined };
+    const { backend, started } = fakeBackend();
+    const cfg = { agents: { claude: {} }, configDir: dir, host: "127.0.0.1", port: 4787, token: "t" } as never;
+    const pr: PrInfo = {
+      url: "https://example.com/pr/7",
+      title: "feat: x",
+      state: "OPEN",
+      number: 7,
+      description: "x",
+      additions: 1,
+      deletions: 1,
+      changed_files: 1,
+      mergeable: "CONFLICTING",
+      base_ref: "main",
+      review_decision: null,
+      checks: { total: 0, failed: 0, pending: false },
+      threads: [{ id: "t1", author: "bot", body: "fix" }],
+    };
+    const opts = { finder: () => pr, backend, cfg };
+    syncTaskPr(db, hub, db.getTask("task-1")!, opts);
+    syncTaskPr(db, hub, db.getTask("task-1")!, opts);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(started.length, 1);
+    db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

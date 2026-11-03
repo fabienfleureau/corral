@@ -55,6 +55,7 @@ export function prReady(pr: PrInfo): PrReady {
   if (pr.checks.pending) reasons.push("checks still running");
   if (pr.checks.failed > 0) reasons.push(`${pr.checks.failed} failing check${pr.checks.failed === 1 ? "" : "s"}`);
   if (pr.mergeable === "CONFLICTING") reasons.push("merge conflicts");
+  else if (pr.state === "OPEN" && pr.mergeable !== "MERGEABLE") reasons.push("mergeability unknown");
   if (pr.review_decision === "CHANGES_REQUESTED") reasons.push("changes requested");
   return { ready: reasons.length === 0, reasons };
 }
@@ -316,7 +317,9 @@ async function respawnForWork(
   message: string,
   work: PrWork,
 ): Promise<string | null> {
-  const target = task.target && cfg.agents[task.target] ? task.target : "claude";
+  // Keep the task's harness: dispatch accepts registry harnesses that are
+  // not in cfg.agents, so checking that map would silently fall back.
+  const target = task.target || "claude";
   const what = [work.conflict ? "merge conflicts" : "", work.comments ? "review comments" : ""]
     .filter(Boolean)
     .join(" and ");
@@ -409,6 +412,10 @@ function patchMeta(db: Db, taskId: string, patch: PrMeta): void {
   db.updateTask(taskId, { pr_meta: JSON.stringify(meta) });
 }
 
+/** Tasks with a delivery underway: blocks a concurrent sync (periodic,
+ *  /check-pr, finish event) from respawning a second agent. */
+const delivering = new Set<string>();
+
 // ---- sync ----
 
 export interface SyncOptions {
@@ -449,16 +456,22 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
   // automatically, once per comment set / conflict episode, in one message.
   const meta = readMeta(task.pr_meta);
   const conflicting = !shouldResolve && pr.mergeable === "CONFLICTING";
-  if (!conflicting && meta.conflict) patchMeta(db, task.id, { conflict: false });
-  if (!shouldResolve && opts.backend && opts.cfg) {
+  // End the episode only on confirmed mergeability or closure: GitHub reports
+  // UNKNOWN while recalculating after a push.
+  if (meta.conflict && (shouldResolve || pr.mergeable === "MERGEABLE")) {
+    patchMeta(db, task.id, { conflict: false });
+  }
+  if (!shouldResolve && opts.backend && opts.cfg && !delivering.has(task.id)) {
     const sig = threadSignature(pr);
     const work: PrWork = {
       comments: pr.threads.length > 0 && meta.pushed !== sig,
       conflict: conflicting && !meta.conflict,
     };
     if (work.comments || work.conflict) {
+      delivering.add(task.id);
       void deliverWork(db, opts.cfg, opts.backend, task, pr, work)
         .then((address) => {
+          if (!address) return; // not delivered: retry on the next sync
           patchMeta(db, task.id, {
             ...(work.comments ? { pushed: sig } : {}),
             ...(work.conflict ? { conflict: true } : {}),
@@ -473,7 +486,8 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
             db.recordMetric("pr.conflicts_pushed", task.id, { base: pr.base_ref, to: address ?? "none" });
           }
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => delivering.delete(task.id));
     }
   }
 
@@ -511,6 +525,9 @@ export function syncTaskPr(db: Db, hub: Hub, task: Task, opts: SyncOptions = {})
 
   const patch: Partial<Item> = {};
   if (existing.title !== title) patch.title = title;
+  // Follow respawns so inbox replies reach the current session.
+  const address = db.getTask(task.id)?.terminal_address ?? null;
+  if (address && existing.source_ref !== address) patch.source_ref = address;
   const body = prItemBody(pr);
   if (existing.body !== body) patch.body = body;
   const summary = ready && !shouldResolve ? "ready for review" : reasons.join(", ") || "ready";
