@@ -113,7 +113,10 @@ export const api = {
     get<Task[]>(`/api/tasks${query({ status })}`),
   createTask: (input: NewTaskInput): Promise<Task> => post<Task>("/api/tasks", input),
   patchTask: (id: string, input: Partial<Task>): Promise<Task> => patch<Task>(`/api/tasks/${id}`, input),
-  dispatchTask: (id: string, input: { target?: string; use_worktree?: boolean }): Promise<DispatchResult> =>
+  dispatchTask: (
+    id: string,
+    input: { target?: string; use_worktree?: boolean; agent?: string | null },
+  ): Promise<DispatchResult> =>
     post<DispatchResult>(`/api/tasks/${id}/dispatch`, input),
   cleanupTask: (id: string): Promise<{ ok: boolean }> => post<{ ok: boolean }>(`/api/tasks/${id}/cleanup`),
   checkPr: (id: string): Promise<{ pr: unknown; task: Task }> =>

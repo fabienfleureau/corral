@@ -81,7 +81,12 @@ export async function dispatchTask(
   backend: WorkerBackend,
   task: Task,
   target: string,
-  opts: { useWorktree?: boolean; model?: string | null; reasoning?: string | null } = {},
+  opts: {
+    useWorktree?: boolean;
+    model?: string | null;
+    reasoning?: string | null;
+    agent?: string | null;
+  } = {},
 ): Promise<DispatchResult> {
   if (!task.repo_path?.trim()) {
     throw new Error("task has no repo assigned — assign one before dispatching");
@@ -113,6 +118,7 @@ export async function dispatchTask(
       git: useWorktree ? { branch, base: task.base_branch } : null,
       prompt: fullPrompt,
       harness: target,
+      agent: opts.agent ?? null,
       model: opts.model ?? null,
       reasoning: opts.reasoning ?? null,
       env: {
