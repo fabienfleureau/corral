@@ -9,7 +9,7 @@
   },
   "scripts": {
     "serve": "node server/index.ts",
-    "reload": "lsof -ti :${CORRAL_PORT:-4787} -sTCP:LISTEN | xargs kill 2>/dev/null; npm run serve",
+    "reload": "launchctl kickstart -k gui/$(id -u)/com.corral.app",
     "dev": "node server/index.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "build": "vite build --config web/vite.config.ts",
