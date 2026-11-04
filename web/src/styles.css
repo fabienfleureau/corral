@@ -161,6 +161,7 @@ button {
   align-items: center;
   width: 100%;
   text-align: left;
+  text-decoration: none;
   padding: 7px 10px;
   border: none;
   border-radius: 8px;
