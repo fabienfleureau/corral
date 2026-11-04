@@ -169,7 +169,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     } else {
       await state.backend.send(address, text);
     }
-    state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now() });
+    state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now(), body: `${item.body}\n\n**Reply:** ${permission || text.trim()}` });
     state.db.recordMetric("item.replied", item.id, { address });
     state.hub.broadcast("item.updated", state.db.getItem(item.id));
     json(res, 200, { ok: true, sent_to: address });

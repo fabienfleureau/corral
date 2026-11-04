@@ -135,6 +135,17 @@ export class CaptureEngine {
       title = task ? `${task.title} — needs you` : `Agent ${e.address} needs you`;
     }
 
+    const previous = this.db.questionItemForTerminal(e.address);
+    if (previous) {
+      this.db.updateItem(previous.id, {
+        status: "open", resolved_ms: null, title, summary, body: `${previous.body}\n\n---\n\n${body}`,
+        options, structured, elicitation, task_id: taskId ?? previous.task_id,
+      });
+      const updated = this.db.getItem(previous.id)!;
+      this.hub.broadcast("item.updated", updated);
+      return updated;
+    }
+
     const item: Item = {
       id: randomUUID(),
       kind: "question",
@@ -234,12 +245,15 @@ export class CaptureEngine {
     // A structured question supersedes any pending capture for this terminal
     // (fallback tail or elicitation) — the agent's own framing is authoritative.
     if (address && itemKind === "question") {
-      const existing = this.db.openQuestionItemForTerminal(address);
+      const existing = this.db.questionItemForTerminal(address);
       if (existing) {
         this.db.updateItem(existing.id, {
           title: opts.title,
           summary: opts.body,
-          body: opts.body,
+          body: existing.status === "resolved" ? `${existing.body}\n\n---\n\n${opts.body}` : opts.body,
+          status: "open",
+          resolved_ms: null,
+          elicitation: null,
           context: context || existing.body,
           options: optionsJson,
           task_id: taskId ?? existing.task_id,
