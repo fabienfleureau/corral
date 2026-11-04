@@ -30,6 +30,9 @@ export interface WorkerStart {
 
 export interface WorkerSession {
   address: string;
+  /** Session-reported settings, when available. */
+  model?: string | null;
+  reasoning?: string | null;
   task_id: string | null;
   name: string | null;
   harness: string | null;

@@ -304,8 +304,10 @@ function TaskRow({
         <div className="task-sub">
           <span className={`badge status-${task.status}`} title={task.worktree_path ? `Worktree: ${task.worktree_path}` : undefined}>{task.status}</span>
           {task.target ? <span className="badge badge-target">{task.target}</span> : null}
-          <span className="muted">Model: {task.model || "Harness default"}</span>
-          <span className="muted">Reasoning: {task.reasoning || "Harness default"}</span>
+          {task.terminal_address ? <>
+            <span className="muted">Model: {task.session_model || "Unknown"}</span>
+            <span className="muted">Reasoning: {task.session_reasoning || "Unknown"}</span>
+          </> : null}
           {task.branch ? <span className="mono">{task.branch}</span> : null}
           {task.pr_url ? (
             <a href={task.pr_url} target="_blank" rel="noreferrer" className="pr-pill" title={task.pr_url}>

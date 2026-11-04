@@ -9,6 +9,8 @@ export type Task = {
   target_state: "suggested" | "confirmed";
   model: string | null;
   reasoning: string | null;
+  session_model: string | null;
+  session_reasoning: string | null;
   base_branch: string | null;
   branch: string | null;
   worktree_path: string | null;

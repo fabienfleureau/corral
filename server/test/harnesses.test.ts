@@ -51,3 +51,11 @@ test("session creation files the task group in an Omnigent project", async () =>
   await backend.start({ taskId: "t", name: null, repoPath: "/repo", git: null, prompt: "go", harness: "codex", agent: "custom", model: null, reasoning: null, project: "My repo" });
   assert.deepEqual(labels, { "corral.task": "t", "corral.harness": "codex", omni_project: "My repo" });
 });
+
+test("session details expose the reported model and reasoning, not the model override", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async () => ({ id: "s", llm_model: "actual-model", model_override: "requested-model", reasoning_effort: "high" });
+  const session = await backend.get("s");
+  assert.equal(session?.model, "actual-model");
+  assert.equal(session?.reasoning, "high");
+});

@@ -59,7 +59,7 @@ type Idea = {
 
 ### Tasks
 - `GET /api/harnesses` → `{harnesses, agents}` — available harness groups, their model catalogs (when supported by the worker), and the full worker agent registry.
-- `GET /api/tasks?status=open|dispatched|done|archived` → `Task[]`
+- `GET /api/tasks?status=open|dispatched|done|archived` → `(Task & {session_model: string | null, session_reasoning: string | null})[]` — linked session settings reported by the worker, or null when unavailable
 - `POST /api/tasks` `{title?, prompt?, repo_path?, target?, model?, reasoning?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch
 - `PATCH /api/tasks/:id` partial task → `Task`
 - `POST /api/tasks/:id/dispatch` `{target?, use_worktree?, agent?, model?, reasoning?}` → `{address, worktreePath, branch}` — uses saved model and reasoning when omitted; creates worktree + starts the agent (409 if already dispatched, 400 if no target)
