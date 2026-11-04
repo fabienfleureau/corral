@@ -92,7 +92,7 @@ function normalizeStatus(live: string | null, blocked: boolean): string | null {
   }
 }
 
-function normalizeElicitations(raw: unknown): WorkerElicitation[] {
+export function normalizeElicitations(raw: unknown): WorkerElicitation[] {
   if (!Array.isArray(raw)) return [];
   const out: WorkerElicitation[] = [];
   for (const entry of raw) {
@@ -100,7 +100,7 @@ function normalizeElicitations(raw: unknown): WorkerElicitation[] {
     const params = (e.params ?? e.request ?? e) as Record<string, unknown>;
     const id = str(e.elicitation_id) ?? str(e.id) ?? str(params.elicitation_id);
     if (!id) continue;
-    const rawKind = (str(e.kind) ?? str(e.type) ?? str(params.type) ?? str(params.kind) ?? "").toLowerCase();
+    const rawKind = [e.kind, e.type, params.type, params.kind, params.phase, params.policy_name].filter((v) => typeof v === "string").join(" ").toLowerCase();
     const kind = rawKind.includes("auth")
       ? "auth"
       : rawKind.includes("permission") || rawKind.includes("approval")
@@ -121,7 +121,8 @@ function normalizeElicitations(raw: unknown): WorkerElicitation[] {
       : [];
     const schema = (params.requestedSchema ?? params.requested_schema ?? null) as { properties?: Record<string, unknown> } | null;
     const field = schema?.properties ? (Object.keys(schema.properties)[0] ?? null) : null;
-    out.push({ id, kind, prompt: prompt.slice(0, 4000), choices, field });
+    const persistPattern = params.phase === "agy_permission" ? str(params.always_allow_pattern) : null;
+    out.push({ id, kind, prompt: prompt.slice(0, 4000), choices, field, ...(persistPattern ? { persistPattern } : {}) });
   }
   return out;
 }
@@ -393,11 +394,12 @@ export class OmnigentBackend implements WorkerBackend {
     elicitationId: string,
     action: "accept" | "decline" | "cancel",
     content?: Record<string, unknown>,
+    meta?: Record<string, unknown>,
   ): Promise<void> {
     await this.request(
       "POST",
       `/v1/sessions/${address}/elicitations/${encodeURIComponent(elicitationId)}/resolve`,
-      content ? { action, content } : { action },
+      { action, ...(content ? { content } : {}), ...(meta ? { _meta: meta } : {}) },
     );
   }
 

@@ -205,3 +205,40 @@ test("mapLimit bounds concurrency and keeps order", async () => {
   assert.deepEqual(out, [10, 20, 30, 40, 50, 60]);
   assert.equal(peak, 2);
 });
+
+test("omnigent: permission phase exposes approval and scoped options", async () => {
+  const { normalizeElicitations } = await import("../omnigent.ts");
+  const [e] = normalizeElicitations([{ elicitation_id: "e", type: "response.elicitation_request", params: { phase: "agy_permission", message: "Run git log?", always_allow_pattern: "git log" } }]);
+  assert.equal(e.kind, "permission");
+  assert.equal(e.persistPattern, "git log");
+});
+
+test("capture: refreshes a previously captured permission on startup", withDb(async (db) => {
+  db.insertTask(makeTask());
+  const engine = new CaptureEngine(db, stubBackend(), { broadcast: () => undefined });
+  await engine.handleEvent(blockedEvent("created"));
+  const existing = db.openQuestionItemForTerminal("s1")!;
+  await engine.handleEvent({ ...blockedEvent("created"), elicitations: [{ id: "el-1", kind: "permission", prompt: "Run git log?", choices: [], persistPattern: "git log" }] });
+  const item = db.openQuestionItemForTerminal("s1")!;
+  assert.equal(item.id, existing.id);
+  assert.deepEqual(JSON.parse(item.elicitation!), { id: "el-1", kind: "permission", field: null, persistPattern: "git log" });
+}));
+
+test("permission button verdicts preserve the selected scope", async () => {
+  const { permissionVerdict } = await import("../api.ts");
+  const permission = { id: "e", kind: "permission", persistPattern: "git log" };
+  assert.deepEqual(permissionVerdict(permission, "approve"), { action: "accept" });
+  assert.deepEqual(permissionVerdict(permission, "reject"), { action: "decline" });
+  assert.deepEqual(permissionVerdict(permission, "session"), { action: "accept", meta: { persist: "session" } });
+  assert.deepEqual(permissionVerdict(permission, "always"), { action: "accept", meta: { persist: "always" } });
+  assert.equal(permissionVerdict({ id: "e", kind: "permission" }, "always"), null);
+  assert.equal(permissionVerdict({ id: "e", kind: "question" }, "approve"), null);
+});
+
+test("omnigent: sends scoped approval as result metadata", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  let request: unknown;
+  (backend as unknown as { request: (method: string, path: string, body: unknown) => Promise<void> }).request = async (_method, _path, body) => { request = body; };
+  await backend.resolveElicitation("s", "e", "accept", undefined, { persist: "session" });
+  assert.deepEqual(request, { action: "accept", _meta: { persist: "session" } });
+});

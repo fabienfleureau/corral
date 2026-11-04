@@ -85,6 +85,7 @@ interface ItemElicitation {
   id: string;
   kind: string;
   field?: string | null;
+  persistPattern?: string;
 }
 
 function parseElicitation(raw: string | null | undefined): ItemElicitation | null {
@@ -108,6 +109,16 @@ export function elicitationVerdict(
   if (/^(y|yes|ok|allow|approve|accept|accepted)\b/.test(t)) return { action: "accept", forward: false };
   if (/^(n|no|deny|decline|reject|refuse)\b/.test(t)) return { action: "decline", forward: false };
   return { action: "decline", forward: true };
+}
+
+export function permissionVerdict(e: ItemElicitation, choice: string): { action: "accept" | "decline"; meta?: Record<string, unknown> } | null {
+  if (e.kind !== "permission") return null;
+  if (choice === "approve") return { action: "accept" };
+  if (choice === "reject") return { action: "decline" };
+  if (e.persistPattern && (choice === "session" || choice === "always")) {
+    return { action: "accept", meta: { persist: choice } };
+  }
+  return null;
 }
 
 export function createHttpServer(state: AppState): ReturnType<typeof createServer> {
@@ -139,12 +150,17 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/items/:id/reply", async (req, res, { body, params }) => {
     const item = state.db.getItem(params.id);
     if (!item) return json(res, 404, { error: "item not found" });
-    const text = (body as { text?: string })?.text ?? "";
-    if (!text.trim()) return json(res, 400, { error: "text required" });
+    const { text = "", permission } = (body ?? {}) as { text?: string; permission?: string };
+    if (!text.trim() && !permission) return json(res, 400, { error: "text required" });
+    if (permission && item.status !== "open") return json(res, 409, { error: "item is not open" });
     const address = item.source_ref ?? (item.task_id ? state.db.getTask(item.task_id)?.terminal_address : null);
     if (!address) return json(res, 409, { error: "no terminal linked to this item" });
     const elicitation = parseElicitation(item.elicitation);
-    if (elicitation) {
+    if (permission) {
+      const verdict = elicitation && permissionVerdict(elicitation, permission);
+      if (!verdict) return json(res, 400, { error: "invalid permission choice" });
+      await state.backend.resolveElicitation(address, elicitation!.id, verdict.action, undefined, verdict.meta);
+    } else if (elicitation) {
       // A captured permission/question is answered on the elicitation itself;
       // a plain message would leave it pending in the backend.
       const verdict = elicitationVerdict(elicitation, text);

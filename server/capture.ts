@@ -87,7 +87,22 @@ export class CaptureEngine {
 
   private async ensureQuestionItem(e: WorkerEvent, taskId: string | null): Promise<Item | null> {
     const existing = this.db.openQuestionItemForTerminal(e.address);
-    if (existing) return existing;
+    if (existing) {
+      const first = e.elicitations?.[0];
+      if (first && existing.elicitation) {
+        try {
+          const old = JSON.parse(existing.elicitation) as { id?: string };
+          if (old.id === first.id) {
+            const elicitation = JSON.stringify({ id: first.id, kind: first.kind, field: first.field ?? null, ...(first.persistPattern ? { persistPattern: first.persistPattern } : {}) });
+            if (existing.elicitation !== elicitation) {
+              this.db.updateItem(existing.id, { elicitation });
+              this.hub.broadcast("item.updated", this.db.getItem(existing.id));
+            }
+          }
+        } catch { /* Keep an unrecognized existing item intact. */ }
+      }
+      return existing;
+    }
 
     const task = taskId ? this.db.getTask(taskId) : null;
     const elicitations: WorkerElicitation[] = e.elicitations ?? [];
@@ -110,7 +125,7 @@ export class CaptureEngine {
         })
         .join("\n\n---\n\n");
       if (first.choices.length > 0) options = JSON.stringify(first.choices.slice(0, 8));
-      elicitation = JSON.stringify({ id: first.id, kind: first.kind, field: first.field ?? null });
+      elicitation = JSON.stringify({ id: first.id, kind: first.kind, field: first.field ?? null, ...(first.persistPattern ? { persistPattern: first.persistPattern } : {}) });
     } else {
       try {
         body = (await this.backend.read(e.address, TAIL_LINES)) || "(output unavailable)";

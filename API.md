@@ -50,7 +50,7 @@ type Idea = {
 
 ### Inbox
 - `GET /api/items?status=open|resolved|archived&kind=question|pr|digest` → `Item[]` (newest first)
-- `POST /api/items/:id/reply` `{text}` → `{ok, sent_to}` — sends text to the item's terminal (hc send) and resolves the item. 409 if no terminal linked.
+- `POST /api/items/:id/reply` `{text}` or `{permission}` → `{ok, sent_to}` — replies to the agent and resolves the item. Permission choices are `approve`, `reject`, `session`, or `always`; scoped choices require an offered pattern. 409 if no terminal is linked or the permission item is not open.
 - `POST /api/items/:id/summarize` → `Item` — LLM summary of `body` into `summary` (async, may take ~10s)
 - `POST /api/items/:id/resolve` → `Item`
 - `POST /api/items/:id/archive` → `Item`

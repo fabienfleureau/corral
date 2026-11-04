@@ -105,14 +105,14 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
     }
   };
 
-  const sendReply = async (override?: string) => {
+  const sendReply = async (override?: string, permission?: string) => {
     const text = (override ?? replyText).trim();
-    if (!selected || !text || replyBusy) return;
+    if (!selected || (!text && !permission) || replyBusy) return;
     setReplyBusy(true);
     setReplyError(null);
     setReplyOk(null);
     try {
-      const res = await api.replyItem(selected.id, text);
+      const res = permission ? await api.replyPermission(selected.id, permission) : await api.replyItem(selected.id, text);
       setReplyOk(`Sent to ${res.sent_to}`);
       setReplyText("");
       applyItem({ ...selected, status: "resolved", resolved_ms: Date.now() });
@@ -385,6 +385,24 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
               ) : null}
 
               <div className="reply-block">
+                {(() => {
+                  try {
+                    const elicitation = selected.elicitation ? JSON.parse(selected.elicitation) as { kind?: string; persistPattern?: string } : null;
+                    if (elicitation?.kind !== "permission") return null;
+                    const choices = [
+                      { value: "approve", label: "Approve" },
+                      ...(elicitation.persistPattern ? [
+                        { value: "session", label: `Allow commands starting with ${elicitation.persistPattern} for this session` },
+                        { value: "always", label: `Always allow commands starting with ${elicitation.persistPattern}` },
+                      ] : []),
+                      { value: "reject", label: "Reject" },
+                    ];
+                    return <div className="option-row">{choices.map(({ value, label }) => (
+                      <button key={value} className={value === "approve" ? "btn btn-primary" : "btn option-btn"}
+                        onClick={() => void sendReply("", value)} disabled={replyBusy || selected.status !== "open"}>{label}</button>
+                    ))}</div>;
+                  } catch { return null; }
+                })()}
                 {(() => {
                   let options: string[] = [];
                   try {

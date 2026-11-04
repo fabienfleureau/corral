@@ -113,6 +113,8 @@ export const api = {
     get<Item[]>(`/api/items${query({ status: params.status, kind: params.kind })}`),
   replyItem: (id: string, text: string): Promise<{ ok: boolean; sent_to: string }> =>
     post<{ ok: boolean; sent_to: string }>(`/api/items/${id}/reply`, { text }),
+  replyPermission: (id: string, permission: string): Promise<{ ok: boolean; sent_to: string }> =>
+    post<{ ok: boolean; sent_to: string }>(`/api/items/${id}/reply`, { permission }),
   summarizeItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/summarize`),
   resolveItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/resolve`),
   archiveItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/archive`),
