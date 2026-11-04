@@ -231,10 +231,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/tasks", async (_req, res, { url }) => {
     const status = url.searchParams.get("status") ?? undefined;
     const tasks = state.db.listTasks(status as never);
-    const sessions = await Promise.all(tasks.map(async (task) => {
-      if (!task.terminal_address) return null;
-      try { return await state.backend.get(task.terminal_address); } catch { return null; }
-    }));
+    const sessions: (Awaited<ReturnType<WorkerBackend["get"]>>)[] = tasks.map(() => null);
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const deadline = new Promise<void>((resolve) => { timer = setTimeout(() => { controller.abort(); resolve(); }, 1500); });
+    await Promise.race([deadline, Promise.all(tasks.map(async (task, i) => {
+      if (!task.terminal_address) return;
+      try { sessions[i] = await state.backend.get(task.terminal_address, controller.signal); } catch { /* optional details */ }
+    }))]);
+    clearTimeout(timer!);
     json(res, 200, tasks.map((task, i) => ({ ...task, session_model: sessions[i]?.model ?? null, session_reasoning: sessions[i]?.reasoning ?? null })));
   });
 

@@ -100,7 +100,7 @@ export interface WorkerBackend {
   /** Start an agent for a task (worktrees included when start.git is set). */
   start(start: WorkerStart): Promise<WorkerSession>;
   list(): Promise<WorkerSession[]>;
-  get(address: string): Promise<WorkerSession | null>;
+  get(address: string, signal?: AbortSignal): Promise<WorkerSession | null>;
   /** Recent output (screen + history) as plain text. */
   read(address: string, lines: number): Promise<string>;
   /** Deliver input to a live session (reply to a question). */

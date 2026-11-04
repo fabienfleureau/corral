@@ -174,13 +174,14 @@ export class OmnigentBackend implements WorkerBackend {
     this.cfg = cfg;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" };
     if (this.cfg.token) headers.Authorization = `Bearer ${this.cfg.token}`;
     if (body !== undefined) headers["Content-Type"] = "application/json";
     const res = await fetch(new URL(path, this.cfg.baseUrl), {
       method,
       headers,
+      signal,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!res.ok) {
@@ -418,9 +419,9 @@ export class OmnigentBackend implements WorkerBackend {
     return rows.map((r) => this.normalize(r as Record<string, unknown>));
   }
 
-  async get(address: string): Promise<WorkerSession | null> {
+  async get(address: string, signal?: AbortSignal): Promise<WorkerSession | null> {
     try {
-      const raw = await this.request<Record<string, unknown>>("GET", `/v1/sessions/${address}`);
+      const raw = await this.request<Record<string, unknown>>("GET", `/v1/sessions/${address}`, undefined, signal);
       return this.normalize(raw);
     } catch {
       return null;

@@ -13,6 +13,7 @@ import type { Config } from "../config.ts";
 import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
 import { prReady, prItemBody, syncTaskPr, syncAllPrs, findPr, type PrInfo } from "../pr.ts";
 import { CaptureEngine } from "../capture.ts";
+import { createHttpServer, type AppState } from "../api.ts";
 import type {
   WorkerBackend,
   WorkerElicitation,
@@ -86,6 +87,29 @@ function fakeBackend(readText = "agent tail…") {
   };
   return { backend, started, sent };
 }
+
+test("task listing returns available session details even if another lookup stalls", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-tasks-timeout-"));
+  const db = new Db(join(dir, "test.db"));
+  db.insertTask(makeTask({ id: "slow", terminal_address: "slow" }));
+  db.insertTask(makeTask({ id: "fast", terminal_address: "fast" }));
+  const { backend } = fakeBackend();
+  backend.get = async (address) => address === "slow" ? new Promise(() => {}) : { model: "model-x", reasoning: "high" } as WorkerSession;
+  const server = createHttpServer({ db, backend, cfg: { token: "test" } } as unknown as AppState);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const port = (server.address() as { port: number }).port;
+    const response = await fetch(`http://127.0.0.1:${port}/api/tasks`, { headers: { Authorization: "Bearer test" }, signal: AbortSignal.timeout(2500) });
+    const tasks = await response.json() as { id: string; session_model: string | null }[];
+    assert.equal(tasks.find((task) => task.id === "fast")?.session_model, "model-x");
+    assert.equal(tasks.find((task) => task.id === "slow")?.session_model, null);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("slugify produces url-safe names", () => {
   assert.equal(slugify("Add caching layer!"), "add-caching-layer");
