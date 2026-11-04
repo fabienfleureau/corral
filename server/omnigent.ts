@@ -381,6 +381,10 @@ export class OmnigentBackend implements WorkerBackend {
     );
   }
 
+  async archive(address: string): Promise<void> {
+    await this.request("PATCH", `/v1/sessions/${address}`, { archived: true });
+  }
+
   async kill(address: string): Promise<void> {
     try {
       await this.request("POST", `/v1/sessions/${address}/interrupt`, {});
@@ -388,7 +392,7 @@ export class OmnigentBackend implements WorkerBackend {
       /* interrupt is best effort */
     }
     try {
-      await this.request("PATCH", `/v1/sessions/${address}`, { archived: true });
+      await this.archive(address);
     } catch {
       /* archive is best effort */
     }

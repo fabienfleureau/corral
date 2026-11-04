@@ -295,7 +295,10 @@ test("pr sync: item flips ready->needs work and resolves on merge", async () => 
   const dir = mkdtempSync(join(tmpdir(), "corral-prsync-"));
   try {
     const db = new Db(join(dir, "test.db"));
-    db.insertTask(makeTask({ branch: "feat-x", status: "dispatched", repo_path: "/tmp/repo" }));
+    db.insertTask(makeTask({ branch: "feat-x", status: "done", terminal_address: "s1", repo_path: "/tmp/repo" }));
+    const { backend } = fakeBackend();
+    const archived: string[] = [];
+    backend.archive = async (address) => { archived.push(address); };
     const hub = { broadcast: () => undefined };
 
     let current: PrInfo = {
@@ -327,7 +330,8 @@ test("pr sync: item flips ready->needs work and resolves on merge", async () => 
     assert.match(item.summary, /1 unresolved review comment/);
 
     current = { ...current, state: "MERGED", threads: [] };
-    await syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
+    await syncTaskPr(db, hub, db.getTask("task-1")!, { finder, backend });
+    assert.deepEqual(archived, ["s1"]);
     item = db.listItems({ kind: "pr" })[0];
     assert.equal(item.status, "resolved", "merged PR items are resolved");
     assert.match(item.title, /PR merged/);

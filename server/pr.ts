@@ -458,6 +458,10 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   const existing = db.listItems({ kind: "pr" }).find((i) => i.task_id === task.id) ?? null;
   const shouldResolve = pr.state !== "OPEN";
   const merged = pr.state === "MERGED";
+  if (merged && task.terminal_address && opts.backend?.archive) {
+    // Retry on later syncs if the backend is unavailable.
+    await opts.backend.archive(task.terminal_address).catch(() => undefined);
+  }
   const doneStatus: Item["status"] = "resolved";
 
   // The loop: comments and merge conflicts go back to the agent —
