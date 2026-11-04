@@ -1324,12 +1324,16 @@ select:focus {
 
 /* offline mode */
 .offline-banner {
-  align-self: flex-start;
-  margin: 12px 24px 0;
+  position: fixed;
+  z-index: 100;
+  right: 16px;
+  bottom: 16px;
+  max-width: min(420px, calc(100vw - 32px));
   padding: 8px 12px;
   border-radius: 8px;
-  background: color-mix(in srgb, #c98a1b 22%, transparent);
-  color: #c98a1b;
+  background: #fff1d2;
+  color: #684300;
+  box-shadow: 0 2px 12px #0003;
   font-size: 0.9em;
   font-weight: 600;
 }

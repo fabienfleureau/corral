@@ -24,6 +24,7 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
 // (server unreachable or slow even though the browser is online).
 type CacheStateHandler = (stale: boolean) => void;
 let cacheStateHandler: CacheStateHandler | null = null;
+let connectivityVersion = 0;
 
 export function setCacheStateHandler(handler: CacheStateHandler | null): void {
   cacheStateHandler = handler;
@@ -38,7 +39,20 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
       init.headers = { "Content-Type": "application/json" };
     }
     res = await fetch(path, init);
-    if (method === "GET") cacheStateHandler?.(res.headers.get("X-Corral-Cache") !== null);
+    if (method === "GET") {
+      const version = ++connectivityVersion;
+      if (res.headers.has("X-Corral-Cache")) {
+        // A slow endpoint can time out while the server remains reachable.
+        void fetch("/api/health", { credentials: "same-origin" }).then(
+          (health) => {
+            if (version === connectivityVersion) cacheStateHandler?.(!health.ok || health.headers.has("X-Corral-Cache"));
+          },
+          () => { if (version === connectivityVersion) cacheStateHandler?.(true); },
+        );
+      } else {
+        cacheStateHandler?.(false);
+      }
+    }
   } catch (err) {
     throw new ApiError(0, `network error: ${err instanceof Error ? err.message : String(err)}`);
   }
