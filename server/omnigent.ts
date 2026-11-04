@@ -198,19 +198,35 @@ export class OmnigentBackend implements WorkerBackend {
   // ---- normalization ----
 
   private async listAgents(): Promise<{ id: string; name: string; harness: string }[]> {
-    try {
-      const res = await this.request<Record<string, unknown>>("GET", "/v1/agents?limit=200");
-      const rows = (res.data ?? res.agents ?? []) as Record<string, unknown>[];
-      return rows
+    const rows: Record<string, unknown>[] = [];
+    for (const scope of ["", "&scope=user"]) {
+      let after = "";
+      const seen = new Set<string>();
+      try {
+        do {
+          const res = await this.request<Record<string, unknown>>("GET", `/v1/agents?limit=200${scope}${after ? `&after=${encodeURIComponent(after)}` : ""}`);
+          rows.push(...((res.data ?? res.agents ?? []) as Record<string, unknown>[]));
+          const next = res.has_more === true ? str(res.last_id) : undefined;
+          if (!next || seen.has(next)) break;
+          seen.add(next);
+          after = next;
+        } while (true);
+      } catch {
+        // Older servers may not support user agents.
+      }
+    }
+    const ids = new Set<string>();
+    return rows
         .map((r) => ({
           id: str(r.id) ?? "",
           name: str(r.name) ?? "",
           harness: str(r.harness) ?? "",
         }))
-        .filter((a) => a.id);
-    } catch {
-      return [];
-    }
+        .filter((a) => {
+          if (!a.id || ids.has(a.id)) return false;
+          ids.add(a.id);
+          return true;
+        });
   }
 
   async registryAgents(): Promise<{ id: string; name: string }[]> {
