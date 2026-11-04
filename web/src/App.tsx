@@ -149,8 +149,8 @@ export function App() {
         </div>
         <nav className="nav">
           {TABS.map((t) => t.key === "sessions" && omnigentUrl ? (
-            <a key={t.key} className="nav-item" href={omnigentUrl} target="_blank" rel="noreferrer">
-              <span>{t.label}</span>
+            <a key={t.key} className="nav-item" href={omnigentUrl} target="_blank" rel="noreferrer" aria-label="Sessions (opens Omnigent in a new tab)" title="Open Omnigent in a new tab">
+              <span className="nav-label">{t.label}<svg className="nav-external-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 3h4v4M13 3 7 9" /><path d="M12 9v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" /></svg></span>
               <span className="nav-count">
                 {counts.sessions}
               </span>
