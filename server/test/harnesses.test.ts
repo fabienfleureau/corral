@@ -37,3 +37,17 @@ test("exposes visible host models and their supported reasoning levels", async (
   };
   assert.deepEqual((await backend.harnesses())[0].models, [{ id: "a", label: "Model A", reasoning: ["high"] }]);
 });
+
+
+test("session creation files the task group in an Omnigent project", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  let labels: unknown;
+  (backend as unknown as { request: (m: string, p: string, b?: any) => Promise<any> }).request = async (method, path, body) => {
+    if (path.startsWith("/v1/agents")) return { data: [{ id: "a", name: "custom", harness: "codex-native" }] };
+    if (method === "POST" && path === "/v1/sessions") { labels = body.labels; return { id: "s" }; }
+    if (method === "GET") return { id: "s" };
+    return {};
+  };
+  await backend.start({ taskId: "t", name: null, repoPath: "/repo", git: null, prompt: "go", harness: "codex", agent: "custom", model: null, reasoning: null, project: "My repo" });
+  assert.deepEqual(labels, { "corral.task": "t", "corral.harness": "codex", omni_project: "My repo" });
+});
