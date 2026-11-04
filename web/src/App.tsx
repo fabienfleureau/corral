@@ -36,6 +36,7 @@ export function App() {
   const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, pulls: 0, sessions: 0, ideas: 0 });
   const [eventVersion, setEventVersion] = useState(0);
   const [bootError, setBootError] = useState<string | null>(null);
+  const [omnigentUrl, setOmnigentUrl] = useState<string | null>(null);
 
   const refresh = useCallback(() => setEventVersion((v) => v + 1), []);
 
@@ -55,7 +56,10 @@ export function App() {
     setUnauthorizedHandler(() => setUnauthorized(true));
     api
       .getConfig()
-      .then(() => setBootError(null))
+      .then((config) => {
+        setOmnigentUrl(config.omnigentUrl || null);
+        setBootError(null);
+      })
       .catch((err: unknown) => {
         const status = err instanceof ApiError ? err.status : -1;
         if (status === 401) return; // handled by setUnauthorizedHandler
@@ -135,7 +139,14 @@ export function App() {
           <span className="brand-name">Corral</span>
         </div>
         <nav className="nav">
-          {TABS.map((t) => (
+          {TABS.map((t) => t.key === "sessions" && omnigentUrl ? (
+            <a key={t.key} className="nav-item" href={omnigentUrl} target="_blank" rel="noreferrer">
+              <span>{t.label}</span>
+              <span className={`nav-count ${counts.sessions > 0 ? "nav-count-hot" : ""}`}>
+                {counts.sessions}
+              </span>
+            </a>
+          ) : (
             <button
               key={t.key}
               className={`nav-item ${tab === t.key ? "nav-active" : ""}`}
