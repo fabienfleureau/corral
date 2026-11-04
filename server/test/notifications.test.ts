@@ -28,3 +28,27 @@ test("notifies when a PR becomes ready again", () => {
   assert.equal(track({ type: "item.updated", item: unready }), null);
   assert.equal(track({ type: "item.updated", item: ready }), ready);
 });
+
+test("sends a desktop notification and reports construction failures", async () => {
+  const { sendDesktopNotification } = await import("../../web/src/notifications.ts");
+  const globals = globalThis as unknown as { Notification?: unknown };
+  const original = globals.Notification;
+  const sent: Array<{ title: string; body: string | undefined }> = [];
+  try {
+    globals.Notification = class {
+      static permission = "granted";
+      constructor(title: string, options?: { body?: string }) {
+        sent.push({ title, body: options?.body });
+      }
+    };
+    assert.equal(sendDesktopNotification("Test", "Hello"), true);
+    assert.deepEqual(sent, [{ title: "Test", body: "Hello" }]);
+    globals.Notification = class {
+      static permission = "granted";
+      constructor() { throw new Error("unavailable"); }
+    };
+    assert.equal(sendDesktopNotification("Test", "Hello"), false);
+  } finally {
+    globals.Notification = original;
+  }
+});

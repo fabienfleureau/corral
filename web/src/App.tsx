@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { ApiError, api, setCacheStateHandler, setUnauthorizedHandler, subscribeEvents } from "./api";
 import { errText } from "./util";
-import { createNotificationTracker } from "./notifications";
+import { createNotificationTracker, sendDesktopNotification } from "./notifications";
 import { Spinner } from "./ui";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
@@ -78,15 +78,7 @@ export function App() {
     const close = subscribeEvents((event) => {
       const item = trackNotification(event);
       if (item) {
-        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-          try {
-            new Notification(item.title, {
-              body: item.summary || item.body.slice(0, 120),
-            });
-          } catch {
-            /* notification construction can fail in some environments */
-          }
-        }
+        sendDesktopNotification(item.title, item.summary || item.body.slice(0, 120));
       }
       setEventVersion((v) => v + 1);
     });
