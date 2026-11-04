@@ -82,7 +82,7 @@ type Idea = {
   totals, by_agent[], by_model[], timeline[], bucket: "hour"|"day", efficiency}`. Cost is an API-list-price
   estimate; models without a price count tokens only (`unpriced_calls`). Prices override via
   `usage.prices` in config.json (`{"gpt-6*": {input, output, cacheRead?, cacheWrite5m?, cacheWrite1h?}}`, USD/MTok).
-  Claude quota comes from ccstatusline's cache, Codex quota from its latest `rate_limits` event.
+  Claude quota comes from ccstatusline's cache, Codex quota from its latest `rate_limits` event, and OpenCode Go quota from its account usage endpoint using OpenCode's locally registered credential.
   `scanning: true` while the first log scan runs (poll). Spend is attributed to a task when the session
   cwd is inside its `worktree_path`; `efficiency` = done tasks per $ and $ per done task.
 
