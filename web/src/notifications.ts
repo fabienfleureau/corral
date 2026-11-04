@@ -18,11 +18,12 @@ export function createNotificationTracker() {
   };
 }
 
-export function sendDesktopNotification(title: string, body: string): boolean {
-  const NotificationApi = (globalThis as unknown as { Notification?: { permission: string; new(title: string, options: { body: string }): unknown } }).Notification;
+export function sendDesktopNotification(title: string, body: string, onError?: () => void): boolean {
+  const NotificationApi = (globalThis as unknown as { Notification?: { permission: string; new(title: string, options: { body: string }): { onerror: (() => void) | null } } }).Notification;
   if (!NotificationApi || NotificationApi.permission !== "granted") return false;
   try {
-    new NotificationApi(title, { body });
+    const notification = new NotificationApi(title, { body });
+    if (onError) notification.onerror = onError;
     return true;
   } catch {
     return false;

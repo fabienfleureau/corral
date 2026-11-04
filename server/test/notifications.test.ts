@@ -52,3 +52,23 @@ test("sends a desktop notification and reports construction failures", async () 
     globals.Notification = original;
   }
 });
+
+test("reports asynchronous notification errors", async () => {
+  const { sendDesktopNotification } = await import("../../web/src/notifications.ts");
+  const globals = globalThis as unknown as { Notification?: unknown };
+  const original = globals.Notification;
+  let notification: { onerror: (() => void) | null } | undefined;
+  let failed = false;
+  try {
+    globals.Notification = class {
+      static permission = "granted";
+      onerror: (() => void) | null = null;
+      constructor() { notification = this; }
+    };
+    sendDesktopNotification("Test", "Hello", () => { failed = true; });
+    notification?.onerror?.();
+    assert.equal(failed, true);
+  } finally {
+    globals.Notification = original;
+  }
+});
