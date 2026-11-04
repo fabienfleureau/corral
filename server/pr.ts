@@ -510,10 +510,10 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   }
 
   const title = shouldResolve
-    ? `PR ${pr.state.toLowerCase()}: ${task.title}`
+    ? `PR ${pr.state.toLowerCase()}: ${pr.title}`
     : ready
-      ? `PR ready for review: ${task.title}`
-      : `PR needs work: ${task.title}`;
+      ? `PR ready for review: ${pr.title}`
+      : `PR needs work: ${pr.title}`;
 
   if (!existing) {
     const item: Item = {
