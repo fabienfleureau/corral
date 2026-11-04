@@ -369,11 +369,11 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
   }
 });
 
-test("pr sync: item flips ready->needs work and archives on merge", async () => {
+test("pr sync: merge completes the task and archives its items and session", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-prsync-"));
   try {
     const db = new Db(join(dir, "test.db"));
-    db.insertTask(makeTask({ branch: "feat-x", status: "done", terminal_address: "s1", repo_path: "/tmp/repo" }));
+    db.insertTask(makeTask({ branch: "feat-x", status: "dispatched", terminal_address: "s1", repo_path: "/tmp/repo" }));
     const { backend } = fakeBackend();
     const archived: string[] = [];
     backend.archive = async (address) => { archived.push(address); };
@@ -413,7 +413,7 @@ test("pr sync: item flips ready->needs work and archives on merge", async () => 
     item = db.listItems({ kind: "pr" })[0];
     assert.equal(item.status, "archived", "merged PR items are archived");
     assert.match(item.title, /PR merged/);
-    assert.equal(db.getTask("task-1")?.status, "archived", "merged PR archives the task");
+    assert.equal(db.getTask("task-1")?.status, "done", "merged PR completes the task");
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -619,7 +619,7 @@ esac
 });
 
 
-test("PR sync archives a merged reported PR when the task branch differs", async () => {
+test("PR sync completes a merged reported PR when the task branch differs", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-reported-pr-"));
   const originalPath = process.env.PATH;
   try {
@@ -637,7 +637,7 @@ esac
     const capture = new CaptureEngine(db, backend, hub, {} as Config);
     await capture.createStructuredQuestion({ kind: "done", taskId: "task-1", title: "Done", body: "PR: https://github.com/example/repo/pull/15" });
     await syncAllPrs(db, hub, { knownPrsOnly: true }, 0);
-    assert.equal(db.getTask("task-1")?.status, "archived");
+    assert.equal(db.getTask("task-1")?.status, "done");
     assert.equal(db.listItems({ kind: "pr" })[0].status, "archived");
     db.close();
   } finally {

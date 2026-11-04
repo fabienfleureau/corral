@@ -58,6 +58,6 @@ backed by `server/omnigent.ts`.
 Settled design (don't silently relitigate in code): Corral = work layer,
 omnigent = agent layer (deep-link out to inspect agents); PR readiness gate =
 answered/resolved threads + green checks + mergeable; a **fresh PR is orange**
-until automated reviews pass; merged PRs archive their task and items; confs =
+until automated reviews pass; merged PRs complete their task and archive its items; confs =
 harness + optional pins (blank = smart-route), agents are an explicit opt-in.
 Ask before changing product semantics.

@@ -443,7 +443,7 @@ export interface SyncOptions {
  *    gate passes; otherwise "needs work" with the reasons,
  *  - unresolved comments are fed to the agent automatically (once per set),
  *  - merge conflicts are fed to the agent as a rebase request (once per episode),
- *  - the item resolves on close; a merge archives the task and its items.
+ *  - the item resolves on close; a merge completes the task and archives its items.
  */
 export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOptions = {}): Promise<PrInfo | null> {
   const finder = opts.finder ?? findPr;
@@ -571,7 +571,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   return pr;
 }
 
-/** A merged PR archives the task and its inbox items. */
+/** A merged PR completes the task and archives its inbox items. */
 function resolveMergedTask(db: Db, hub: Hub, task: Task): void {
   const now = Date.now();
   for (const item of db.listItems()) {
@@ -580,8 +580,8 @@ function resolveMergedTask(db: Db, hub: Hub, task: Task): void {
     hub.broadcast("item.updated", db.getItem(item.id));
   }
   const current = db.getTask(task.id);
-  if (current && current.status !== "archived") {
-    db.updateTask(task.id, { status: "archived" });
+  if (current && current.status !== "done" && current.status !== "archived") {
+    db.updateTask(task.id, { status: "done" });
     db.recordMetric("task.done", task.id, { how: "pr-merged" });
     hub.broadcast("task.updated", db.getTask(task.id));
   }
