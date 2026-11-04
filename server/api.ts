@@ -1,3 +1,4 @@
+import { errors } from "./errors.ts";
 // HTTP API + static hosting. Token auth middleware (token-ready for LAN/team),
 // SSE hub for live inbox updates.
 
@@ -416,6 +417,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       json(res, 500, { error: String(err) });
     }
   });
+
+  on("GET", "/api/errors", (_req, res) => json(res, 200, errors.list()));
 
   // ---- pull requests (where the human is awaited) ----
   on("GET", "/api/pulls", (_req, res) => json(res, 200, cachedPulls()));

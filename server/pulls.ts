@@ -8,6 +8,7 @@
 
 import type { Hub } from "./capture.ts";
 import { mapLimit, runAsync } from "./exec.ts";
+import { errors } from "./errors.ts";
 
 export type PullColor = "green" | "orange" | "red";
 
@@ -199,12 +200,10 @@ async function listGitHub(): Promise<Pull[]> {
 
 // ---- GitLab ----
 
-async function gitlabLogin(): Promise<string | null> {
-  try {
-    return (JSON.parse(await run("glab", ["api", "user"])) as { username?: string }).username ?? null;
-  } catch {
-    return null;
-  }
+async function gitlabLogin(): Promise<string> {
+  const login = (JSON.parse(await run("glab", ["api", "user"])) as { username?: string }).username;
+  if (!login) throw new Error("GitLab returned no username");
+  return login;
 }
 
 interface GlabMR {
@@ -271,7 +270,7 @@ async function listGitLab(): Promise<Pull[]> {
     [
       `merge_requests?scope=all&state=opened&author_username=${login}&per_page=50`,
       `merge_requests?scope=all&state=opened&reviewer_username=${login}&per_page=50`,
-    ].map((q) => run("glab", ["api", q]).then((s) => JSON.parse(s) as GlabMR[]).catch(() => [] as GlabMR[])),
+    ].map((q) => run("glab", ["api", q]).then((s) => JSON.parse(s) as GlabMR[])),
   );
   for (const mr of lists.flat()) seen.set(mr.web_url, mr);
   return mapLimit([...seen.values()], CONCURRENCY, (mr) => gitlabPull(mr, login));
@@ -292,7 +291,13 @@ export function refreshPulls(hub?: Hub): Promise<Pull[]> {
 }
 
 async function doRefresh(hub?: Hub): Promise<Pull[]> {
-  const [gh, gl] = await Promise.all([listGitHub(), listGitLab()]);
+  const [gh, gl] = await Promise.all([
+    listGitHub(),
+    listGitLab().then((pulls) => { errors.clear("GitLab sync"); return pulls; }).catch((err: unknown) => {
+      errors.fail("GitLab sync", err);
+      return cache.filter((pull) => pull.host === "gitlab");
+    }),
+  ]);
   const pulls = [...gh, ...gl];
   // Awaiting-my-review first, then color severity, then recency.
   const rank: Record<PullColor, number> = { red: 0, orange: 1, green: 2 };

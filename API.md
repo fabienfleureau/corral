@@ -93,3 +93,5 @@ type Idea = {
 - `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, token /* masked */}`
 - `PUT /api/config` `{jira?: {baseUrl, email, token, jql}, assistant?: string[], agents?: {...}}` → `{ok}`
 - `GET /api/health` → `{ok: true}` (no auth)
+
+- `GET /api/errors` → current background synchronization errors (`source`, `message`, `updated_ms`); cleared when the operation succeeds.
