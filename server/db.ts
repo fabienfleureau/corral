@@ -111,6 +111,8 @@ export class Db {
     const taskNames = new Set(taskCols.map((c) => c.name));
     if (!taskNames.has("pr_url")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
     if (!taskNames.has("pr_meta")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN pr_meta TEXT`);
+    if (!taskNames.has("model")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN model TEXT`);
+    if (!taskNames.has("reasoning")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN reasoning TEXT`);
     if (!taskNames.has("handoff")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN handoff TEXT`);
   }
 
@@ -125,13 +127,13 @@ export class Db {
       .prepare(
         `INSERT INTO tasks (id, title, prompt, repo_path, target, target_state, base_branch, branch,
           worktree_path, assignee, jira_key, jira_url, jira_parent_key, pr_url, pr_meta, handoff, status, terminal_address,
-          exit_code, created_ms, updated_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          exit_code, created_ms, updated_ms, model, reasoning)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         t.id, t.title, t.prompt, t.repo_path, t.target, t.target_state, t.base_branch, t.branch,
         t.worktree_path, t.assignee, t.jira_key, t.jira_url, t.jira_parent_key, t.pr_url, t.pr_meta ?? null,
-        t.handoff ?? null, t.status, t.terminal_address, t.exit_code, t.created_ms, t.updated_ms,
+        t.handoff ?? null, t.status, t.terminal_address, t.exit_code, t.created_ms, t.updated_ms, t.model ?? null, t.reasoning ?? null,
       );
   }
 

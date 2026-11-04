@@ -24,3 +24,8 @@ export function harnessLabel(harness: string, quotas: AgentQuota[]): string {
   if (!quota) return harness;
   return [harness, quota.plan, ...quota.windows.map((w) => `${w.label} ${Math.round(w.used_percent)}% used`), quota.stale ? "stale" : null].filter(Boolean).join(" · ").replace(" · ", " — ");
 }
+
+export function lastHarnessSettings(tasks: Task[], harness: string): { model: string; reasoning: string } {
+  const latest = tasks.filter((task) => task.target === harness).sort((a, b) => b.created_ms - a.created_ms)[0];
+  return { model: latest?.model ?? "", reasoning: latest?.reasoning ?? "" };
+}

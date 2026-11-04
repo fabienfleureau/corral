@@ -645,3 +645,20 @@ esac
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("task model settings survive storage and are used for dispatch", async () => {
+  const db = new Db(":memory:");
+  const dir = mkdtempSync(join(tmpdir(), "corral-model-"));
+  try {
+    execFileSync("git", ["init", dir], { stdio: "ignore" });
+    const task = makeTask({ repo_path: dir, model: "model-x", reasoning: "high" });
+    db.insertTask(task);
+    const stored = db.getTask(task.id)!;
+    assert.equal(stored.model, "model-x");
+    assert.equal(stored.reasoning, "high");
+    const { backend, started } = fakeBackend();
+    await dispatchTask(db, { configDir: dir, host: "localhost", port: 4787, token: "" } as Config, backend, stored, "codex", { useWorktree: false });
+    assert.equal(started[0].model, "model-x");
+    assert.equal(started[0].reasoning, "high");
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});

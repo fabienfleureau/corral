@@ -147,8 +147,8 @@ export async function dispatchTask(
       prompt: fullPrompt,
       harness: target,
       agent: opts.agent ?? null,
-      model: opts.model ?? null,
-      reasoning: opts.reasoning ?? null,
+      model: opts.model === undefined ? task.model ?? null : opts.model,
+      reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
       env: {
         CORRAL_URL: `http://${cfg.host}:${cfg.port}`,
         CORRAL_TOKEN: cfg.token,
@@ -163,6 +163,8 @@ export async function dispatchTask(
     status: "dispatched",
     target,
     target_state: "confirmed",
+    model: opts.model === undefined ? task.model ?? null : opts.model,
+    reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
     branch,
     worktree_path: useWorktree && session.cwd ? session.cwd : null,
     terminal_address: session.address,
@@ -180,8 +182,8 @@ export async function dispatchTask(
     target,
     address: session.address,
     worktree: useWorktree,
-    model: opts.model ?? null,
-    reasoning: opts.reasoning ?? null,
+    model: opts.model === undefined ? task.model ?? null : opts.model,
+    reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
   });
 
   return { address: session.address, worktreePath: session.cwd, branch };

@@ -13,6 +13,8 @@ export interface Task {
   repo_path: string;
   target: AgentTarget;
   target_state: TargetState;
+  model?: string | null;
+  reasoning?: string | null;
   base_branch: string | null;
   branch: string | null;
   worktree_path: string | null;

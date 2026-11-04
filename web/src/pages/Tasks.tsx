@@ -1,7 +1,7 @@
 // Tasks — dispatch queue grouped by repository.
 
 import { useEffect, useMemo, useState } from "react";
-import { groupTasks, harnessLabel, sortRepos } from "../task-page";
+import { groupTasks, harnessLabel, sortRepos, lastHarnessSettings } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
 import type { AgentQuota, JiraSearchResult, Repo, Task } from "../types";
@@ -130,7 +130,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         </div>
 
         {showImport ? <JiraImport onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        <NewTaskForm repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} onDone={refresh} />
+        <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} onDone={refresh} />
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
@@ -200,6 +200,8 @@ function TaskRow({
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [prompt, setPrompt] = useState(task.prompt);
   const [target, setTarget] = useState(task.target || "claude");
+  const [model, setModel] = useState(task.model ?? "");
+  const [reasoning, setReasoning] = useState(task.reasoning ?? "");
   const [agent, setAgent] = useState("");
   const [useWorktree, setUseWorktree] = useState(true);
   const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
@@ -241,6 +243,8 @@ function TaskRow({
         target: selectedTarget,
         use_worktree: useWorktree,
         agent: agent || null,
+        model: model.trim() || null,
+        reasoning: reasoning.trim() || null,
       });
       setDispatchResult(result);
       setShowDispatch(false);
@@ -363,7 +367,7 @@ function TaskRow({
             )}
             <label className="field-inline">
               <span>Harness</span>
-              <select value={selectedTarget} onChange={(e) => setTarget(e.target.value)}>
+              <select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setModel(e.target.value === task.target ? task.model ?? "" : ""); setReasoning(e.target.value === task.target ? task.reasoning ?? "" : ""); }}>
                 {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
                 {targets.map((t) => (
                   <option key={t} value={t}>
@@ -383,6 +387,8 @@ function TaskRow({
                 ))}
               </select>
             </label>
+            <label className="field-inline"><span>Model</span><input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Harness default" /></label>
+            <label className="field-inline"><span>Reasoning level</span><input value={reasoning} onChange={(e) => setReasoning(e.target.value)} placeholder="Harness default" /></label>
             <HarnessQuotas targets={targets} quotas={quotas} selected={selectedTarget} />
             <label className="check-inline">
               <input
@@ -461,11 +467,12 @@ function firstLine(text: string): string {
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
-function NewTaskForm({ repos, targets, quotas, agentOptions, onDone }: { repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: { id: string; name: string }[]; onDone: () => void }) {
+function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: { id: string; name: string }[]; onDone: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [repoChoice, setRepoChoice] = useState("");
   const [target, setTarget] = useState("");
   const [agent, setAgent] = useState("");
+  const [settings, setSettings] = useState<Record<string, { model: string; reasoning: string }>>({});
   const [repoTouched, setRepoTouched] = useState(false);
   const [repoPath, setRepoPath] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
@@ -482,6 +489,9 @@ function NewTaskForm({ repos, targets, quotas, agentOptions, onDone }: { repos: 
   const selectedRepo = repoTouched ? repoChoice : (repos[0]?.path ?? "");
   const selectedTarget = targets.includes(target) ? target : targets[0] ?? "";
 
+  const selectedSettings = settings[selectedTarget] ?? lastHarnessSettings(tasks, selectedTarget);
+  const setSetting = (key: "model" | "reasoning", value: string) => setSettings((prev) => ({ ...prev, [selectedTarget]: { ...selectedSettings, [key]: value } }));
+
   const submit = async (dispatch: boolean) => {
     if (!prompt.trim() || busy) return;
     setBusy(true);
@@ -489,6 +499,9 @@ function NewTaskForm({ repos, targets, quotas, agentOptions, onDone }: { repos: 
     try {
       const input: NewTaskInput = {
         prompt,
+        target: selectedTarget,
+        model: selectedSettings.model.trim() || null,
+        reasoning: selectedSettings.reasoning.trim() || null,
         repo_path: selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo,
         base_branch: baseBranch.trim() || null,
       };
@@ -555,6 +568,10 @@ function NewTaskForm({ repos, targets, quotas, agentOptions, onDone }: { repos: 
           <option value="">— none (bare harness) —</option>
           {agentOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select></label>
+      </div>
+      <div className="field-row">
+        <label className="field"><span>Model (optional)</span><input value={selectedSettings.model} onChange={(e) => setSetting("model", e.target.value)} placeholder="Harness default" /></label>
+        <label className="field"><span>Reasoning level (optional)</span><input value={selectedSettings.reasoning} onChange={(e) => setSetting("reasoning", e.target.value)} placeholder="Harness default" /></label>
       </div>
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">

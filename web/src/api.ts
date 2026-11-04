@@ -93,6 +93,8 @@ export type NewTaskInput = {
   prompt?: string;
   repo_path?: string;
   target?: string;
+  model?: string | null;
+  reasoning?: string | null;
   base_branch?: string | null;
   assignee?: string | null;
   jira_key?: string | null;
@@ -129,7 +131,7 @@ export const api = {
   patchTask: (id: string, input: Partial<Task>): Promise<Task> => patch<Task>(`/api/tasks/${id}`, input),
   dispatchTask: (
     id: string,
-    input: { target?: string; use_worktree?: boolean; agent?: string | null },
+    input: { target?: string; use_worktree?: boolean; agent?: string | null; model?: string | null; reasoning?: string | null },
   ): Promise<DispatchResult> =>
     post<DispatchResult>(`/api/tasks/${id}/dispatch`, input),
   cleanupTask: (id: string): Promise<{ ok: boolean }> => post<{ ok: boolean }>(`/api/tasks/${id}/cleanup`),

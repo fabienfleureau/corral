@@ -228,6 +228,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       repo_path: b.repo_path ?? "",
       target: b.target ?? "",
       target_state: "suggested",
+      model: b.model?.trim() || null,
+      reasoning: b.reasoning?.trim() || null,
       base_branch: b.base_branch ?? null,
       branch: null,
       worktree_path: null,
@@ -276,8 +278,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     try {
       const result = await dispatchTask(state.db, state.cfg, state.backend, task, target, {
         useWorktree: b.use_worktree,
-        model: b.model ?? null,
-        reasoning: b.reasoning ?? null,
+        model: b.model === undefined ? task.model : b.model,
+        reasoning: b.reasoning === undefined ? task.reasoning : b.reasoning,
         agent: b.agent ?? null,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
