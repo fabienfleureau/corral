@@ -5,6 +5,8 @@
 // same information (status, blocked elicitations, tree).
 
 import { gzipSync } from "node:zlib";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { OmnigentConfig } from "./config.ts";
 import type {
   WorkerBackend,
@@ -18,6 +20,17 @@ import type {
 } from "./worker.ts";
 
 const POLL_MS = 4000;
+const execFileAsync = promisify(execFile);
+
+async function localOpenCodeModels(): Promise<WorkerModel[]> {
+  try {
+    const { stdout } = await execFileAsync("opencode", ["models"], { timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
+    return [...new Set(stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^[^\s/]+\/[^\s/]+$/.test(line)))]
+      .map((id) => ({ id, label: id, reasoning: [] }));
+  } catch {
+    return [];
+  }
+}
 
 /** "claude-native-ui" | "claude-sdk" | "claude-native" -> "claude"; "acp:junie" -> "junie" */
 export function harnessOf(agentHarness: string): string {
@@ -243,8 +256,9 @@ export class OmnigentBackend implements WorkerBackend {
             id: str(m.id)!, label: str(m.displayName) ?? str(m.id)!,
             reasoning: Array.isArray(m.supportedReasoningEfforts) ? m.supportedReasoningEfforts.map((r: Record<string, unknown>) => str(r.reasoningEffort)).filter((r): r is string => !!r) : harness === "claude" ? ["low", "medium", "high", "xhigh", "max"] : [],
           }));
-        } catch { /* Keep manual entry when the catalog is unavailable. */ }
+        } catch { /* Fall back below when the catalog is unavailable. */ }
       }
+      if (harness === "opencode" && !models.length) models = await localOpenCodeModels();
       return { harness, agents: groupAgents, ...(models.length ? { models } : {}) };
     }));
   }

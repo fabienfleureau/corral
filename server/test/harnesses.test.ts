@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { OmnigentBackend } from "../omnigent.ts";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 test("harness picker excludes unavailable native harnesses on the configured host", async () => {
   const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "host1", agents: {} });
@@ -36,6 +39,28 @@ test("exposes visible host models and their supported reasoning levels", async (
     return { models: [{ id: "a", displayName: "Model A", supportedReasoningEfforts: [{ reasoningEffort: "high" }] }, { id: "hidden", hidden: true }] };
   };
   assert.deepEqual((await backend.harnesses())[0].models, [{ id: "a", label: "Model A", reasoning: ["high"] }]);
+});
+
+test("falls back to local OpenCode models when the host catalog is unsupported", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-models-"));
+  const oldPath = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "opencode"), "#!/bin/sh\nprintf 'provider/model-a\\nprovider/model-b\\n'\n", { mode: 0o755 });
+    process.env.PATH = dir;
+    const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "host1", agents: {} });
+    (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async (_m, path) => {
+      if (path.startsWith("/v1/agents")) return { data: [{ id: "1", name: "opencode", harness: "opencode-native" }] };
+      if (path === "/v1/hosts") return { hosts: [{ host_id: "host1" }] };
+      throw new Error("unsupported");
+    };
+    assert.deepEqual((await backend.harnesses())[0].models, [
+      { id: "provider/model-a", label: "provider/model-a", reasoning: [] },
+      { id: "provider/model-b", label: "provider/model-b", reasoning: [] },
+    ]);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 
