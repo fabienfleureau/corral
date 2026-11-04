@@ -190,7 +190,7 @@ export const api = {
     get<UsageReport>(`/api/usage?range=${range}${refresh ? "&refresh=1" : ""}`),
 
   getConfig: (): Promise<Config> => get<Config>("/api/config"),
-  putConfig: (input: { jira?: JiraConfigInput }): Promise<{ ok: boolean }> =>
+  putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[] }): Promise<{ ok: boolean }> =>
     put<{ ok: boolean }>("/api/config", input),
 };
 

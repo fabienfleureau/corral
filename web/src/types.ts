@@ -120,7 +120,10 @@ export type Repo = {
   created_ms: number;
 };
 
+export type Favorite = { name: string; harness: string; agent: string; model: string; reasoning: string };
+
 export type Config = {
+  favorites: Favorite[];
   port: number;
   host: string;
   agents: string[];

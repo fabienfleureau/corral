@@ -1,3 +1,4 @@
+import { parseFavorites } from "./favorites.ts";
 import { errors } from "./errors.ts";
 // HTTP API + static hosting. Token auth middleware (token-ready for LAN/team),
 // SSE hub for live inbox updates.
@@ -626,6 +627,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/config", (_req, res) => {
     const cfg = state.cfg;
     json(res, 200, {
+      favorites: cfg.favorites ?? [],
       port: cfg.port,
       host: cfg.host,
       agents: Object.keys(cfg.agents),
@@ -639,7 +641,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   on("PUT", "/api/config", (req, res, { body }) => {
-    const b = body as { jira?: Record<string, string>; assistant?: string[]; agents?: Record<string, string[]> };
+    const b = body as { jira?: Record<string, string>; assistant?: string[]; agents?: Record<string, string[]>; favorites?: unknown };
+    if (b.favorites !== undefined) {
+      try { b.favorites = parseFavorites(b.favorites); } catch { return json(res, 400, { error: "Invalid favorites" }); }
+    }
     if (b.jira) Object.assign(state.cfg.jira, b.jira);
     if (b.assistant) state.cfg.assistant = b.assistant;
     if (b.agents) Object.assign(state.cfg.agents, b.agents);
@@ -650,8 +655,9 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       const merged = { ...current, ...b, jira: { ...current.jira, ...b.jira } };
       writeFileSync(path, JSON.stringify(merged, null, 2) + "\n");
     } catch {
-      /* config file may not exist in tests */
+      if (b.favorites !== undefined) return json(res, 500, { error: "Could not save favorites" });
     }
+    if (b.favorites !== undefined) state.cfg.favorites = b.favorites as import("./favorites.ts").Favorite[];
     json(res, 200, { ok: true });
   });
 

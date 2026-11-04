@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Favorite } from "./favorites.ts";
 import type { ModelPrice } from "./usage.ts";
 
 export interface JiraConfig {
@@ -25,6 +26,7 @@ export interface OmnigentConfig {
 }
 
 export interface Config {
+  favorites?: Favorite[];
   port: number;
   host: string;
   token: string;

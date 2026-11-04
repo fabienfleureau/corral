@@ -5,7 +5,7 @@ import { groupTasks, harnessLabel, sortRepos, lastHarnessSettings, modelChoices,
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
-import type { AgentQuota, JiraSearchResult, Repo, Task } from "../types";
+import type { AgentQuota, Favorite, JiraSearchResult, Repo, Task } from "../types";
 import { errText, formatTs, prLabel, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 
@@ -472,6 +472,8 @@ function firstLine(text: string): string {
 
 // No title (omnigent names the session) and no target (picked at dispatch).
 function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: { id: string; name: string }[]; catalog: Record<string, ModelOption[]>; onDone: () => void }) {
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
+  useEffect(() => { api.getConfig().then((cfg) => setFavorites(cfg.favorites ?? [])).catch(() => undefined); }, []);
   const [prompt, setPrompt] = useState("");
   const [repoChoice, setRepoChoice] = useState("");
   const [target, setTarget] = useState("");
@@ -563,6 +565,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
           <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
         </label>
       </div>
+      {favorites.length > 0 ? <div className="field"><span>Favorites</span><div className="chip-row">{favorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!targets.includes(f.harness)} title={!targets.includes(f.harness) ? "Harness unavailable" : [f.harness, f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")} onClick={() => { setTarget(f.harness); setAgent(f.agent); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}>{f.name}</button>)}</div></div> : null}
       <div className="field-row">
         <label className="field"><span>Harness</span><select value={selectedTarget} onChange={(e) => setTarget(e.target.value)}>
           {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
@@ -570,6 +573,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
         </select></label>
         <label className="field"><span>Agent</span><select value={agent} onChange={(e) => setAgent(e.target.value)}>
           <option value="">— none (bare harness) —</option>
+          {agent && !agentOptions.some((a) => a.id === agent) ? <option value={agent}>{agent} (unavailable)</option> : null}
           {agentOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select></label>
       </div>
@@ -813,7 +817,7 @@ function JiraImport({ onImported, onClose }: { onImported: () => void; onClose: 
   );
 }
 
-function ModelSettings({ models, model, reasoning, setModel, setReasoning, fieldClass }: { models: ModelOption[]; model: string; reasoning: string; setModel: (value: string) => void; setReasoning: (value: string) => void; fieldClass: string }) {
+export function ModelSettings({ models, model, reasoning, setModel, setReasoning, fieldClass }: { models: ModelOption[]; model: string; reasoning: string; setModel: (value: string) => void; setReasoning: (value: string) => void; fieldClass: string }) {
   const levels = reasoningChoices(models, model, reasoning);
   const hasLevels = model ? (models.find((m) => m.id === model)?.reasoning.length ?? 0) > 0 : models.some((m) => m.reasoning.length > 0);
   return <>
