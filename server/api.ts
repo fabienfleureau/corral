@@ -228,9 +228,14 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   // ---- tasks ----
-  on("GET", "/api/tasks", (_req, res, { url }) => {
+  on("GET", "/api/tasks", async (_req, res, { url }) => {
     const status = url.searchParams.get("status") ?? undefined;
-    json(res, 200, state.db.listTasks(status as never));
+    const tasks = state.db.listTasks(status as never);
+    const sessions = await Promise.all(tasks.map(async (task) => {
+      if (!task.terminal_address) return null;
+      try { return await state.backend.get(task.terminal_address); } catch { return null; }
+    }));
+    json(res, 200, tasks.map((task, i) => ({ ...task, session_model: sessions[i]?.model ?? null, session_reasoning: sessions[i]?.reasoning ?? null })));
   });
 
   on("POST", "/api/tasks", (req, res, { body }) => {

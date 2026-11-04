@@ -275,6 +275,8 @@ export class OmnigentBackend implements WorkerBackend {
     const live = str(raw.live_status) ?? str(raw.status) ?? null;
     return {
       address: id,
+      model: str(raw.llm_model),
+      reasoning: str(raw.reasoning_effort),
       task_id: str(labels["corral.task"]) ?? this.taskIds.get(id) ?? null,
       name: str(raw.title) ?? str(raw.sub_agent_name),
       harness: str(labels["corral.harness"]) ?? null,
