@@ -17,3 +17,14 @@ export function createNotificationTracker() {
     return item;
   };
 }
+
+export function sendDesktopNotification(title: string, body: string): boolean {
+  const NotificationApi = (globalThis as unknown as { Notification?: { permission: string; new(title: string, options: { body: string }): unknown } }).Notification;
+  if (!NotificationApi || NotificationApi.permission !== "granted") return false;
+  try {
+    new NotificationApi(title, { body });
+    return true;
+  } catch {
+    return false;
+  }
+}

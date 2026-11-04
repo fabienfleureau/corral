@@ -5,6 +5,7 @@ import { api } from "../api";
 import type { Config, Repo } from "../types";
 import { errText } from "../util";
 import { Spinner } from "../ui";
+import { sendDesktopNotification } from "../notifications";
 
 export function SettingsPage() {
   const [config, setConfig] = useState<Config | null>(null);
@@ -32,6 +33,8 @@ export function SettingsPage() {
   const [permission, setPermission] = useState<string>(
     typeof Notification !== "undefined" ? Notification.permission : "unsupported",
   );
+
+  const [notificationError, setNotificationError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -243,7 +246,18 @@ export function SettingsPage() {
               ) : permission === "denied" ? (
                 <p className="muted">Notifications are blocked in your browser settings.</p>
               ) : permission === "granted" ? (
-                <p className="muted">Notifications are enabled.</p>
+                <div>
+                  <p className="muted">Notifications are enabled.</p>
+                  <div className="form-foot">
+                    <button className="btn btn-primary" onClick={() => {
+                      setNotificationError(sendDesktopNotification("Corral test notification", "Desktop notifications are working.")
+                        ? null : "Could not send a notification. Check your browser and system settings.");
+                    }}>
+                      Test notification
+                    </button>
+                  </div>
+                  {notificationError && <p role="alert">{notificationError}</p>}
+                </div>
               ) : (
                 <p className="muted">This browser does not support desktop notifications.</p>
               )}
