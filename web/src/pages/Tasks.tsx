@@ -1,7 +1,7 @@
-// Tasks — dispatch queue grouped by Jira parent.
+// Tasks — dispatch queue grouped by repository.
 
 import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { groupTasks, sortRepos } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
 import type { JiraSearchResult, Repo, Task } from "../types";
@@ -13,7 +13,6 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [showNew, setShowNew] = useState(false);
   const [showImport, setShowImport] = useState(() => {
     // Deep link: #/tasks?import=1 opens the Jira import panel directly.
     const q = window.location.hash.split("?")[1] ?? "";
@@ -63,17 +62,8 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
     };
   }, [eventVersion]);
 
-  const groups = useMemo(() => {
-    const map = new Map<string, Task[]>();
-    for (const t of tasks) {
-      const key = t.jira_parent_key ?? "";
-      const arr = map.get(key);
-      if (arr) arr.push(t);
-      else map.set(key, [t]);
-    }
-    const named = [...map.entries()].filter(([key]) => key !== "").sort(([a], [b]) => a.localeCompare(b));
-    return { named, ungrouped: map.get("") ?? [] };
-  }, [tasks]);
+  const groups = useMemo(() => groupTasks(tasks), [tasks]);
+  const sortedRepos = useMemo(() => sortRepos(repos, tasks), [repos, tasks]);
 
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
@@ -84,7 +74,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
     });
   };
 
-  const renderGroup = (key: string, members: Task[], label: ReactNode, href: string | null) => {
+  const renderGroup = (key: string, members: Task[], label: string) => {
     const open = !collapsed.has(key);
     return (
       <section className="task-group" key={key || "ungrouped"}>
@@ -99,23 +89,12 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         >
           <Chevron open={open} />
           <span className="task-group-title">{label}</span>
-          {href ? (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="meta-link"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ExternalLinkIcon />
-            </a>
-          ) : null}
           <span className="badge">{members.length}</span>
         </div>
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={repos} targets={targets} agentOptions={agentOptions} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} agentOptions={agentOptions} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -132,14 +111,11 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
             <button className="btn" onClick={() => setShowImport((v) => !v)}>
               {showImport ? "Close import" : "Import from Jira"}
             </button>
-            <button className="btn btn-primary" onClick={() => setShowNew((v) => !v)}>
-              {showNew ? "Close" : "New task"}
-            </button>
           </div>
         </div>
 
         {showImport ? <JiraImport onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        {showNew ? <NewTaskForm repos={repos} onDone={() => { setShowNew(false); refresh(); }} /> : null}
+        <NewTaskForm repos={sortedRepos} onDone={refresh} />
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
@@ -150,26 +126,14 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
           <div className="pane-note">No tasks yet. Create one or import from Jira.</div>
         ) : (
           <div className="task-groups">
-            {groups.named.map(([key, members]) =>
-              renderGroup(key, members, key, parentUrl(members, key)),
+            {groups.map(([key, members]) =>
+              renderGroup(key, members, key ? (repos.find((r) => r.path === key)?.name ?? key) : "No repository"),
             )}
-            {groups.ungrouped.length > 0
-              ? renderGroup("ungrouped", groups.ungrouped, "Ungrouped", null)
-              : null}
           </div>
         )}
       </div>
     </div>
   );
-}
-
-function parentUrl(members: Task[], parentKey: string): string | null {
-  for (const m of members) {
-    if (m.jira_url && m.jira_key && m.jira_url.includes(m.jira_key)) {
-      return m.jira_url.replace(m.jira_key, parentKey);
-    }
-  }
-  return null;
 }
 
 // ---- one task row ----
@@ -284,7 +248,7 @@ function TaskRow({
           ) : null}
         </div>
         <div className="task-sub">
-          <span className={`badge status-${task.status}`}>{task.status}</span>
+          <span className={`badge status-${task.status}`} title={task.worktree_path ? `Worktree: ${task.worktree_path}` : undefined}>{task.status}</span>
           {task.target ? <span className="badge badge-target">{task.target}</span> : null}
           {task.branch ? <span className="mono">{task.branch}</span> : null}
           {task.pr_url ? (
@@ -293,7 +257,12 @@ function TaskRow({
               <ExternalLinkIcon />
             </a>
           ) : null}
-          {task.repo_path ? <span className="mono muted">{task.repo_path}</span> : null}
+          {task.terminal_address ? (
+            <button className="btn" onClick={() => void run("session", async () => {
+              const result = await api.openSession(task.terminal_address!);
+              if (result.url) window.open(result.url, "_blank", "noopener");
+            })} disabled={busy !== null}>Open session</button>
+          ) : null}
           <span className="time muted" title={formatTs(task.updated_ms)}>
             {timeAgo(task.updated_ms)}
           </span>
@@ -320,7 +289,6 @@ function TaskRow({
             </label>
           </div>
         ) : null}
-        {task.worktree_path ? <div className="task-sub mono muted">worktree: {task.worktree_path}</div> : null}
         {dispatchResult ? (
           <div className="task-sub">
             <span className="inline-ok">Dispatched</span>
@@ -412,7 +380,7 @@ function TaskRow({
       </div>
 
       <div className="task-actions">
-        {task.status !== "open" ? <button
+        {task.status === "dispatched" ? <button
           className="btn"
           onClick={() => setShowDispatch((v) => !v)}
           disabled={task.status === "dispatched" || busy !== null}
@@ -434,15 +402,6 @@ function TaskRow({
             </button>
           </>
         ) : null}
-        {task.worktree_path && (task.status === "done" || task.status === "archived") ? (
-          <button
-            className="btn"
-            onClick={() => void run("cleanup", () => api.cleanupTask(task.id), "Worktree removed.")}
-            disabled={busy !== null}
-          >
-            {busy === "cleanup" ? "Cleaning…" : "Cleanup worktree"}
-          </button>
-        ) : null}
       </div>
     </div>
   );
@@ -463,6 +422,14 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const clear = () => {
+    setPrompt("");
+    setRepoChoice("");
+    setRepoPath("");
+    setBaseBranch("");
+    setError(null);
+  };
+
   const submit = async () => {
     if (!prompt.trim() || busy) return;
     setBusy(true);
@@ -474,6 +441,7 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
         base_branch: baseBranch.trim() || null,
       };
       await api.createTask(input);
+      clear();
       onDone();
     } catch (err) {
       setError(errText(err));
@@ -492,7 +460,6 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="What should the agent do?"
-          autoFocus
         />
       </label>
       <div className="field-row">
@@ -525,8 +492,8 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
           {busy ? <Spinner /> : null}
           {busy ? "Creating…" : "Create task"}
         </button>
-        <button className="btn" onClick={onDone} disabled={busy}>
-          Cancel
+        <button className="btn" onClick={clear} disabled={busy}>
+          Clear
         </button>
       </div>
     </div>
