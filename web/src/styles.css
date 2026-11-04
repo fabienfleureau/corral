@@ -12,6 +12,7 @@
   --muted: #69707a;
   --faint: #9aa1aa;
   --accent: #3b53c4;
+  --accent-contrast: #ffffff;
   --accent-ink: #2f47b5;
   --accent-soft: #e7ecfb;
   --danger-ink: #b23535;
@@ -24,51 +25,53 @@
 }
 
 /* Dark palette: explicit choice, or the OS when the theme is "system".
-   Mirrors omnigent's default dark theme (web/src/themePalettes.generated.css,
-   `.dark:not([data-theme])`); keep both dark blocks in sync. */
+   Mirrors omnigent's GitHub dark theme (web/src/themePalettes.generated.css,
+   `.dark[data-theme="github"]`); keep both dark blocks in sync. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --bg: #181f25;
-    --bg-sunken: #0e1013;
-    --bg-hover: #1f272d;
-    --chip-bg: color-mix(in srgb, #92a4b3 15%, #262f36);
-    --code-bg: oklch(0.38 0.005 240);
-    --border: oklch(0.28 0.005 240);
-    --text: oklch(0.965 0.003 240);
-    --muted: #92a4b3;
-    --faint: #a1a1aa;
-    --accent: oklch(0.64 0.22 254);
-    --accent-ink: #4299e0;
-    --accent-soft: #04355d;
+    --bg: #0d1117;
+    --bg-sunken: #161b22;
+    --bg-hover: #21262d;
+    --chip-bg: #21262d;
+    --code-bg: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --faint: #8b949e;
+    --accent: #58a6ff;
+    --accent-contrast: #0d1117;
+    --accent-ink: #58a6ff;
+    --accent-soft: #121d2f;
     --danger-ink: #e65b77;
-    --danger-soft: color-mix(in srgb, #f04858 18%, #181f25);
+    --danger-soft: color-mix(in srgb, #f04858 18%, #0d1117);
     --warn-ink: #d4972a;
-    --warn-soft: color-mix(in srgb, #d4972a 18%, #181f25);
+    --warn-soft: color-mix(in srgb, #d4972a 18%, #0d1117);
     --ok-ink: #2ea65c;
-    --ok-soft: color-mix(in srgb, #2ea65c 18%, #181f25);
+    --ok-soft: color-mix(in srgb, #2ea65c 18%, #0d1117);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #181f25;
-  --bg-sunken: #0e1013;
-  --bg-hover: #1f272d;
-  --chip-bg: color-mix(in srgb, #92a4b3 15%, #262f36);
-  --code-bg: oklch(0.38 0.005 240);
-  --border: oklch(0.28 0.005 240);
-  --text: oklch(0.965 0.003 240);
-  --muted: #92a4b3;
-  --faint: #a1a1aa;
-  --accent: oklch(0.64 0.22 254);
-  --accent-ink: #4299e0;
-  --accent-soft: #04355d;
+  --bg: #0d1117;
+  --bg-sunken: #161b22;
+  --bg-hover: #21262d;
+  --chip-bg: #21262d;
+  --code-bg: #1c2128;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --faint: #8b949e;
+  --accent: #58a6ff;
+  --accent-contrast: #0d1117;
+  --accent-ink: #58a6ff;
+  --accent-soft: #121d2f;
   --danger-ink: #e65b77;
-  --danger-soft: color-mix(in srgb, #f04858 18%, #181f25);
+  --danger-soft: color-mix(in srgb, #f04858 18%, #0d1117);
   --warn-ink: #d4972a;
-  --warn-soft: color-mix(in srgb, #d4972a 18%, #181f25);
+  --warn-soft: color-mix(in srgb, #d4972a 18%, #0d1117);
   --ok-ink: #2ea65c;
-  --ok-soft: color-mix(in srgb, #2ea65c 18%, #181f25);
+  --ok-soft: color-mix(in srgb, #2ea65c 18%, #0d1117);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
@@ -134,7 +137,7 @@ button {
   height: 24px;
   border-radius: 7px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 700;
   font-size: 13px;
   display: inline-flex;
@@ -199,7 +202,7 @@ button {
 
 .nav-count-hot {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .sidebar-foot {
@@ -334,7 +337,7 @@ button {
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .btn-primary:hover:not(:disabled) {
