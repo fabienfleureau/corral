@@ -556,7 +556,6 @@ function NewTaskForm({ repos, targets, quotas, agentOptions, onDone }: { repos: 
           {agentOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select></label>
       </div>
-      <HarnessQuotas targets={targets} quotas={quotas} selected={selectedTarget} />
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
         <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !prompt.trim() || !selectedTarget || !(selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
