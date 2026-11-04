@@ -97,6 +97,8 @@ export interface WorkerBackend {
     content?: Record<string, unknown>,
   ): Promise<void>;
   kill(address: string): Promise<void>;
+  /** Archive a resolved session without deleting its worktree. */
+  archive?(address: string): Promise<void>;
   /** Remove the worktree a finished task created (best effort). */
   cleanup?(address: string): Promise<void>;
   /** Session transcript — for the context drawer and handoff synthesis. */
