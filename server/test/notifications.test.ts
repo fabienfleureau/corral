@@ -1,0 +1,30 @@
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+import { createNotificationTracker } from "../../web/src/notifications.ts";
+import type { Item } from "../../web/src/types.ts";
+
+const item = (overrides: Partial<Item> = {}): Item => ({
+  id: "one", kind: "question", status: "open", title: "Question", summary: "", body: "Help",
+  context: "", options: null, elicitation: null, source_ref: null, task_id: null, structured: 1,
+  ready: 1, created_ms: 1, updated_ms: 1, resolved_ms: null, snooze_until_ms: null, ...overrides,
+});
+
+test("notifies again when a question is reopened, but not for repeated updates", () => {
+  const track = createNotificationTracker();
+  const question = item();
+  assert.equal(track({ type: "item.created", item: question }), question);
+  assert.equal(track({ type: "item.updated", item: question }), null);
+  assert.equal(track({ type: "item.updated", item: item({ status: "resolved" }) }), null);
+  assert.equal(track({ type: "item.updated", item: question }), question);
+});
+
+test("notifies when a PR becomes ready again", () => {
+  const track = createNotificationTracker();
+  const ready = item({ kind: "pr" });
+  const unready = item({ kind: "pr", ready: 0 });
+  assert.equal(track({ type: "item.created", item: unready }), null);
+  assert.equal(track({ type: "item.updated", item: ready }), ready);
+  assert.equal(track({ type: "item.updated", item: ready }), null);
+  assert.equal(track({ type: "item.updated", item: unready }), null);
+  assert.equal(track({ type: "item.updated", item: ready }), ready);
+});
