@@ -1,7 +1,8 @@
 // Tasks — dispatch queue grouped by repository.
 
 import { useEffect, useMemo, useState } from "react";
-import { groupTasks, harnessLabel, sortRepos, lastHarnessSettings } from "../task-page";
+import { groupTasks, harnessLabel, sortRepos, lastHarnessSettings, modelChoices, reasoningChoices } from "../task-page";
+import type { ModelOption } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
 import type { AgentQuota, JiraSearchResult, Repo, Task } from "../types";
@@ -19,6 +20,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
     return new URLSearchParams(q).get("import") === "1";
   });
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [catalog, setCatalog] = useState<Record<string, ModelOption[]>>({});
   const [targets, setTargets] = useState<string[]>([]);
   const [quotas, setQuotas] = useState<AgentQuota[]>([]);
   const [agentOptions, setAgentOptions] = useState<{ id: string; name: string }[]>([]);
@@ -29,6 +31,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
       .then((res) => {
         const list = res.harnesses.map((h) => h.harness);
         setTargets(list);
+        setCatalog(Object.fromEntries(res.harnesses.map((h) => [h.harness, h.models ?? []])));
         setAgentOptions(res.agents);
       })
       .catch(() => undefined);
@@ -109,7 +112,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -130,7 +133,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         </div>
 
         {showImport ? <JiraImport onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} onDone={refresh} />
+        <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} onDone={refresh} />
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
@@ -187,6 +190,7 @@ function TaskRow({
   targets,
   quotas,
   agentOptions,
+  catalog,
   refresh,
 }: {
   task: Task;
@@ -194,6 +198,7 @@ function TaskRow({
   targets: string[];
   quotas: AgentQuota[];
   agentOptions: { id: string; name: string }[];
+  catalog: Record<string, ModelOption[]>;
   refresh: () => void;
 }) {
   const [showDispatch, setShowDispatch] = useState(task.status === "open");
@@ -387,8 +392,7 @@ function TaskRow({
                 ))}
               </select>
             </label>
-            <label className="field-inline"><span>Model</span><input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Harness default" /></label>
-            <label className="field-inline"><span>Reasoning level</span><input value={reasoning} onChange={(e) => setReasoning(e.target.value)} placeholder="Harness default" /></label>
+            <ModelSettings models={catalog[selectedTarget] ?? []} model={model} reasoning={reasoning} setModel={setModel} setReasoning={setReasoning} fieldClass="field-inline" />
             <HarnessQuotas targets={targets} quotas={quotas} selected={selectedTarget} />
             <label className="check-inline">
               <input
@@ -467,7 +471,7 @@ function firstLine(text: string): string {
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
-function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: { id: string; name: string }[]; onDone: () => void }) {
+function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: { id: string; name: string }[]; catalog: Record<string, ModelOption[]>; onDone: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [repoChoice, setRepoChoice] = useState("");
   const [target, setTarget] = useState("");
@@ -570,8 +574,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, onDone }: { 
         </select></label>
       </div>
       <div className="field-row">
-        <label className="field"><span>Model (optional)</span><input value={selectedSettings.model} onChange={(e) => setSetting("model", e.target.value)} placeholder="Harness default" /></label>
-        <label className="field"><span>Reasoning level (optional)</span><input value={selectedSettings.reasoning} onChange={(e) => setSetting("reasoning", e.target.value)} placeholder="Harness default" /></label>
+        <ModelSettings models={catalog[selectedTarget] ?? []} model={selectedSettings.model} reasoning={selectedSettings.reasoning} setModel={(value) => setSetting("model", value)} setReasoning={(value) => setSetting("reasoning", value)} fieldClass="field" />
       </div>
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
@@ -808,4 +811,13 @@ function JiraImport({ onImported, onClose }: { onImported: () => void; onClose: 
       )}
     </div>
   );
+}
+
+function ModelSettings({ models, model, reasoning, setModel, setReasoning, fieldClass }: { models: ModelOption[]; model: string; reasoning: string; setModel: (value: string) => void; setReasoning: (value: string) => void; fieldClass: string }) {
+  const levels = reasoningChoices(models, model, reasoning);
+  const hasLevels = model ? (models.find((m) => m.id === model)?.reasoning.length ?? 0) > 0 : models.some((m) => m.reasoning.length > 0);
+  return <>
+    <label className={fieldClass}><span>Model</span>{models.length ? <select value={model} onChange={(e) => setModel(e.target.value)}><option value="">Harness default</option>{modelChoices(models, model).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}</select> : <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Harness default" />}</label>
+    <label className={fieldClass}><span>Reasoning level</span>{hasLevels ? <select value={reasoning} onChange={(e) => setReasoning(e.target.value)}><option value="">Harness default</option>{levels.map((level) => <option key={level} value={level}>{level}</option>)}</select> : <input value={reasoning} onChange={(e) => setReasoning(e.target.value)} placeholder="Harness default" />}</label>
+  </>;
 }

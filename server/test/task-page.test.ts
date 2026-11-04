@@ -46,3 +46,11 @@ test('uses the latest settings for each harness, including cleared settings', as
   assert.deepEqual(lastHarnessSettings(tasks, 'claude'), { model: 'opus', reasoning: '' });
   assert.deepEqual(lastHarnessSettings(tasks, 'other'), { model: '', reasoning: '' });
 });
+
+test('model options retain saved values and use model-specific reasoning', async () => {
+  const { modelChoices, reasoningChoices } = await import('../../web/src/task-page.ts');
+  const models = [{ id: 'one', label: 'One', reasoning: ['low', 'high'] }, { id: 'two', label: 'Two', reasoning: ['medium'] }];
+  assert.deepEqual(modelChoices(models, 'legacy').map((m) => m.id), ['legacy', 'one', 'two']);
+  assert.deepEqual(reasoningChoices(models, 'one', 'old'), ['old', 'low', 'high']);
+  assert.deepEqual(reasoningChoices(models, 'two', ''), ['medium']);
+});

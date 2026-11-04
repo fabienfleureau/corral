@@ -26,3 +26,14 @@ test("uses host_id to hide unavailable harnesses while retaining custom agents",
   };
   assert.deepEqual(await backend.harnesses(), [{ harness: "claude", agents: [{ id: "custom", name: "my-agent" }] }]);
 });
+
+test("exposes visible host models and their supported reasoning levels", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "host1", agents: {} });
+  (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async (_m, path) => {
+    if (path.startsWith("/v1/agents")) return { data: [{ id: "1", name: "codex", harness: "codex-native" }] };
+    if (path === "/v1/hosts") return { hosts: [{ host_id: "host1" }] };
+    assert.equal(path, "/v1/hosts/host1/harnesses/codex-native/model-options");
+    return { models: [{ id: "a", displayName: "Model A", supportedReasoningEfforts: [{ reasoningEffort: "high" }] }, { id: "hidden", hidden: true }] };
+  };
+  assert.deepEqual((await backend.harnesses())[0].models, [{ id: "a", label: "Model A", reasoning: ["high"] }]);
+});
