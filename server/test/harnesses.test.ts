@@ -93,3 +93,15 @@ test("rejects an agent belonging to a different harness before creating a sessio
   };
   await assert.rejects(backend.start({ taskId: "t", name: null, repoPath: "/repo", git: null, prompt: "go", harness: "codex", agent: "a", model: "terra", reasoning: null }), /opencode.*codex/);
 });
+
+test("includes paginated user agents alongside built-in agents", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async (_m, path) => {
+    const url = new URL(path, "http://x");
+    if (url.pathname === "/v1/hosts") return { hosts: [] };
+    if (url.searchParams.get("scope") !== "user") return { data: [{ id: "builtin", name: "codex-ui", harness: "codex-native" }] };
+    if (!url.searchParams.has("after")) return { data: [], has_more: true, last_id: "cursor" };
+    return { data: [{ id: "polie", name: "polie", harness: "codex" }], has_more: false };
+  };
+  assert.deepEqual((await backend.harnesses())[0].agents, [{ id: "builtin", name: "codex-ui" }, { id: "polie", name: "polie" }]);
+});
