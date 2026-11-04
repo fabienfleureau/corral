@@ -8,8 +8,6 @@ import type { JiraSearchResult, Repo, Task } from "../types";
 import { errText, formatTs, prLabel, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 
-const TARGET_OPTIONS = ["claude", "codex", "opencode"];
-
 export function TasksPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,7 +20,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
     return new URLSearchParams(q).get("import") === "1";
   });
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [targets, setTargets] = useState<string[]>(TARGET_OPTIONS);
+  const [targets, setTargets] = useState<string[]>([]);
   const [agentOptions, setAgentOptions] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
@@ -30,7 +28,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
       .listHarnesses()
       .then((res) => {
         const list = res.harnesses.map((h) => h.harness);
-        if (list.length > 0) setTargets(list);
+        setTargets(list);
         setAgentOptions(res.harnesses.flatMap((h) => h.agents));
       })
       .catch(() => undefined);
@@ -216,6 +214,8 @@ function TaskRow({
     }
   };
 
+  const selectedTarget = targets.includes(target) ? target : targets[0] ?? "";
+
   const dispatch = async () => {
     if (busy) return;
     setBusy("dispatch");
@@ -223,7 +223,7 @@ function TaskRow({
     setMsg(null);
     try {
       const result = await api.dispatchTask(task.id, {
-        target,
+        target: selectedTarget,
         use_worktree: useWorktree,
         agent: agent || null,
       });
@@ -317,7 +317,8 @@ function TaskRow({
             ) : null}
             <label className="field-inline">
               <span>Target</span>
-              <select value={target} onChange={(e) => setTarget(e.target.value)}>
+              <select value={selectedTarget} onChange={(e) => setTarget(e.target.value)}>
+                {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
                 {targets.map((t) => (
                   <option key={t} value={t}>
                     {t}
@@ -347,7 +348,7 @@ function TaskRow({
             <button
               className="btn btn-primary"
               onClick={() => void dispatch()}
-              disabled={busy !== null || !task.repo_path}
+              disabled={busy !== null || !task.repo_path || !selectedTarget}
             >
               {busy === "dispatch" ? <Spinner /> : null}
               {busy === "dispatch" ? "Dispatching…" : "Dispatch"}

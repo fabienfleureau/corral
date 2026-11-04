@@ -180,14 +180,30 @@ export class OmnigentBackend implements WorkerBackend {
 
   /** Harness dimension of the registry: "claude", "codex", "opencode", … */
   async harnesses(): Promise<{ harness: string; agents: { id: string; name: string }[] }[]> {
+    const agents = await this.listAgents();
+    let readiness: Record<string, unknown> = {};
+    try {
+      const res = await this.request<{ hosts?: { id: string; configured_harnesses?: Record<string, unknown> }[] }>("GET", "/v1/hosts");
+      const hosts = res.hosts ?? [];
+      const host = this.cfg.hostId ? hosts.find((h) => h.id === this.cfg.hostId) : hosts.length === 1 ? hosts[0] : undefined;
+      readiness = host?.configured_harnesses ?? {};
+    } catch {
+      // Older or unreachable hosts may not report readiness.
+    }
     const groups = new Map<string, { id: string; name: string }[]>();
-    for (const a of await this.listAgents()) {
+    for (const a of agents) {
       const key = harnessOf(a.harness) || a.name;
       const list = groups.get(key) ?? [];
       list.push({ id: a.id, name: a.name });
       groups.set(key, list);
     }
     return [...groups.entries()]
+      .filter(([short]) => {
+        const ids = agents.map((a) => a.harness).filter((h) => harnessOf(h) === short);
+        const id = ids.find((h) => h.endsWith("-native")) ?? ids.find((h) => h === short) ?? ids[0];
+        const value = readiness[id];
+        return value === undefined || value === null || value === true;
+      })
       .map(([harness, agents]) => ({ harness, agents }))
       .sort((a, b) => a.harness.localeCompare(b.harness));
   }
