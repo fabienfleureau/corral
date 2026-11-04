@@ -175,6 +175,18 @@ button {
   cursor: pointer;
 }
 
+.nav-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.nav-external-icon {
+  width: 13px;
+  height: 13px;
+  color: var(--muted);
+}
+
 .nav-item:hover {
   background: var(--bg-hover);
 }
