@@ -118,6 +118,7 @@ test("dispatch: worktree starts from the freshly fetched remote default branch",
     const { backend, started } = fakeBackend();
     const cfg = { configDir: dir, host: "localhost", port: 4787, token: "" } as Config;
     await dispatchTask(db, cfg, backend, task, "codex");
+    assert.equal(started[0].project, clone);
     assert.ok(started[0].git?.base);
     assert.equal(git(clone, "rev-parse", started[0].git!.base!), expected);
     assert.notEqual(git(clone, "rev-parse", "HEAD"), expected);
@@ -548,6 +549,7 @@ test("pr sync: failed delivery is retried; respawn keeps harness and moves sourc
     await sync(); // retried
     assert.equal(started.length, 1);
     assert.equal(started[0].harness, "junie");
+    assert.equal(started[0].project, "/tmp/repo");
     assert.equal(db.getTask("task-1")!.terminal_address, "s1");
 
     await sync(); // next sync points the PR item at the new session

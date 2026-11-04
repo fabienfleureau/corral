@@ -5,6 +5,8 @@
 
 export interface WorkerStart {
   taskId: string | null;
+  /** Display name of the task group, when available. */
+  project?: string | null;
   /** Human label for the session (task slug etc.) — null = let the backend
    *  generate a title (untitled tasks). */
   name: string | null;

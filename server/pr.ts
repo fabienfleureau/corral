@@ -345,6 +345,7 @@ async function respawnForWork(
   ].join("\n");
   const session = await backend.start({
     taskId: task.id,
+    project: task.repo_path ? db.getRepoByPath(task.repo_path)?.name ?? task.repo_path : null,
     name: `corral-${slugify(task.title, 20)}-${work.comments ? "review" : "rebase"}`,
     repoPath: task.worktree_path ?? task.repo_path,
     git: task.branch

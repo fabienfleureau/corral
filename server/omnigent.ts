@@ -282,6 +282,7 @@ export class OmnigentBackend implements WorkerBackend {
       labels: {
         "corral.task": start.taskId ?? "",
         "corral.harness": start.harness,
+        ...(start.project ? { omni_project: start.project } : {}),
       },
       workspace: start.repoPath,
     };

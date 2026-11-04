@@ -142,6 +142,7 @@ export async function dispatchTask(
     const base = useWorktree ? await worktreeBase(task.repo_path, task.base_branch) : null;
     session = await backend.start({
       taskId: task.id,
+    project: task.repo_path ? db.getRepoByPath(task.repo_path)?.name ?? task.repo_path : null,
       name,
       repoPath: task.repo_path,
       git: useWorktree ? { branch, base } : null,
