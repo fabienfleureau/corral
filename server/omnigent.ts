@@ -325,6 +325,9 @@ export class OmnigentBackend implements WorkerBackend {
       if (!agent) {
         throw new Error(`omnigent agent "${start.agent}" not found in the registry`);
       }
+      if (harnessOf(agent.harness) !== start.harness) {
+        throw new Error(`Agent "${agent.name}" uses harness "${agent.harness}", incompatible with selected harness "${start.harness}"`);
+      }
       const created = await this.request<Record<string, unknown>>("POST", "/v1/sessions", {
         ...meta,
         agent_id: agent.id,
