@@ -16,6 +16,9 @@ the PR description. Capture the base and the changed version, and check the
 images before uploading them; do not use the live application as a stand-in for
 either version.
 
+Use the repeatable fixture and capture commands in `AGENTS.md` under
+“Repeatable UI screenshots”.
+
 On GitHub, `gh pr create` and `gh pr edit` support `--attach` (gh 2.99 or
 later). For example, add `--attach './before.png#Before'` and
 `--attach './after.png#After'` to the command. GitHub hosts the images and appends them to
