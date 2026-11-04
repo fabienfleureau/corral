@@ -13,6 +13,7 @@ import type {
   WorkerEventSubscription,
   WorkerSession,
   WorkerStart,
+  WorkerModel,
 } from "./worker.ts";
 
 const POLL_MS = 4000;
@@ -184,14 +185,16 @@ export class OmnigentBackend implements WorkerBackend {
   }
 
   /** Harness dimension of the registry: "claude", "codex", "opencode", … */
-  async harnesses(): Promise<{ harness: string; agents: { id: string; name: string }[] }[]> {
+  async harnesses(): Promise<{ harness: string; agents: { id: string; name: string }[]; models?: WorkerModel[] }[]> {
     const agents = await this.listAgents();
     let readiness: Record<string, unknown> = {};
+    let hostId = "";
     try {
       const res = await this.request<{ hosts?: { id?: string; host_id?: string; configured_harnesses?: Record<string, unknown> }[] }>("GET", "/v1/hosts");
       const hosts = res.hosts ?? [];
       const host = this.cfg.hostId ? hosts.find((h) => (h.host_id ?? h.id) === this.cfg.hostId) : hosts.length === 1 ? hosts[0] : undefined;
       readiness = host?.configured_harnesses ?? {};
+      hostId = host?.host_id ?? host?.id ?? "";
     } catch {
       // Older or unreachable hosts may not report readiness.
     }
@@ -202,15 +205,28 @@ export class OmnigentBackend implements WorkerBackend {
       list.push({ id: a.id, name: a.name });
       groups.set(key, list);
     }
-    return [...groups.entries()]
+    const available = [...groups.entries()]
       .filter(([short]) => {
         const ids = agents.map((a) => a.harness).filter((h) => harnessOf(h) === short);
         const id = ids.find((h) => h.endsWith("-native")) ?? ids.find((h) => h === short) ?? ids[0];
         const value = readiness[id];
         return value === undefined || value === null || value === true;
       })
-      .map(([harness, agents]) => ({ harness, agents }))
-      .sort((a, b) => a.harness.localeCompare(b.harness));
+      .sort(([a], [b]) => a.localeCompare(b));
+    return Promise.all(available.map(async ([harness, groupAgents]) => {
+      let models: WorkerModel[] = [];
+      if (hostId) {
+        try {
+          const id = await this.harnessIdFor(harness);
+          const result = await this.request<{ models?: Record<string, unknown>[] }>("GET", `/v1/hosts/${encodeURIComponent(hostId)}/harnesses/${encodeURIComponent(id)}/model-options`);
+          models = (result.models ?? []).filter((m) => m.hidden !== true && str(m.id)).map((m) => ({
+            id: str(m.id)!, label: str(m.displayName) ?? str(m.id)!,
+            reasoning: Array.isArray(m.supportedReasoningEfforts) ? m.supportedReasoningEfforts.map((r: Record<string, unknown>) => str(r.reasoningEffort)).filter((r): r is string => !!r) : harness === "claude" ? ["low", "medium", "high", "xhigh", "max"] : [],
+          }));
+        } catch { /* Keep manual entry when the catalog is unavailable. */ }
+      }
+      return { harness, agents: groupAgents, ...(models.length ? { models } : {}) };
+    }));
   }
 
   /** Pick the registered agent for a harness: user agents before stock *-ui. */

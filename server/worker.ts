@@ -79,6 +79,8 @@ export interface WorkerEventSubscription {
   stop(): void;
 }
 
+export interface WorkerModel { id: string; label: string; reasoning: string[] }
+
 export interface WorkerBackend {
   name: string;
 
@@ -111,6 +113,6 @@ export interface WorkerBackend {
   inspectUrl?(address: string): string | null;
   /** Harness dimension of the backend's registry (for target pickers). */
   registryAgents?(): Promise<{ id: string; name: string }[]>;
-  harnesses?(): Promise<{ harness: string; agents: { id: string; name: string }[] }[]>;
+  harnesses?(): Promise<{ harness: string; agents: { id: string; name: string }[]; models?: WorkerModel[] }[]>;
   onEvent(cb: (e: WorkerEvent) => void): WorkerEventSubscription;
 }

@@ -29,3 +29,14 @@ export function lastHarnessSettings(tasks: Task[], harness: string): { model: st
   const latest = tasks.filter((task) => task.target === harness).sort((a, b) => b.created_ms - a.created_ms)[0];
   return { model: latest?.model ?? "", reasoning: latest?.reasoning ?? "" };
 }
+
+export type ModelOption = { id: string; label: string; reasoning: string[] };
+
+export function modelChoices(models: ModelOption[], current: string): ModelOption[] {
+  return current && !models.some((m) => m.id === current) ? [{ id: current, label: current, reasoning: [] }, ...models] : models;
+}
+
+export function reasoningChoices(models: ModelOption[], model: string, current: string): string[] {
+  const levels = model ? models.find((m) => m.id === model)?.reasoning ?? [] : [...new Set(models.flatMap((m) => m.reasoning))];
+  return current && !levels.includes(current) ? [current, ...levels] : levels;
+}

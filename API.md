@@ -58,7 +58,7 @@ type Idea = {
 - `POST /api/prs/sync` → `{ok, ran}` — re-checks every dispatched/done task with a known PR now (throttled to once per 30s; `ran: false` when skipped). A merged PR completes the task and archives all its items; a closed one resolves the PR item.
 
 ### Tasks
-- `GET /api/harnesses` → `{harnesses, agents}` — available harness groups and the full worker agent registry.
+- `GET /api/harnesses` → `{harnesses, agents}` — available harness groups, their model catalogs (when supported by the worker), and the full worker agent registry.
 - `GET /api/tasks?status=open|dispatched|done|archived` → `Task[]`
 - `POST /api/tasks` `{title?, prompt?, repo_path?, target?, model?, reasoning?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch
 - `PATCH /api/tasks/:id` partial task → `Task`
