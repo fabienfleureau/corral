@@ -2,7 +2,8 @@
 // Worktrees are the backend's job — omnigent's host daemon creates them from
 // the git request on session create.
 
-import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -69,6 +70,30 @@ function trustClaudeWorkspace(path: string): void {
   }
 }
 
+const execFileAsync = promisify(execFile);
+
+async function worktreeBase(repo: string, base: string | null): Promise<string | null> {
+  const git = async (...args: string[]) => (await execFileAsync("git", ["-C", repo, ...args], {
+    encoding: "utf8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  })).stdout.trim();
+  const remotes = (await git("remote")).split("\n");
+  if (!remotes.includes("origin")) return base;
+  await git("fetch", "origin");
+  if (base) {
+    if (base.startsWith("origin/")) return base;
+    try {
+      await git("show-ref", "--verify", "--quiet", `refs/remotes/origin/${base}`);
+      return `origin/${base}`;
+    } catch {
+      return base;
+    }
+  }
+  const remoteHead = await git("ls-remote", "--symref", "origin", "HEAD");
+  const branch = remoteHead.match(/^ref: refs\/heads\/(.+)\s+HEAD$/m)?.[1];
+  if (!branch) throw new Error("origin has no default branch; set a base branch for this task");
+  return `origin/${branch}`;
+}
+
 export interface DispatchResult {
   address: string;
   worktreePath: string;
@@ -112,11 +137,12 @@ export async function dispatchTask(
 
   let session: WorkerSession;
   try {
+    const base = useWorktree ? await worktreeBase(task.repo_path, task.base_branch) : null;
     session = await backend.start({
       taskId: task.id,
       name,
       repoPath: task.repo_path,
-      git: useWorktree ? { branch, base: task.base_branch } : null,
+      git: useWorktree ? { branch, base } : null,
       prompt: fullPrompt,
       harness: target,
       agent: opts.agent ?? null,

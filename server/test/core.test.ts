@@ -8,7 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Db } from "../db.ts";
-import { slugify } from "../dispatch.ts";
+import { dispatchTask, slugify } from "../dispatch.ts";
+import type { Config } from "../config.ts";
 import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
 import { prReady, prItemBody, syncTaskPr, type PrInfo } from "../pr.ts";
 import { CaptureEngine } from "../capture.ts";
@@ -91,6 +92,50 @@ test("slugify produces url-safe names", () => {
   assert.equal(slugify("  Résumé de la conférence  "), "resume-de-la-conference");
   assert.equal(slugify("!!!"), "task");
   assert.ok(slugify("x".repeat(100)).length <= 40);
+});
+
+test("dispatch: worktree starts from the freshly fetched remote default branch", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-dispatch-"));
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  try {
+    const remote = join(dir, "remote.git");
+    const source = join(dir, "source");
+    const clone = join(dir, "clone");
+    execFileSync("git", ["init", "--bare", "--initial-branch=main", remote]);
+    execFileSync("git", ["clone", remote, source], { stdio: "ignore" });
+    git(source, "config", "user.email", "test@example.com");
+    git(source, "config", "user.name", "Test");
+    git(source, "config", "commit.gpgsign", "false");
+    git(source, "commit", "--allow-empty", "-m", "initial");
+    git(source, "push", "-u", "origin", "main");
+    execFileSync("git", ["clone", remote, clone], { stdio: "ignore" });
+    git(source, "commit", "--allow-empty", "-m", "new remote commit");
+    git(source, "push");
+    const expected = git(source, "rev-parse", "HEAD");
+    const db = new Db(join(dir, "test.db"));
+    const task = makeTask({ repo_path: clone });
+    db.insertTask(task);
+    const { backend, started } = fakeBackend();
+    const cfg = { configDir: dir, host: "localhost", port: 4787, token: "" } as Config;
+    await dispatchTask(db, cfg, backend, task, "codex");
+    assert.ok(started[0].git?.base);
+    assert.equal(git(clone, "rev-parse", started[0].git!.base!), expected);
+    assert.notEqual(git(clone, "rev-parse", "HEAD"), expected);
+    const explicit = makeTask({ id: "task-2", repo_path: clone, base_branch: "main" });
+    db.insertTask(explicit);
+    await dispatchTask(db, cfg, backend, explicit, "codex");
+    assert.equal(git(clone, "rev-parse", started[1].git!.base!), expected);
+    git(clone, "remote", "set-url", "origin", join(dir, "missing.git"));
+    const broken = makeTask({ id: "task-3", repo_path: clone });
+    db.insertTask(broken);
+    await assert.rejects(dispatchTask(db, cfg, backend, broken, "codex"), /dispatch failed/);
+    assert.equal(db.getTask(broken.id)?.status, "open");
+    await dispatchTask(db, cfg, backend, broken, "codex", { useWorktree: false });
+    assert.equal(started[2].git, null);
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("db: task and item round-trip", () => {
