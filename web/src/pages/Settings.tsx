@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { Config, Repo } from "../types";
+import type { Config, Favorite, Repo } from "../types";
 import { errText } from "../util";
 import { Spinner } from "../ui";
+import { ModelSettings } from "./Tasks";
+import type { ModelOption } from "../task-page";
 import { sendDesktopNotification } from "../notifications";
 
 export function SettingsPage() {
@@ -116,6 +118,7 @@ export function SettingsPage() {
         <div className="chip-row settings-tabs">
           {[
             { key: "general", label: "General" },
+            { key: "favorites", label: "Favorites" },
             { key: "jira", label: "Jira" },
             { key: "repos", label: "Repos" },
           ].map((s) => (
@@ -207,6 +210,7 @@ export function SettingsPage() {
             </section>
             ) : null}
 
+            {section === "favorites" ? <FavoritesSection initial={config.favorites ?? []} /> : null}
             {section === "repos" ? <ReposSection /> : null}
 
             {section === "general" ? (
@@ -407,4 +411,33 @@ function ReposSection() {
       </div>
     </section>
   );
+}
+
+function FavoritesSection({ initial }: { initial: Favorite[] }) {
+  const [favorites, setFavorites] = useState(initial);
+  const [catalog, setCatalog] = useState<{ harness: string; agents: { id: string; name: string }[]; models?: ModelOption[] }[]>([]);
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  const [draft, setDraft] = useState<Favorite>({ name: "", harness: "", agent: "", model: "", reasoning: "" });
+  const [editing, setEditing] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.listHarnesses().then((r) => { setCatalog(r.harnesses); setAgents(r.agents); }).catch((e: unknown) => setError(errText(e))); }, []);
+  const harness = draft.harness || catalog[0]?.harness || "";
+  const update = (patch: Partial<Favorite>) => setDraft((d) => ({ ...d, ...patch }));
+  const save = async (next: Favorite[]) => {
+    setBusy(true); setError("");
+    try { await api.putConfig({ favorites: next }); setFavorites(next); setEditing(null); setDraft({ name: "", harness: "", agent: "", model: "", reasoning: "" }); }
+    catch (e) { setError(errText(e)); } finally { setBusy(false); }
+  };
+  return <section className="panel-form">
+    <h2 className="panel-title">Task favorites</h2>
+    <p className="muted">Save combinations for one-click selection when creating a task.</p>
+    <ul className="repo-list">{favorites.map((f, i) => <li className="repo-row" key={i}><div className="repo-info"><strong>{f.name}</strong><span className="muted">{[f.harness, agents.find((a) => a.id === f.agent)?.name || f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")}</span></div><div className="repo-actions"><button className="btn" disabled={busy} onClick={() => { setDraft(f); setEditing(i); }}>Edit</button><button className="btn" disabled={busy} onClick={() => void save(favorites.filter((_, n) => n !== i))}>Remove</button></div></li>)}</ul>
+    <label className="field"><span>Name</span><input value={draft.name} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. Code review" /></label>
+    <div className="field-row"><label className="field"><span>Harness</span><select value={harness} onChange={(e) => update({ harness: e.target.value, model: "", reasoning: "" })}>{catalog.length === 0 ? <option value="">No configured harnesses</option> : null}{draft.harness && !catalog.some((h) => h.harness === draft.harness) ? <option value={draft.harness}>{draft.harness} (unavailable)</option> : null}{catalog.map((h) => <option key={h.harness} value={h.harness}>{h.harness}</option>)}</select></label>
+    <label className="field"><span>Agent</span><select value={draft.agent} onChange={(e) => update({ agent: e.target.value })}><option value="">— none (bare harness) —</option>{draft.agent && !agents.some((a) => a.id === draft.agent) ? <option value={draft.agent}>{draft.agent} (unavailable)</option> : null}{agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label></div>
+    <div className="field-row"><ModelSettings models={catalog.find((h) => h.harness === harness)?.models ?? []} model={draft.model} reasoning={draft.reasoning} setModel={(model) => update({ model })} setReasoning={(reasoning) => update({ reasoning })} fieldClass="field" /></div>
+    {error ? <div className="inline-error">{error}</div> : null}
+    <div className="form-foot"><button className="btn btn-primary" disabled={busy || !draft.name.trim() || !harness} onClick={() => { const next = [...favorites]; const favorite = { ...draft, name: draft.name.trim(), harness }; if (editing === null) next.push(favorite); else next[editing] = favorite; void save(next); }}>{editing === null ? "Add favorite" : "Save favorite"}</button>{editing !== null ? <button className="btn" onClick={() => { setEditing(null); setDraft({ name: "", harness: "", agent: "", model: "", reasoning: "" }); }}>Cancel</button> : null}</div>
+  </section>;
 }

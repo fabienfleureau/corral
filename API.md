@@ -90,8 +90,9 @@ type Idea = {
 - `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`
 - `GET /api/metrics/summary` → `{by_name: [{name, count, last_ms}], recent: [{id, ts, name, ref, data}]}`
 - `GET /api/terminals` → tracked terminals `[{address, task_id, name, agent, last_status, last_turn, updated_ms}]`
-- `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, token /* masked */}`
-- `PUT /api/config` `{jira?: {baseUrl, email, token, jql}, assistant?: string[], agents?: {...}}` → `{ok}`
+- `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, favorites: Favorite[], token /* masked */}`
+- `Favorite` is `{name, harness, agent, model, reasoning}`; all fields are strings, with empty agent/model/reasoning meaning defaults.
+- `PUT /api/config` `{jira?: {baseUrl, email, token, jql}, assistant?: string[], agents?: {...}, favorites?: Favorite[]}` → `{ok}`
 - `GET /api/health` → `{ok: true}` (no auth)
 
 - `GET /api/errors` → current background synchronization errors (`source`, `message`, `updated_ms`); cleared when the operation succeeds.
