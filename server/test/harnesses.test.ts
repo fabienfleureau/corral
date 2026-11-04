@@ -84,3 +84,12 @@ test("session details expose the reported model and reasoning, not the model ove
   assert.equal(session?.model, "actual-model");
   assert.equal(session?.reasoning, "high");
 });
+
+test("rejects an agent belonging to a different harness before creating a session", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async (_method, path) => {
+    if (path.startsWith("/v1/agents")) return { data: [{ id: "a", name: "opencode-ui", harness: "opencode-native" }] };
+    throw new Error("session creation must not be reached");
+  };
+  await assert.rejects(backend.start({ taskId: "t", name: null, repoPath: "/repo", git: null, prompt: "go", harness: "codex", agent: "a", model: "terra", reasoning: null }), /opencode.*codex/);
+});

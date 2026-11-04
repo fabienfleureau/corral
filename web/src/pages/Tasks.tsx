@@ -23,7 +23,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [catalog, setCatalog] = useState<Record<string, ModelOption[]>>({});
   const [targets, setTargets] = useState<string[]>([]);
   const [quotas, setQuotas] = useState<AgentQuota[]>([]);
-  const [agentOptions, setAgentOptions] = useState<{ id: string; name: string }[]>([]);
+  const [agentOptions, setAgentOptions] = useState<Record<string, { id: string; name: string }[]>>({});
 
   useEffect(() => {
     api
@@ -32,7 +32,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         const list = res.harnesses.map((h) => h.harness);
         setTargets(list);
         setCatalog(Object.fromEntries(res.harnesses.map((h) => [h.harness, h.models ?? []])));
-        setAgentOptions(res.agents);
+        setAgentOptions(Object.fromEntries(res.harnesses.map((h) => [h.harness, h.agents])));
       })
       .catch(() => undefined);
   }, []);
@@ -197,7 +197,7 @@ function TaskRow({
   repos: Repo[];
   targets: string[];
   quotas: AgentQuota[];
-  agentOptions: { id: string; name: string }[];
+  agentOptions: Record<string, { id: string; name: string }[]>;
   catalog: Record<string, ModelOption[]>;
   refresh: () => void;
 }) {
@@ -376,7 +376,7 @@ function TaskRow({
             )}
             <label className="field-inline">
               <span>Harness</span>
-              <select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setModel(e.target.value === task.target ? task.model ?? "" : ""); setReasoning(e.target.value === task.target ? task.reasoning ?? "" : ""); }}>
+              <select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setAgent(""); setModel(e.target.value === task.target ? task.model ?? "" : ""); setReasoning(e.target.value === task.target ? task.reasoning ?? "" : ""); }}>
                 {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
                 {targets.map((t) => (
                   <option key={t} value={t}>
@@ -389,7 +389,8 @@ function TaskRow({
               <span>Agent</span>
               <select value={agent} onChange={(e) => setAgent(e.target.value)}>
                 <option value="">— none (bare harness) —</option>
-                {agentOptions.map((a) => (
+                {agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent) ? <option value={agent}>{agent} (unavailable for this harness)</option> : null}
+                {(agentOptions[selectedTarget] ?? []).map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
                   </option>
@@ -409,7 +410,7 @@ function TaskRow({
             <button
               className="btn btn-primary"
               onClick={() => void dispatch()}
-              disabled={busy !== null || editingPrompt || !task.repo_path || !selectedTarget}
+              disabled={busy !== null || editingPrompt || !task.repo_path || !selectedTarget || (!!agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent))}
             >
               {busy === "dispatch" ? <Spinner /> : null}
               {busy === "dispatch" ? "Dispatching…" : "Dispatch"}
@@ -475,7 +476,7 @@ function firstLine(text: string): string {
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
-function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: { id: string; name: string }[]; catalog: Record<string, ModelOption[]>; onDone: () => void }) {
+function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; onDone: () => void }) {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   useEffect(() => { api.getConfig().then((cfg) => setFavorites(cfg.favorites ?? [])).catch(() => undefined); }, []);
   const [prompt, setPrompt] = useState("");
@@ -571,14 +572,14 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
       </div>
       {favorites.length > 0 ? <div className="field"><span>Favorites</span><div className="chip-row">{favorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!targets.includes(f.harness)} title={!targets.includes(f.harness) ? "Harness unavailable" : [f.harness, f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")} onClick={() => { setTarget(f.harness); setAgent(f.agent); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}>{f.name}</button>)}</div></div> : null}
       <div className="field-row">
-        <label className="field"><span>Harness</span><select value={selectedTarget} onChange={(e) => setTarget(e.target.value)}>
+        <label className="field"><span>Harness</span><select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setAgent(""); }}>
           {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
           {targets.map((t) => <option key={t} value={t}>{harnessLabel(t, quotas)}</option>)}
         </select></label>
         <label className="field"><span>Agent</span><select value={agent} onChange={(e) => setAgent(e.target.value)}>
           <option value="">— none (bare harness) —</option>
-          {agent && !agentOptions.some((a) => a.id === agent) ? <option value={agent}>{agent} (unavailable)</option> : null}
-          {agentOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          {agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent) ? <option value={agent}>{agent} (unavailable)</option> : null}
+          {(agentOptions[selectedTarget] ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select></label>
       </div>
       <div className="field-row">
@@ -586,7 +587,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
       </div>
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
-        <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !prompt.trim() || !selectedTarget || !(selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
+        <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !prompt.trim() || !selectedTarget || (!!agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent)) || !(selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
           Create and dispatch
         </button>
         <button className="btn" onClick={() => void submit(false)} disabled={busy || !prompt.trim()}>
