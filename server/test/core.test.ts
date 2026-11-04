@@ -288,7 +288,7 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
   }
 });
 
-test("pr sync: item flips ready->needs work and back, archives on merge", () => {
+test("pr sync: item flips ready->needs work and resolves on merge", () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-prsync-"));
   try {
     const db = new Db(join(dir, "test.db"));
@@ -325,9 +325,9 @@ test("pr sync: item flips ready->needs work and back, archives on merge", () => 
     current = { ...current, state: "MERGED", threads: [] };
     syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
     item = db.listItems({ kind: "pr" })[0];
-    assert.equal(item.status, "archived", "merged PR items are archived");
+    assert.equal(item.status, "resolved", "merged PR items are resolved");
     assert.match(item.title, /PR merged/);
-    assert.equal(db.getTask("task-1")?.status, "archived", "merged PR archives the task");
+    assert.equal(db.getTask("task-1")?.status, "done", "merged PR completes the task");
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
