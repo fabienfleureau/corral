@@ -373,7 +373,7 @@ test("pr sync: merge completes the task and archives its items and session", asy
   const dir = mkdtempSync(join(tmpdir(), "corral-prsync-"));
   try {
     const db = new Db(join(dir, "test.db"));
-    db.insertTask(makeTask({ branch: "feat-x", status: "dispatched", terminal_address: "s1", repo_path: "/tmp/repo" }));
+    db.insertTask(makeTask({ title: "", branch: "feat-x", status: "dispatched", terminal_address: "s1", repo_path: "/tmp/repo" }));
     const { backend } = fakeBackend();
     const archived: string[] = [];
     backend.archive = async (address) => { archived.push(address); };
@@ -398,13 +398,13 @@ test("pr sync: merge completes the task and archives its items and session", asy
     await syncTaskPr(db, hub, makeTask({ branch: "feat-x", status: "dispatched", repo_path: "/tmp/repo", id: "task-1" }), { finder });
     let item = db.listItems({ kind: "pr" })[0];
     assert.equal(item.ready, 1);
-    assert.match(item.title, /PR ready for review/);
+    assert.equal(item.title, "PR ready for review: feat: x");
 
     current = { ...current, threads: [{ id: "t1", author: "bot", body: "fix" }] };
     await syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
     item = db.listItems({ kind: "pr" })[0];
     assert.equal(item.ready, 0);
-    assert.match(item.title, /PR needs work/);
+    assert.equal(item.title, "PR needs work: feat: x");
     assert.match(item.summary, /1 unresolved review comment/);
 
     current = { ...current, state: "MERGED", threads: [] };
@@ -412,7 +412,7 @@ test("pr sync: merge completes the task and archives its items and session", asy
     assert.deepEqual(archived, ["s1"]);
     item = db.listItems({ kind: "pr" })[0];
     assert.equal(item.status, "archived", "merged PR items are archived");
-    assert.match(item.title, /PR merged/);
+    assert.equal(item.title, "PR merged: feat: x");
     assert.equal(db.getTask("task-1")?.status, "done", "merged PR completes the task");
     db.close();
   } finally {
