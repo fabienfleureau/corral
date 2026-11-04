@@ -112,6 +112,11 @@ export function App() {
     };
   }, [eventVersion]);
 
+  useEffect(() => {
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (icon) icon.href = counts.inbox > 0 ? "/favicon-inbox.svg" : "/favicon.svg";
+  }, [counts.inbox]);
+
   // Offline mode: track connectivity (the service worker serves cached data).
   const [online, setOnline] = useState(() =>
     typeof navigator === "undefined" ? true : navigator.onLine,
