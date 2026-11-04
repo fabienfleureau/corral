@@ -8,6 +8,26 @@ sees it when it is actually ready. This file is how you hold up your side.
 Commit, push, open the PR/MR, report `kind= "done"` with the link. Do not ask
 permission for this flow.
 
+## UI changes
+
+For visible UI changes, capture comparable before-and-after views with the same
+viewport and representative, non-sensitive data. Include labeled screenshots in
+the PR description. Capture the base and the changed version, and check the
+images before uploading them; do not use the live application as a stand-in for
+either version.
+
+On GitHub, `gh pr create` and `gh pr edit` support `--attach` (gh 2.99 or
+later). For example, add `--attach './before.png#Before'` and
+`--attach './after.png#After'` to the command. GitHub hosts the images and appends them to
+the description. Fetch the saved PR description and verify both images are
+present. Do not commit screenshots just to make them accessible.
+
+If headless Chrome exits without producing an image in a sandbox, try an
+available browser tool or request the sandbox's supported permission to run the
+capture outside it. Use a separate temporary browser profile. If capture or
+upload still fails, state the specific failure in the PR and completion report;
+never claim a visual check passed without reviewing the images.
+
 ## When review comments come back
 
 Corral watches your PR. When review comments or threads appear, Corral pushes
