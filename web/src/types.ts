@@ -31,6 +31,7 @@ export type Item = {
   body: string; // raw tail / structured body — shown when summary is empty
   context: string; // raw agent output captured at report time (context drawer)
   options: string | null; // JSON array of quick-reply options
+  elicitation: string | null;
   source_ref: string | null; // herdr terminal address for question items
   task_id: string | null;
   structured: number; // 1 = agent reported it, 0 = blocked-status fallback

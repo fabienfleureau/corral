@@ -56,6 +56,7 @@ export interface WorkerElicitation {
   choices: string[];
   /** First requestedSchema property: where a typed answer goes on accept. */
   field?: string | null;
+  persistPattern?: string;
 }
 
 export type WorkerEventType = "created" | "status" | "finished" | "removed";
@@ -95,6 +96,7 @@ export interface WorkerBackend {
     elicitationId: string,
     action: "accept" | "decline" | "cancel",
     content?: Record<string, unknown>,
+    meta?: Record<string, unknown>,
   ): Promise<void>;
   kill(address: string): Promise<void>;
   /** Archive a resolved session without deleting its worktree. */
