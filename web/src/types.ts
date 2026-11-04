@@ -7,6 +7,8 @@ export type Task = {
   repo_path: string;
   target: string; // "", "claude", "codex", "opencode"
   target_state: "suggested" | "confirmed";
+  model: string | null;
+  reasoning: string | null;
   base_branch: string | null;
   branch: string | null;
   worktree_path: string | null;

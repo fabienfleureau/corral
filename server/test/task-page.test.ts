@@ -34,3 +34,15 @@ test('harness labels show known quota windows and flag stale snapshots', async (
   assert.equal(harnessLabel('claude', quota), 'claude');
   assert.equal(harnessLabel('codex', [{ ...quota[0], windows: [] }]), 'codex');
 });
+
+test('uses the latest settings for each harness, including cleared settings', async () => {
+  const { lastHarnessSettings } = await import('../../web/src/task-page.ts');
+  const tasks = [
+    { target: 'codex', model: 'old', reasoning: 'low', created_ms: 1 },
+    { target: 'claude', model: 'opus', reasoning: null, created_ms: 3 },
+    { target: 'codex', model: null, reasoning: 'high', created_ms: 2 },
+  ] as any;
+  assert.deepEqual(lastHarnessSettings(tasks, 'codex'), { model: '', reasoning: 'high' });
+  assert.deepEqual(lastHarnessSettings(tasks, 'claude'), { model: 'opus', reasoning: '' });
+  assert.deepEqual(lastHarnessSettings(tasks, 'other'), { model: '', reasoning: '' });
+});

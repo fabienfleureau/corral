@@ -60,9 +60,9 @@ type Idea = {
 ### Tasks
 - `GET /api/harnesses` → `{harnesses, agents}` — available harness groups and the full worker agent registry.
 - `GET /api/tasks?status=open|dispatched|done|archived` → `Task[]`
-- `POST /api/tasks` `{title?, prompt?, repo_path?, target?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch
+- `POST /api/tasks` `{title?, prompt?, repo_path?, target?, model?, reasoning?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch
 - `PATCH /api/tasks/:id` partial task → `Task`
-- `POST /api/tasks/:id/dispatch` `{target?, use_worktree?}` → `{address, worktreePath, branch}` — creates worktree + starts the agent (409 if already dispatched, 400 if no target)
+- `POST /api/tasks/:id/dispatch` `{target?, use_worktree?, agent?, model?, reasoning?}` → `{address, worktreePath, branch}` — uses saved model and reasoning when omitted; creates worktree + starts the agent (409 if already dispatched, 400 if no target)
 - `POST /api/tasks/:id/cleanup` → `{ok}` — removes the task's worktree
 
 ### Jira
