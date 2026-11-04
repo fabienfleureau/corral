@@ -133,7 +133,8 @@ export async function dispatchTask(
 
   // Untitled task: send no title so omnigent generates one; capture adopts it.
   const name = task.title.trim() ? `corral-${slugify(task.title, 24)}` : null;
-  const fullPrompt = `${task.prompt.trim()}\n\n---\n${questionConvention(cfg, task)}`;
+  const taskContext = [...new Set([task.title.trim(), task.prompt.trim()].filter(Boolean))].join("\n\n");
+  const fullPrompt = `${taskContext}\n\n---\n${questionConvention(cfg, task)}`;
 
   let session: WorkerSession;
   try {
