@@ -117,6 +117,8 @@ export const api = {
     post<{ ok: boolean; sent_to: string }>(`/api/items/${id}/reply`, { text }),
   replyPermission: (id: string, permission: string): Promise<{ ok: boolean; sent_to: string }> =>
     post<{ ok: boolean; sent_to: string }>(`/api/items/${id}/reply`, { permission }),
+  replyAnswers: (id: string, content: Record<string, string | string[]>): Promise<{ ok: boolean; sent_to: string }> =>
+    post<{ ok: boolean; sent_to: string }>(`/api/items/${id}/reply`, { content }),
   summarizeItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/summarize`),
   resolveItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/resolve`),
   archiveItem: (id: string): Promise<Item> => post<Item>(`/api/items/${id}/archive`),

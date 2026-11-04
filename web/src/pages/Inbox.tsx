@@ -9,6 +9,8 @@ import { ExternalLinkIcon, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
 import { selectedInboxItem } from "../inbox-selection";
 import { inboxTitle } from "../inbox-title";
+import { replyQuestions } from "../question-reply";
+import { QuestionReply } from "../QuestionReply";
 
 type StatusFilter = "open" | "resolved" | "archived";
 
@@ -108,14 +110,14 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
     }
   };
 
-  const sendReply = async (override?: string, permission?: string) => {
+  const sendReply = async (override?: string, permission?: string, answers?: Record<string, string | string[]>) => {
     const text = (override ?? replyText).trim();
-    if (!selected || (!text && !permission) || replyBusy) return;
+    if (!selected || (!text && !permission && !answers) || replyBusy) return;
     setReplyBusy(true);
     setReplyError(null);
     setReplyOk(null);
     try {
-      const res = permission ? await api.replyPermission(selected.id, permission) : await api.replyItem(selected.id, text);
+      const res = answers ? await api.replyAnswers(selected.id, answers) : permission ? await api.replyPermission(selected.id, permission) : await api.replyItem(selected.id, text);
       setReplyOk(`Sent to ${res.sent_to}`);
       setReplyText("");
       applyItem({ ...selected, status: "resolved", resolved_ms: Date.now() });
@@ -388,6 +390,12 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
               ) : null}
 
               <div className="reply-block">
+                {replyQuestions(selected.elicitation).length > 0 ? <>
+                  <QuestionReply key={selected.id + selected.elicitation}
+                    questions={replyQuestions(selected.elicitation)} disabled={replyBusy || selected.status !== "open"}
+                    onSend={(answers) => sendReply("", undefined, answers)} />
+                  {replyError ? <span className="inline-error">{replyError}</span> : null}
+                </> : <>
                 {(() => {
                   try {
                     const elicitation = selected.elicitation ? JSON.parse(selected.elicitation) as { kind?: string; persistPattern?: string } : null;
@@ -449,6 +457,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                     <span className="muted">Snoozed until {formatTs(selected.snooze_until_ms)}</span>
                   ) : null}
                 </div>
+                </>}
               </div>
             </div>
           </>

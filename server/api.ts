@@ -7,7 +7,7 @@ import { extname, join, normalize } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
-import type { WorkerBackend } from "./worker.ts";
+import type { WorkerBackend, WorkerQuestion } from "./worker.ts";
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText } from "./llm.ts";
@@ -86,6 +86,7 @@ interface ItemElicitation {
   kind: string;
   field?: string | null;
   persistPattern?: string;
+  questions?: WorkerQuestion[];
 }
 
 function parseElicitation(raw: string | null | undefined): ItemElicitation | null {
@@ -150,13 +151,27 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/items/:id/reply", async (req, res, { body, params }) => {
     const item = state.db.getItem(params.id);
     if (!item) return json(res, 404, { error: "item not found" });
-    const { text = "", permission } = (body ?? {}) as { text?: string; permission?: string };
-    if (!text.trim() && !permission) return json(res, 400, { error: "text required" });
-    if (permission && item.status !== "open") return json(res, 409, { error: "item is not open" });
+    const { text = "", permission, content } = (body ?? {}) as { text?: string; permission?: string; content?: unknown };
+    if (typeof text !== "string" || (!text.trim() && !permission && content === undefined)) return json(res, 400, { error: "text or answers required" });
+    if ((permission || content !== undefined || item.elicitation) && item.status !== "open") return json(res, 409, { error: "item is not open" });
     const address = item.source_ref ?? (item.task_id ? state.db.getTask(item.task_id)?.terminal_address : null);
     if (!address) return json(res, 409, { error: "no terminal linked to this item" });
     const elicitation = parseElicitation(item.elicitation);
-    if (permission) {
+    if (content !== undefined) {
+      if (permission || text.trim() || !elicitation?.questions?.length || !content || typeof content !== "object" || Array.isArray(content)) {
+        return json(res, 400, { error: "invalid question answers" });
+      }
+      const answers = content as Record<string, unknown>;
+      if (Object.keys(answers).length !== elicitation.questions.length || elicitation.questions.some((q) => {
+        const answer = answers[q.id];
+        return q.multiple
+          ? !Array.isArray(answer) || !answer.length || answer.some((v) => typeof v !== "string" || !v.trim())
+          : typeof answer !== "string" || !answer.trim();
+      })) return json(res, 400, { error: "answer every question with the expected selection type" });
+      await state.backend.resolveElicitation(address, elicitation.id, "accept", answers);
+    } else if (elicitation?.questions?.length && !elicitation.field) {
+      return json(res, 400, { error: "structured answers required for this question" });
+    } else if (permission) {
       const verdict = elicitation && permissionVerdict(elicitation, permission);
       if (!verdict) return json(res, 400, { error: "invalid permission choice" });
       await state.backend.resolveElicitation(address, elicitation!.id, verdict.action, undefined, verdict.meta);
@@ -169,7 +184,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     } else {
       await state.backend.send(address, text);
     }
-    state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now(), body: `${item.body}\n\n**Reply:** ${permission || text.trim()}` });
+    state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now(), body: `${item.body}\n\n**Reply:** ${content !== undefined ? JSON.stringify(content) : permission || text.trim()}` });
     state.db.recordMetric("item.replied", item.id, { address });
     state.hub.broadcast("item.updated", state.db.getItem(item.id));
     json(res, 200, { ok: true, sent_to: address });

@@ -93,9 +93,13 @@ export class CaptureEngine {
         try {
           const old = JSON.parse(existing.elicitation) as { id?: string };
           if (old.id === first.id) {
-            const elicitation = JSON.stringify({ id: first.id, kind: first.kind, field: first.field ?? null, ...(first.persistPattern ? { persistPattern: first.persistPattern } : {}) });
+            const elicitation = JSON.stringify({ id: first.id, kind: first.kind, field: first.field ?? null, ...(first.questions ? { questions: first.questions } : {}), ...(first.persistPattern ? { persistPattern: first.persistPattern } : {}) });
             if (existing.elicitation !== elicitation) {
-              this.db.updateItem(existing.id, { elicitation });
+              this.db.updateItem(existing.id, { elicitation, ...(first.questions ? {
+                title: first.prompt.split("\n")[0].slice(0, 120),
+                options: first.choices.length ? JSON.stringify(first.choices.slice(0, 8)) : null,
+                body: `${existing.body}\n\n---\n\n${first.questions.map((q) => [q.prompt, ...q.choices.map((c) => `- ${c}`)].join("\n")).join("\n\n")}`,
+              } : {}) });
               this.hub.broadcast("item.updated", this.db.getItem(existing.id));
             }
           }
@@ -125,7 +129,7 @@ export class CaptureEngine {
         })
         .join("\n\n---\n\n");
       if (first.choices.length > 0) options = JSON.stringify(first.choices.slice(0, 8));
-      elicitation = JSON.stringify({ id: first.id, kind: first.kind, field: first.field ?? null, ...(first.persistPattern ? { persistPattern: first.persistPattern } : {}) });
+      elicitation = JSON.stringify({ id: first.id, kind: first.kind, field: first.field ?? null, ...(first.questions ? { questions: first.questions } : {}), ...(first.persistPattern ? { persistPattern: first.persistPattern } : {}) });
     } else {
       try {
         body = (await this.backend.read(e.address, TAIL_LINES)) || "(output unavailable)";

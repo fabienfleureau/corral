@@ -46,6 +46,13 @@ export interface WorkerSession {
   parent: string | null;
 }
 
+export interface WorkerQuestion {
+  id: string;
+  prompt: string;
+  choices: string[];
+  multiple: boolean;
+}
+
 export interface WorkerElicitation {
   id: string;
   /** permission | question | auth | unknown */
@@ -56,6 +63,7 @@ export interface WorkerElicitation {
   choices: string[];
   /** First requestedSchema property: where a typed answer goes on accept. */
   field?: string | null;
+  questions?: WorkerQuestion[];
   persistPattern?: string;
 }
 
