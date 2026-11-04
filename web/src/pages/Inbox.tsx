@@ -7,6 +7,7 @@ import type { Item, Task } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
 import { ExternalLinkIcon, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
+import { selectedInboxItem } from "../inbox-selection";
 
 type StatusFilter = "open" | "resolved" | "archived";
 
@@ -45,7 +46,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
         setAllItems(itemList);
         setTasks(taskList);
         setError(null);
-        setSelected((prev) => (prev ? itemList.find((i) => i.id === prev.id) ?? prev : prev));
+        setSelected((prev) => selectedInboxItem(prev, itemList, statusFilter));
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(errText(err));
@@ -56,12 +57,15 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
     return () => {
       cancelled = true;
     };
-  }, [eventVersion]);
+  }, [eventVersion, statusFilter]);
 
   // Opening the inbox re-checks PRs: merged ones get resolved (server
   // broadcasts the changes, which bumps eventVersion and reloads the list).
   useEffect(() => {
-    api.syncPrs().catch(() => undefined);
+    const sync = () => { if (document.visibilityState === "visible") void api.syncPrs().catch(() => undefined); };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
   }, []);
 
   const items = useMemo(() => allItems.filter((i) => i.status === statusFilter), [allItems, statusFilter]);
