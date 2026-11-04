@@ -15,6 +15,9 @@ backed by `server/omnigent.ts`.
   tsconfig.server.json`, `npx tsc --noEmit -p web/tsconfig.json`, `npm run build`.
 - Keep PRs small and single-purpose. The description says **what changed, why,
   and how to test it** (including UI deep links like `#/pulls?color=red`).
+- For UI changes, include labeled before-and-after screenshots of comparable
+  views in the PR description. If screenshots cannot be captured or included,
+  explain why.
 - Say explicitly if your PR overlaps another open PR.
 
 ## Dev loop
