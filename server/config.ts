@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ModelPrice } from "./usage.ts";
 
 export interface JiraConfig {
   baseUrl: string;
@@ -39,6 +40,8 @@ export interface Config {
   assistant: string[];
   jira: JiraConfig;
   omnigent: OmnigentConfig;
+  /** Usage page: price overrides (USD per MTok), by exact model id or "prefix*". */
+  usage: { prices: Record<string, ModelPrice> };
 }
 
 function defaultConfig(): Config {
@@ -70,6 +73,7 @@ function defaultConfig(): Config {
         opencode: { harness: "opencode-native" },
       },
     },
+    usage: { prices: {} },
   };
 }
 

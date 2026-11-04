@@ -10,6 +10,7 @@ import { prCandidateTasks, syncAllPrs, syncTaskPr } from "./pr.ts";
 import { refreshPulls } from "./pulls.ts";
 import { createHttpServer, type AppState } from "./api.ts";
 import type { ServerResponse } from "node:http";
+import { UsageScanner, defaultSources } from "./usage.ts";
 
 const cfg = loadConfig();
 const db = new Db(join(cfg.dataDir, "corral.db"));
@@ -32,7 +33,10 @@ const hub = {
 };
 
 const capture = new CaptureEngine(db, backend, hub, cfg);
-const state: AppState = { db, cfg, backend, capture, jira, hub };
+const usage = new UsageScanner(defaultSources());
+const state: AppState = { db, cfg, backend, capture, jira, hub, usage };
+// Usage page: warm the log scan so the first visit is fast.
+setTimeout(() => void usage.refresh().catch(() => undefined), 5_000);
 
 // Worker events (omnigent polling loop) drive the inbox.
 const subscription = backend.onEvent((e) => void capture.handleEvent(e));
