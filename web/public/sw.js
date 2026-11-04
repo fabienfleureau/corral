@@ -10,17 +10,35 @@
 // Bump CACHE when the caching semantics change (not on every deploy — hashed
 // assets and network-first navigations pick up new deploys automatically).
 
-const CACHE = "corral-v1";
+const CACHE = "corral-v2";
 const SHELL = ["/"];
 const TIMEOUT_MS = 3000;
 
+/** Hashed JS/CSS the shell references: precached so the first offline
+ *  reload works (on first visit they load before this worker controls the page). */
+function shellAssets(html) {
+  const urls = new Set();
+  for (const m of html.matchAll(/<(?:script|link)\b[^>]*?(?:src|href)="([^"]+)"/g)) {
+    const url = new URL(m[1], self.location.origin);
+    if (url.origin === self.location.origin && /\.(?:js|css)$/.test(url.pathname)) urls.add(url.pathname);
+  }
+  return [...urls];
+}
+
+async function precache() {
+  const cache = await caches.open(CACHE);
+  await cache.addAll(SHELL);
+  try {
+    const shell = await cache.match("/");
+    const assets = shell ? shellAssets(await shell.text()) : [];
+    await Promise.all(assets.map((a) => cache.add(a).catch(() => undefined)));
+  } catch {
+    /* assets get cached on use instead */
+  }
+}
+
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(SHELL))
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(precache().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -48,9 +66,14 @@ function fetchWithTimeout(request, ms) {
   });
 }
 
+/** Best effort: a full or failing cache must never discard a good response. */
 function cachePut(request, response) {
   if (response && response.ok && request.method === "GET") {
-    return caches.open(CACHE).then((cache) => cache.put(request, response.clone()));
+    const copy = response.clone();
+    return caches
+      .open(CACHE)
+      .then((cache) => cache.put(request, copy))
+      .catch(() => undefined);
   }
   return Promise.resolve();
 }

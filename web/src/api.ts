@@ -20,6 +20,15 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
   unauthorizedHandler = handler;
 }
 
+// The service worker marks stale API responses with X-Corral-Cache: hit
+// (server unreachable or slow even though the browser is online).
+type CacheStateHandler = (stale: boolean) => void;
+let cacheStateHandler: CacheStateHandler | null = null;
+
+export function setCacheStateHandler(handler: CacheStateHandler | null): void {
+  cacheStateHandler = handler;
+}
+
 async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
@@ -29,6 +38,7 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
       init.headers = { "Content-Type": "application/json" };
     }
     res = await fetch(path, init);
+    if (method === "GET") cacheStateHandler?.(res.headers.get("X-Corral-Cache") !== null);
   } catch (err) {
     throw new ApiError(0, `network error: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -149,7 +159,8 @@ export const api = {
   // ---- pull requests ----
   listPulls: (): Promise<{ pulls: Pull[]; fetched_ms: number }> =>
     get<{ pulls: Pull[]; fetched_ms: number }>("/api/pulls"),
-  refreshPulls: (): Promise<{ pulls: Pull[] }> => post<{ pulls: Pull[] }>("/api/pulls/refresh"),
+  refreshPulls: (): Promise<{ pulls: Pull[]; fetched_ms: number }> =>
+    post<{ pulls: Pull[]; fetched_ms: number }>("/api/pulls/refresh"),
 
   // ---- sessions ----
   listSessions: (): Promise<SessionInfo[]> => get<SessionInfo[]>("/api/sessions"),
@@ -178,7 +189,9 @@ export type ServerEvent =
   | { type: "item.created"; item: Item }
   | { type: "item.updated"; item: Item }
   | { type: "task.updated"; task: Task }
-  | { type: "idea.created"; idea: Idea };
+  | { type: "idea.created"; idea: Idea }
+  | { type: "pulls.updated" }
+  | { type: "session.updated"; address: string; status: string | null };
 
 /** Subscribe to /api/events. Returns an unsubscribe function. */
 export function subscribeEvents(onEvent: (event: ServerEvent) => void): () => void {
@@ -209,7 +222,16 @@ export function subscribeEvents(onEvent: (event: ServerEvent) => void): () => vo
     if (idea) onEvent({ type: "idea.created", idea });
   };
 
+  // Background refreshes and session status changes: pages just reload.
+  const onPullsUpdated = () => onEvent({ type: "pulls.updated" });
+  const onSessionUpdated = (ev: Event) => {
+    const s = parse(ev) as { address?: string; status?: string | null } | null;
+    if (s?.address) onEvent({ type: "session.updated", address: s.address, status: s.status ?? null });
+  };
+
   source.addEventListener("item.created", onItemCreated);
+  source.addEventListener("pulls.updated", onPullsUpdated);
+  source.addEventListener("session.updated", onSessionUpdated);
   source.addEventListener("item.updated", onItemUpdated);
   source.addEventListener("task.updated", onTaskUpdated);
   source.addEventListener("idea.created", onIdeaCreated);
@@ -219,6 +241,8 @@ export function subscribeEvents(onEvent: (event: ServerEvent) => void): () => vo
     source.removeEventListener("item.updated", onItemUpdated);
     source.removeEventListener("task.updated", onTaskUpdated);
     source.removeEventListener("idea.created", onIdeaCreated);
+    source.removeEventListener("pulls.updated", onPullsUpdated);
+    source.removeEventListener("session.updated", onSessionUpdated);
     source.close();
   };
 }

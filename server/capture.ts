@@ -5,7 +5,8 @@
 //    quick-reply buttons) — the structured path
 //  - session blocked without elicitation data -> question item with a raw
 //    output tail — the fallback path
-//  - session leaves blocked -> its open question item auto-resolves
+//  - session leaves blocked -> its open question item auto-resolves (only on
+//    that transition: an agent-reported question survives the turn ending)
 //  - session finished -> linked task marked done, open questions resolve
 //  - a `kind=done` report marks the task done and stores its handoff document
 
@@ -37,17 +38,9 @@ export class CaptureEngine {
     try {
       switch (e.type) {
         case "created": {
-          if (e.task_id) {
-            this.db.upsertTerminal({
-              address: e.address,
-              task_id: e.task_id,
-              name: null,
-              agent: null,
-              last_status: e.status ?? null,
-              last_turn: e.turn ?? 0,
-              updated_ms: Date.now(),
-            });
-          }
+          // First sight carries the current status: a session already
+          // blocked at startup must still produce its question.
+          await this.onStatus(e);
           break;
         }
         case "status": {
@@ -71,6 +64,7 @@ export class CaptureEngine {
     const taskId = e.task_id ?? tracked?.task_id ?? null;
     if (!tracked && !taskId) return; // not a Corral session
     const blocked = e.status === "blocked";
+    const wasBlocked = tracked?.last_status === "blocked";
     this.db.upsertTerminal({
       address: e.address,
       task_id: taskId,
@@ -80,10 +74,13 @@ export class CaptureEngine {
       last_turn: e.turn ?? tracked?.last_turn ?? 0,
       updated_ms: Date.now(),
     });
+    if (tracked?.last_status !== (e.status ?? null)) {
+      this.hub.broadcast("session.updated", { address: e.address, task_id: taskId, status: e.status ?? null });
+    }
 
     if (blocked) {
       await this.ensureQuestionItem(e, taskId);
-    } else {
+    } else if (wasBlocked) {
       this.resolveOpenQuestion(e.address, "auto");
     }
   }
@@ -99,6 +96,7 @@ export class CaptureEngine {
     let body: string;
     let options: string | null = null;
     let structured = 0;
+    let elicitation: string | null = null;
 
     if (elicitations.length > 0) {
       structured = 1;
@@ -112,6 +110,7 @@ export class CaptureEngine {
         })
         .join("\n\n---\n\n");
       if (first.choices.length > 0) options = JSON.stringify(first.choices.slice(0, 8));
+      elicitation = JSON.stringify({ id: first.id, kind: first.kind, field: first.field ?? null });
     } else {
       try {
         body = (await this.backend.read(e.address, TAIL_LINES)) || "(output unavailable)";
@@ -134,6 +133,7 @@ export class CaptureEngine {
       source_ref: e.address,
       task_id: taskId,
       structured,
+      elicitation,
       created_ms: Date.now(),
       updated_ms: Date.now(),
       resolved_ms: null,
@@ -168,11 +168,8 @@ export class CaptureEngine {
         const updated = this.db.getTask(task.id);
         this.hub.broadcast("task.updated", updated);
         if (updated) {
-          try {
-            syncTaskPr(this.db, this.hub, updated, { backend: this.backend, cfg: this.cfg ?? undefined });
-          } catch {
-            /* PR discovery is best effort */
-          }
+          // PR discovery is best effort.
+          void syncTaskPr(this.db, this.hub, updated, { backend: this.backend, cfg: this.cfg ?? undefined }).catch(() => undefined);
         }
       }
     }
@@ -221,7 +218,6 @@ export class CaptureEngine {
 
     // A structured question supersedes any pending capture for this terminal
     // (fallback tail or elicitation) — the agent's own framing is authoritative.
-    // Completion reports always create their own item.
     if (address && itemKind === "question") {
       const existing = this.db.openQuestionItemForTerminal(address);
       if (existing) {
@@ -240,16 +236,40 @@ export class CaptureEngine {
         return updated!;
       }
     }
+    // Completion: one PR item per task. Reuse the one the periodic sync may
+    // have created; stay unready until syncTaskPr verifies the gate.
+    if (itemKind === "pr" && taskId) {
+      const existing = this.db
+        .listItems({ kind: "pr" })
+        .find((i) => i.task_id === taskId && i.status !== "archived");
+      if (existing) {
+        this.db.updateItem(existing.id, {
+          title: opts.title,
+          summary: "checking the PR",
+          body: opts.body,
+          context: context || existing.context,
+          source_ref: address ?? existing.source_ref,
+          ready: 0,
+          status: "open",
+          resolved_ms: null,
+        });
+        this.db.recordMetric("item.structured_report", existing.id, { task_id: taskId, kind: "pr" });
+        const updated = this.db.getItem(existing.id)!;
+        this.hub.broadcast("item.updated", updated);
+        this.syncPrSoon(taskId);
+        return updated;
+      }
+    }
     const item: Item = {
       id: randomUUID(),
       kind: itemKind,
       status: "open",
       title: opts.title,
-      summary: opts.body,
+      summary: itemKind === "pr" ? "checking the PR" : opts.body,
       body: opts.body,
       context,
       options: optionsJson,
-      ready: 1,
+      ready: itemKind === "pr" ? 0 : 1,
       source_ref: address,
       task_id: taskId,
       structured: 1,
@@ -261,6 +281,14 @@ export class CaptureEngine {
     this.db.insertItem(item);
     this.db.recordMetric("item.created", item.id, { kind: itemKind, capture: "structured", task_id: taskId });
     this.hub.broadcast("item.created", item);
+    if (itemKind === "pr" && taskId) this.syncPrSoon(taskId);
     return item;
+  }
+
+  /** Verify the PR gate right after a completion report (best effort). */
+  private syncPrSoon(taskId: string): void {
+    const task = this.db.getTask(taskId);
+    if (!task?.branch) return;
+    void syncTaskPr(this.db, this.hub, task, { backend: this.backend, cfg: this.cfg ?? undefined }).catch(() => undefined);
   }
 }
