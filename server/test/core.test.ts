@@ -138,6 +138,39 @@ test("dispatch: worktree starts from the freshly fetched remote default branch",
   }
 });
 
+for (const target of ["codex", "claude"]) {
+  for (const scenario of [
+    { name: "title only", title: " Fix missing task context ", prompt: "", expected: "Fix missing task context" },
+    { name: "title and details", title: "OPS-123 Fix task context", prompt: " Preserve the full description.\nInclude acceptance criteria. ", expected: "OPS-123 Fix task context\n\nPreserve the full description.\nInclude acceptance criteria." },
+    { name: "untitled", title: " ", prompt: " Fix task context ", expected: "Fix task context" },
+    { name: "matching title and details", title: "Fix task context", prompt: "Fix task context", expected: "Fix task context" },
+  ]) {
+    test(`dispatch to ${target}: preserves task context (${scenario.name})`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), "corral-dispatch-"));
+      const db = new Db(join(dir, "test.db"));
+      try {
+        execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+        const task = makeTask({ title: scenario.title, prompt: scenario.prompt, repo_path: dir });
+        db.insertTask(task);
+        const { backend, started } = fakeBackend();
+        const cfg = { configDir: dir, host: "127.0.0.1", port: 4787, token: "t" } as never;
+
+        await dispatchTask(db, cfg, backend, task, target, { useWorktree: false });
+
+        assert.equal(started.length, 1);
+        assert.equal(started[0].prompt.split("\n\n---\n")[0], scenario.expected);
+        assert.ok(started[0].prompt.length > scenario.expected.length, "workflow conventions are appended");
+        assert.equal(started[0].harness, target);
+        if (!scenario.title.trim()) assert.equal(started[0].name, null);
+        assert.equal(db.getTask(task.id)?.status, "dispatched");
+      } finally {
+        db.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
 test("db: task and item round-trip", () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-test-"));
   try {
