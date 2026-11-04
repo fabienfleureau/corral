@@ -1,9 +1,10 @@
 // App shell — sidebar navigation, auth gate, live SSE updates + notifications.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { ApiError, api, setCacheStateHandler, setUnauthorizedHandler, subscribeEvents } from "./api";
 import { errText } from "./util";
+import { createNotificationTracker } from "./notifications";
 import { Spinner } from "./ui";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
@@ -72,16 +73,11 @@ export function App() {
 
   // Live updates: one SSE connection feeds every page + desktop notifications.
   // PR items start unready and flip via item.updated once the gate passes.
-  const notified = useRef(new Set<string>());
   useEffect(() => {
+    const trackNotification = createNotificationTracker();
     const close = subscribeEvents((event) => {
-      const item = event.type === "item.created" || event.type === "item.updated" ? event.item : null;
-      const notify =
-        item !== null &&
-        item.status === "open" &&
-        ((event.type === "item.created" && item.kind === "question") || (item.kind === "pr" && item.ready === 1));
-      if (notify && !notified.current.has(item.id)) {
-        notified.current.add(item.id);
+      const item = trackNotification(event);
+      if (item) {
         if (typeof Notification !== "undefined" && Notification.permission === "granted") {
           try {
             new Notification(item.title, {
