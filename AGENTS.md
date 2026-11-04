@@ -30,6 +30,43 @@ backed by `server/omnigent.ts`.
 - **Server** code changes need a server restart. Config file changes too.
 - Tests: `npm test` (node --test over `server/test/`).
 
+## Repeatable UI screenshots
+
+Use the fixture in this checkout, never the live app. It starts a server with a
+fresh temporary home, config, database, and browser profile; GitHub refresh is
+disabled and the agent backend points to an unavailable local address. It seeds
+synthetic open, dispatched, and done tasks with pinned and default model settings.
+The script cleans up its server and temporary data on exit. Do not dispatch tasks
+or connect the fixture to real services.
+
+Capture the same route and viewport from the base and the current checkout:
+
+```sh
+shot_dir=$(mktemp -d "${TMPDIR:-/tmp}/corral-shots.XXXXXX")
+mkdir "$shot_dir/base"
+git archive origin/main | tar -x -C "$shot_dir/base"
+(cd "$shot_dir/base" && npm ci && npm run build)
+npm ci && npm run build
+scripts/capture-screenshot.sh "$shot_dir/base" "$shot_dir/before.png" /tasks
+scripts/capture-screenshot.sh "$PWD" "$shot_dir/after.png" /tasks
+```
+
+Replace `origin/main` with the PR base and `/tasks` with the same hash route for
+both captures. Set `CHROME` to the Chrome/Chromium executable if it is not at
+its default macOS location. The capture uses 1440×1000 pixels, a fresh profile,
+and a local random port. If Chrome fails in the sandbox, use the supported
+outside-sandbox permission. Inspect both PNGs with an image viewer before
+uploading; confirm the intended route, fixture data, and comparable framing.
+For a different UI state, use an isolated browser with the same fixture and
+viewport for both captures; do not use the live app.
+
+Attach with `gh pr create` or `gh pr edit` using
+`--attach "$shot_dir/before.png#Before" --attach "$shot_dir/after.png#After"`
+(gh 2.99+). Run `gh pr view <number> --json body --jq .body` and confirm the
+saved description contains both labeled image links. If capture or upload fails,
+record the specific failure in the PR. Delete the temporary directory when done;
+never commit screenshots or generated fixture data.
+
 ## Code conventions
 
 - TypeScript: **erasable syntax only** (no enums, no parameter properties) —
