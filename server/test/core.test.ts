@@ -11,7 +11,7 @@ import { Db } from "../db.ts";
 import { dispatchTask, slugify } from "../dispatch.ts";
 import type { Config } from "../config.ts";
 import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
-import { prReady, prItemBody, syncTaskPr, findPr, type PrInfo } from "../pr.ts";
+import { prReady, prItemBody, syncTaskPr, syncAllPrs, findPr, type PrInfo } from "../pr.ts";
 import { CaptureEngine } from "../capture.ts";
 import type {
   WorkerBackend,
@@ -612,6 +612,34 @@ esac
     const pr = await findPr(dir, "feature");
     assert.ok(pr);
     assert.equal(prReady(pr).ready, true);
+  } finally {
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("PR sync archives a merged reported PR when the task branch differs", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-reported-pr-"));
+  const originalPath = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "gh"), `#!/bin/sh
+case "$*" in
+  "pr view https://github.com/example/repo/pull/15"*) echo '{"url":"https://github.com/example/repo/pull/15","title":"fix","state":"MERGED","number":15}' ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+    process.env.PATH = `${dir}:${originalPath}`;
+    const db = new Db(join(dir, "test.db"));
+    db.insertTask(makeTask({ branch: "original-branch", status: "done", repo_path: dir }));
+    const hub = { broadcast: () => undefined };
+    const { backend } = fakeBackend();
+    const capture = new CaptureEngine(db, backend, hub, {} as Config);
+    await capture.createStructuredQuestion({ kind: "done", taskId: "task-1", title: "Done", body: "PR: https://github.com/example/repo/pull/15" });
+    await syncAllPrs(db, hub, { knownPrsOnly: true }, 0);
+    assert.equal(db.getTask("task-1")?.status, "archived");
+    assert.equal(db.listItems({ kind: "pr" })[0].status, "archived");
+    db.close();
   } finally {
     process.env.PATH = originalPath;
     rmSync(dir, { recursive: true, force: true });

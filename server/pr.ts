@@ -192,8 +192,12 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
 }
 
 async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | null> {
-  const out = await run("glab", ["mr", "list", "--source-branch", branch, "--all", "--output", "json"], repoPath);
-  const list = JSON.parse(out) as Record<string, unknown>[];
+  const match = branch.match(/^(https?:\/\/.+?)\/-\/merge_requests\/(\d+)(?:[/?#].*)?$/);
+  const out = match
+    ? await run("glab", ["mr", "view", match[2], "--repo", match[1], "--output", "json"], repoPath)
+    : await run("glab", ["mr", "list", "--source-branch", branch, "--all", "--output", "json"], repoPath);
+  const parsed = JSON.parse(out) as Record<string, unknown> | Record<string, unknown>[];
+  const list = Array.isArray(parsed) ? parsed : [parsed];
   if (list.length === 0) return null;
   const mr = list[0];
   const iid = Number(mr.iid ?? 0);
@@ -443,7 +447,10 @@ export interface SyncOptions {
  */
 export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOptions = {}): Promise<PrInfo | null> {
   const finder = opts.finder ?? findPr;
-  const pr = await finder(staleTask.repo_path, staleTask.branch ?? "");
+  const item = db.listItems({ kind: "pr" }).find((i) => i.task_id === staleTask.id && i.status !== "archived");
+  const reportedUrl = item?.body.match(/https?:\/\/[^\s<>]+(?:\/pull\/|\/-\/merge_requests\/)\d+/)?.[0];
+  const ref = staleTask.pr_url || reportedUrl || staleTask.branch || "";
+  const pr = await finder(staleTask.repo_path, ref);
   if (!pr) return null;
   // The platform calls take seconds: work from the task as it is now.
   const task = db.getTask(staleTask.id) ?? staleTask;
@@ -596,7 +603,8 @@ export async function syncAllPrs(
   lastSyncAll = now;
   syncAllRunning = true;
   try {
-    const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url);
+    const reportedTasks = new Set(db.listItems({ kind: "pr" }).filter((i) => i.status !== "archived").map((i) => i.task_id));
+    const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url || reportedTasks.has(t.id));
     await mapLimit(tasks, 4, (task) => syncTaskPr(db, hub, task, opts).catch(() => null));
   } finally {
     syncAllRunning = false;
