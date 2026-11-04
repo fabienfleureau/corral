@@ -22,10 +22,21 @@ test("notifies when a PR becomes ready again", () => {
   const track = createNotificationTracker();
   const ready = item({ kind: "pr" });
   const unready = item({ kind: "pr", ready: 0 });
-  assert.equal(track({ type: "item.created", item: unready }), null);
+  assert.equal(track({ type: "item.created", item: unready }), unready);
+  assert.equal(track({ type: "item.updated", item: unready }), null);
   assert.equal(track({ type: "item.updated", item: ready }), ready);
   assert.equal(track({ type: "item.updated", item: ready }), null);
   assert.equal(track({ type: "item.updated", item: unready }), null);
+  assert.equal(track({ type: "item.updated", item: ready }), ready);
+});
+
+test("notifies on arrival and readiness again after a PR is reopened", () => {
+  const track = createNotificationTracker();
+  const unready = item({ kind: "pr", ready: 0 });
+  const ready = item({ kind: "pr" });
+  assert.equal(track({ type: "item.created", item: unready }), unready);
+  assert.equal(track({ type: "item.updated", item: item({ kind: "pr", status: "resolved" }) }), null);
+  assert.equal(track({ type: "item.updated", item: unready }), unready);
   assert.equal(track({ type: "item.updated", item: ready }), ready);
 });
 
