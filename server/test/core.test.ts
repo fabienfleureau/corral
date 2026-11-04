@@ -361,7 +361,7 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
     const fallback = db.openQuestionItemForTerminal("s9");
     assert.ok(fallback);
     assert.equal(fallback.structured, 0);
-    assert.equal(fallback.body, "agent tail…");
+    assert.match(fallback.body, /agent tail…/);
     assert.ok(broadcasts.some(([t]) => t === "item.created"));
     db.close();
   } finally {

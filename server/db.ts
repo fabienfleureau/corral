@@ -210,6 +210,11 @@ export class Db {
     return (row as unknown as Item) ?? null;
   }
 
+  questionItemForTerminal(address: string): Item | null {
+    const row = this.raw.prepare(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' AND status IN ('open', 'resolved') ORDER BY created_ms DESC LIMIT 1`).get(address);
+    return (row as unknown as Item) ?? null;
+  }
+
   // ---- ideas ----
 
   insertIdea(i: Idea): void {

@@ -242,3 +242,16 @@ test("omnigent: sends scoped approval as result metadata", async () => {
   await backend.resolveElicitation("s", "e", "accept", undefined, { persist: "session" });
   assert.deepEqual(request, { action: "accept", _meta: { persist: "session" } });
 });
+test("capture: sequential session questions reuse one item and retain history", withDb(async (db) => {
+  db.insertTask(makeTask());
+  const engine = new CaptureEngine(db, stubBackend(), { broadcast: () => undefined });
+  const first = await engine.createStructuredQuestion({ taskId: "task-1", title: "First?", body: "First question" });
+  db.updateItem(first.id, { status: "resolved", resolved_ms: Date.now() });
+  const second = await engine.createStructuredQuestion({ taskId: "task-1", title: "Second?", body: "Second question", options: ["yes", "no"] });
+  assert.equal(second.id, first.id);
+  assert.equal(second.status, "open");
+  assert.equal(second.resolved_ms, null);
+  assert.match(second.body, /First question/);
+  assert.match(second.body, /Second question/);
+  assert.equal(db.listItems({ kind: "question" }).length, 1);
+}));
