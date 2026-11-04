@@ -14,6 +14,7 @@ import type {
   WorkerSession,
   WorkerStart,
   WorkerModel,
+  WorkerQuestion,
 } from "./worker.ts";
 
 const POLL_MS = 4000;
@@ -101,6 +102,25 @@ export function normalizeElicitations(raw: unknown): WorkerElicitation[] {
     const params = (e.params ?? e.request ?? e) as Record<string, unknown>;
     const id = str(e.elicitation_id) ?? str(e.id) ?? str(params.elicitation_id);
     if (!id) continue;
+    const ask = params.ask_user_question as { questions?: unknown } | undefined;
+    if (Array.isArray(ask?.questions) && ask.questions.length > 0) {
+      const questions: WorkerQuestion[] = ask.questions.map((raw, index) => {
+        const q = (raw ?? {}) as Record<string, unknown>;
+        return {
+          id: str(q.id) ?? String(index),
+          prompt: str(q.question) ?? "(asked for input)",
+          choices: Array.isArray(q.options) ? q.options.flatMap((option) => {
+            const label = typeof option === "string" ? option : str(option?.label);
+            return label ? [label] : [];
+          }) : [],
+          multiple: q.multiSelect === true,
+        };
+      });
+      const single = questions.length === 1 && !questions[0].multiple ? questions[0] : null;
+      out.push({ id, kind: "question", prompt: questions.map((q) => q.prompt).join("\n\n"),
+        choices: single?.choices ?? [], field: single?.id ?? null, questions });
+      continue;
+    }
     const rawKind = [e.kind, e.type, params.type, params.kind, params.phase, params.policy_name].filter((v) => typeof v === "string").join(" ").toLowerCase();
     const kind = rawKind.includes("auth")
       ? "auth"

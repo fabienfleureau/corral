@@ -1670,3 +1670,21 @@ select:focus {
   gap: 6px;
   color: var(--text);
 }
+.question-reply fieldset {
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.question-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.question-choice input {
+  width: auto;
+  margin: 0;
+}

@@ -138,7 +138,7 @@ test("dispatch: worktree starts from the freshly fetched remote default branch",
   }
 });
 
-for (const target of ["codex", "claude"]) {
+for (const target of ["codex", "claude", "opencode"]) {
   for (const scenario of [
     { name: "title only", title: " Fix missing task context ", prompt: "", expected: "Fix missing task context" },
     { name: "title and details", title: "OPS-123 Fix task context", prompt: " Preserve the full description.\nInclude acceptance criteria. ", expected: "OPS-123 Fix task context\n\nPreserve the full description.\nInclude acceptance criteria." },
