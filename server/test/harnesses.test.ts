@@ -14,3 +14,15 @@ test("harness picker excludes unavailable native harnesses on the configured hos
   };
   assert.deepEqual((await backend.harnesses()).map((h) => h.harness), ["codex", "other"]);
 });
+
+test("uses host_id to hide unavailable harnesses while retaining custom agents", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "host1", agents: {} });
+  (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async (_m, path) => {
+    if (path.startsWith("/v1/agents")) return { data: [
+      { id: "custom", name: "my-agent", harness: "claude-sdk" },
+      { id: "missing", name: "missing", harness: "cursor-native" },
+    ] };
+    return { hosts: [{ host_id: "host1", configured_harnesses: { "claude-sdk": true, "cursor-native": "binary-missing" } }] };
+  };
+  assert.deepEqual(await backend.harnesses(), [{ harness: "claude", agents: [{ id: "custom", name: "my-agent" }] }]);
+});

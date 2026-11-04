@@ -9,7 +9,7 @@ export function groupTasks(tasks: Task[]): [string, Task[]][] {
     groups.set(key, [...(groups.get(key) ?? []), task]);
   }
   return [...groups.entries()]
-    .sort(([a], [b]) => !a ? 1 : !b ? -1 : a.localeCompare(b))
+    .sort(([a, ar], [b, br]) => Math.max(...br.map(t => t.created_ms)) - Math.max(...ar.map(t => t.created_ms)) || a.localeCompare(b))
     .map(([key, rows]) => [key, rows.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || b.created_ms - a.created_ms)]);
 }
 
