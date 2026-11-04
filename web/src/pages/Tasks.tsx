@@ -187,7 +187,9 @@ function TaskRow({
   agentOptions: { id: string; name: string }[];
   refresh: () => void;
 }) {
-  const [showDispatch, setShowDispatch] = useState(false);
+  const [showDispatch, setShowDispatch] = useState(task.status === "open");
+  const [editingPrompt, setEditingPrompt] = useState(false);
+  const [prompt, setPrompt] = useState(task.prompt);
   const [target, setTarget] = useState(task.target || "claude");
   const [agent, setAgent] = useState("");
   const [useWorktree, setUseWorktree] = useState(true);
@@ -197,6 +199,10 @@ function TaskRow({
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setShowDispatch(task.status === "open");
+  }, [task.status]);
 
   const run = async (label: string, fn: () => Promise<unknown>, okMsg?: string) => {
     if (busy) return;
@@ -229,6 +235,21 @@ function TaskRow({
       });
       setDispatchResult(result);
       setShowDispatch(false);
+      refresh();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const savePrompt = async () => {
+    if (busy) return;
+    setBusy("prompt");
+    setError(null);
+    try {
+      await api.patchTask(task.id, { prompt });
+      setEditingPrompt(false);
       refresh();
     } catch (err) {
       setError(errText(err));
@@ -315,6 +336,18 @@ function TaskRow({
             {!task.repo_path ? (
               <div className="inline-error">Assign a repo before dispatching.</div>
             ) : null}
+            {editingPrompt ? (
+              <>
+                <textarea aria-label="Task prompt" className="comment-input" rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+                <button className="btn" onClick={() => void savePrompt()} disabled={busy !== null}>Save prompt</button>
+                <button className="btn" onClick={() => { setPrompt(task.prompt); setEditingPrompt(false); }} disabled={busy !== null}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <div style={{ whiteSpace: "pre-wrap" }}>{task.prompt}</div>
+                <button className="btn" onClick={() => { setPrompt(task.prompt); setEditingPrompt(true); }} disabled={busy !== null}>Modify prompt</button>
+              </>
+            )}
             <label className="field-inline">
               <span>Target</span>
               <select value={selectedTarget} onChange={(e) => setTarget(e.target.value)}>
@@ -348,13 +381,10 @@ function TaskRow({
             <button
               className="btn btn-primary"
               onClick={() => void dispatch()}
-              disabled={busy !== null || !task.repo_path || !selectedTarget}
+              disabled={busy !== null || editingPrompt || !task.repo_path || !selectedTarget}
             >
               {busy === "dispatch" ? <Spinner /> : null}
               {busy === "dispatch" ? "Dispatching…" : "Dispatch"}
-            </button>
-            <button className="btn" onClick={() => setShowDispatch(false)} disabled={busy !== null}>
-              Cancel
             </button>
           </div>
         ) : null}
@@ -382,14 +412,14 @@ function TaskRow({
       </div>
 
       <div className="task-actions">
-        <button
+        {task.status !== "open" ? <button
           className="btn"
           onClick={() => setShowDispatch((v) => !v)}
           disabled={task.status === "dispatched" || busy !== null}
           title={task.status === "dispatched" ? "Already dispatched" : undefined}
         >
           {task.status === "dispatched" ? "Dispatched" : "Dispatch"}
-        </button>
+        </button> : null}
         {task.jira_key ? (
           <>
             <button
