@@ -58,7 +58,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
     };
   }, [eventVersion]);
 
-  // Opening the inbox re-checks PRs: merged ones get archived (server
+  // Opening the inbox re-checks PRs: merged ones get resolved (server
   // broadcasts the changes, which bumps eventVersion and reloads the list).
   useEffect(() => {
     api.syncPrs().catch(() => undefined);

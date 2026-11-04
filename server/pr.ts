@@ -457,10 +457,8 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   const { ready, reasons } = prReady(pr);
   const existing = db.listItems({ kind: "pr" }).find((i) => i.task_id === task.id) ?? null;
   const shouldResolve = pr.state !== "OPEN";
-  // A merged PR means the work is over: its items go to "archived" (and the
-  // task follows) — a closed PR is just "resolved".
   const merged = pr.state === "MERGED";
-  const doneStatus: Item["status"] = merged ? "archived" : "resolved";
+  const doneStatus: Item["status"] = "resolved";
 
   // The loop: comments and merge conflicts go back to the agent —
   // automatically, once per comment set / conflict episode, in one message.
@@ -529,7 +527,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
     db.insertItem(item);
     db.recordMetric("item.created", item.id, { kind: "pr", capture: "pr-sync", task_id: task.id, ready: item.ready });
     hub.broadcast("item.created", item);
-    if (merged) archiveMergedTask(db, hub, task);
+    if (merged) resolveMergedTask(db, hub, task);
     return pr;
   }
 
@@ -559,22 +557,22 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
       db.recordMetric("item.ready_for_review", existing.id, { task_id: task.id });
     }
   }
-  if (merged) archiveMergedTask(db, hub, task);
+  if (merged) resolveMergedTask(db, hub, task);
   return pr;
 }
 
-/** Merged PR = the task is over: archive the task and every inbox item tied to it. */
-function archiveMergedTask(db: Db, hub: Hub, task: Task): void {
+/** A merged PR completes the task and resolves its open inbox items. */
+function resolveMergedTask(db: Db, hub: Hub, task: Task): void {
   const now = Date.now();
   for (const item of db.listItems()) {
-    if (item.task_id !== task.id || item.status === "archived") continue;
-    db.updateItem(item.id, { status: "archived", resolved_ms: item.resolved_ms ?? now });
+    if (item.task_id !== task.id || item.status !== "open") continue;
+    db.updateItem(item.id, { status: "resolved", resolved_ms: item.resolved_ms ?? now });
     hub.broadcast("item.updated", db.getItem(item.id));
   }
   const current = db.getTask(task.id);
-  if (current && current.status !== "archived") {
-    db.updateTask(task.id, { status: "archived" });
-    db.recordMetric("task.archived", task.id, { how: "pr-merged" });
+  if (current && current.status !== "archived" && current.status !== "done") {
+    db.updateTask(task.id, { status: "done" });
+    db.recordMetric("task.done", task.id, { how: "pr-merged" });
     hub.broadcast("task.updated", db.getTask(task.id));
   }
 }
