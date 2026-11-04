@@ -13,6 +13,7 @@ import type { Config } from "../config.ts";
 import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
 import { prReady, prItemBody, syncTaskPr, syncAllPrs, findPr, type PrInfo } from "../pr.ts";
 import { CaptureEngine } from "../capture.ts";
+import { createHttpServer, type AppState } from "../api.ts";
 import type {
   WorkerBackend,
   WorkerElicitation,
@@ -620,6 +621,39 @@ esac
   }
 });
 
+
+test("PR sync endpoint responds before a slow lookup and completes it in the background", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-pr-background-"));
+  const originalPath = process.env.PATH;
+  const db = new Db(join(dir, "test.db"));
+  writeFileSync(join(dir, "gh"), `#!/bin/sh
+sleep 1
+echo '{"url":"https://github.com/example/repo/pull/15","title":"fix","state":"MERGED","number":15}'
+`, { mode: 0o755 });
+  process.env.PATH = `${dir}:${originalPath}`;
+  db.insertTask(makeTask({ branch: "feature", status: "dispatched", repo_path: dir, pr_url: "https://github.com/example/repo/pull/15" }));
+  const hub = { broadcast: () => undefined };
+  const { backend } = fakeBackend();
+  const server = createHttpServer({ db, backend, hub, cfg: { token: "test" } } as unknown as AppState);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const port = (server.address() as { port: number }).port;
+    const response = await fetch(`http://127.0.0.1:${port}/api/prs/sync`, { method: "POST", headers: { Authorization: "Bearer test" }, signal: AbortSignal.timeout(700) });
+    assert.deepEqual(await response.json(), { ok: true, ran: true });
+    const second = await fetch(`http://127.0.0.1:${port}/api/prs/sync`, { method: "POST", headers: { Authorization: "Bearer test" } });
+    assert.deepEqual(await second.json(), { ok: true, ran: false });
+    const deadline = Date.now() + 5000;
+    while (db.getTask("task-1")?.status !== "done" && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(db.getTask("task-1")?.status, "done");
+  } finally {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("PR sync completes a merged reported PR when the task branch differs", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-reported-pr-"));

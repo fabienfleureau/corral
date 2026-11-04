@@ -599,18 +599,32 @@ export async function syncAllPrs(
   opts: SyncOptions & { knownPrsOnly?: boolean } = {},
   minIntervalMs = 30_000,
 ): Promise<boolean> {
+  const pending = startSyncAllPrs(db, hub, opts, minIntervalMs);
+  if (!pending) return false;
+  await pending;
+  return true;
+}
+
+/** Start a sync immediately, or return null when throttled or already running. */
+export function startSyncAllPrs(
+  db: Db,
+  hub: Hub,
+  opts: SyncOptions & { knownPrsOnly?: boolean } = {},
+  minIntervalMs = 30_000,
+): Promise<void> | null {
   const now = Date.now();
-  if (syncAllRunning || now - lastSyncAll < minIntervalMs) return false;
+  if (syncAllRunning || now - lastSyncAll < minIntervalMs) return null;
   lastSyncAll = now;
   syncAllRunning = true;
-  try {
-    const reportedTasks = new Set(db.listItems({ kind: "pr" }).filter((i) => i.status !== "archived").map((i) => i.task_id));
-    const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url || reportedTasks.has(t.id));
-    await mapLimit(tasks, 4, (task) => syncTaskPr(db, hub, task, opts).catch(() => null));
-  } finally {
-    syncAllRunning = false;
-  }
-  return true;
+  return (async () => {
+    try {
+      const reportedTasks = new Set(db.listItems({ kind: "pr" }).filter((i) => i.status !== "archived").map((i) => i.task_id));
+      const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url || reportedTasks.has(t.id));
+      await mapLimit(tasks, 4, (task) => syncTaskPr(db, hub, task, opts).catch(() => null));
+    } finally {
+      syncAllRunning = false;
+    }
+  })();
 }
 
 /** Tasks whose branch may have a PR: dispatched/done, with a repo and branch. */

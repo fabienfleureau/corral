@@ -55,7 +55,7 @@ type Idea = {
 - `POST /api/items/:id/resolve` → `Item`
 - `POST /api/items/:id/archive` → `Item`
 - `POST /api/items/:id/snooze` `{until_ms?}` → `Item` (default +1h)
-- `POST /api/prs/sync` → `{ok, ran}` — re-checks every dispatched/done task with a known PR now (throttled to once per 30s; `ran: false` when skipped). A merged PR completes the task and archives all its items; a closed one resolves the PR item.
+- `POST /api/prs/sync` → `{ok, ran}` — starts a background re-check of every dispatched/done task with a known PR (throttled to once per 30s; `ran: false` when skipped). A merged PR completes the task and archives all its items; a closed one resolves the PR item. Updates are broadcast as PRs are re-checked.
 
 ### Tasks
 - `GET /api/harnesses` → `{harnesses, agents}` — available harness groups, their model catalogs (when supported by the worker), and the full worker agent registry.
