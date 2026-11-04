@@ -26,3 +26,11 @@ test('orders repository groups by latest task creation', () => {
   ] as any;
   assert.deepEqual(groupTasks(tasks).map(([path]) => path), ['/b', '/a']);
 });
+
+test('harness labels show known quota windows and flag stale snapshots', async () => {
+  const { harnessLabel } = await import('../../web/src/task-page.ts');
+  const quota = [{ agent: 'codex', plan: 'Plus', stale: true, windows: [{ label: '5-hour', used_percent: 42.4 }, { label: 'Weekly', used_percent: 80 }] }] as any;
+  assert.equal(harnessLabel('codex', quota), 'codex — Plus · 5-hour 42% used · Weekly 80% used · stale');
+  assert.equal(harnessLabel('claude', quota), 'claude');
+  assert.equal(harnessLabel('codex', [{ ...quota[0], windows: [] }]), 'codex');
+});

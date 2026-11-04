@@ -1,10 +1,10 @@
 // Tasks — dispatch queue grouped by repository.
 
 import { useEffect, useMemo, useState } from "react";
-import { groupTasks, sortRepos } from "../task-page";
+import { groupTasks, harnessLabel, sortRepos } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
-import type { JiraSearchResult, Repo, Task } from "../types";
+import type { AgentQuota, JiraSearchResult, Repo, Task } from "../types";
 import { errText, formatTs, prLabel, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 
@@ -20,6 +20,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   });
   const [repos, setRepos] = useState<Repo[]>([]);
   const [targets, setTargets] = useState<string[]>([]);
+  const [quotas, setQuotas] = useState<AgentQuota[]>([]);
   const [agentOptions, setAgentOptions] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
@@ -32,6 +33,20 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = () => {
+      api.getUsage("7d").then((report) => {
+        if (cancelled) return;
+        setQuotas(report.quota);
+        if (report.scanning) timer = setTimeout(load, 2000);
+      }).catch(() => undefined);
+    };
+    load();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [eventVersion]);
 
   useEffect(() => {
     api
@@ -94,7 +109,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} agentOptions={agentOptions} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -115,7 +130,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         </div>
 
         {showImport ? <JiraImport onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        <NewTaskForm repos={sortedRepos} targets={targets} agentOptions={agentOptions} onDone={refresh} />
+        <NewTaskForm repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} onDone={refresh} />
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
@@ -138,16 +153,46 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
 
 // ---- one task row ----
 
+function HarnessQuotas({ targets, quotas, selected }: { targets: string[]; quotas: AgentQuota[]; selected: string }) {
+  const known = quotas.filter((q) => targets.includes(q.agent) && q.windows.length > 0);
+  if (!known.length) return null;
+  return (
+    <div className="harness-quotas" aria-label="Harness quota usage">
+      {known.map((q) => (
+        <div className={`harness-quota${q.agent === selected ? " harness-quota-selected" : ""}`} key={q.agent}>
+          <div className="harness-quota-head">
+            <strong>{q.agent}</strong>
+            {q.plan ? <span className="badge badge-mute">{q.plan}</span> : null}
+            {q.stale ? <span className="badge badge-wait">stale</span> : null}
+          </div>
+          {q.windows.map((w) => {
+            const pct = Math.max(0, Math.min(100, w.used_percent));
+            const tone = pct >= 90 ? "usage-bar-hot" : pct >= 70 ? "usage-bar-warm" : "";
+            return (
+              <div className="usage-quota-row" key={w.label}>
+                <div className="usage-quota-label"><span>{w.label}</span><strong>{Math.round(w.used_percent)}% used</strong></div>
+                <div className="usage-bar"><div className={`usage-bar-fill ${tone}`} style={{ width: `${pct}%` }} /></div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TaskRow({
   task,
   repos,
   targets,
+  quotas,
   agentOptions,
   refresh,
 }: {
   task: Task;
   repos: Repo[];
   targets: string[];
+  quotas: AgentQuota[];
   agentOptions: { id: string; name: string }[];
   refresh: () => void;
 }) {
@@ -322,7 +367,7 @@ function TaskRow({
                 {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
                 {targets.map((t) => (
                   <option key={t} value={t}>
-                    {t}
+                    {harnessLabel(t, quotas)}
                   </option>
                 ))}
               </select>
@@ -338,6 +383,7 @@ function TaskRow({
                 ))}
               </select>
             </label>
+            <HarnessQuotas targets={targets} quotas={quotas} selected={selectedTarget} />
             <label className="check-inline">
               <input
                 type="checkbox"
@@ -415,7 +461,7 @@ function firstLine(text: string): string {
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
-function NewTaskForm({ repos, targets, agentOptions, onDone }: { repos: Repo[]; targets: string[]; agentOptions: { id: string; name: string }[]; onDone: () => void }) {
+function NewTaskForm({ repos, targets, quotas, agentOptions, onDone }: { repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: { id: string; name: string }[]; onDone: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [repoChoice, setRepoChoice] = useState("");
   const [target, setTarget] = useState("");
@@ -503,13 +549,14 @@ function NewTaskForm({ repos, targets, agentOptions, onDone }: { repos: Repo[]; 
       <div className="field-row">
         <label className="field"><span>Harness</span><select value={selectedTarget} onChange={(e) => setTarget(e.target.value)}>
           {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
-          {targets.map((t) => <option key={t} value={t}>{t}</option>)}
+          {targets.map((t) => <option key={t} value={t}>{harnessLabel(t, quotas)}</option>)}
         </select></label>
         <label className="field"><span>Agent</span><select value={agent} onChange={(e) => setAgent(e.target.value)}>
           <option value="">— none (bare harness) —</option>
           {agentOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select></label>
       </div>
+      <HarnessQuotas targets={targets} quotas={quotas} selected={selectedTarget} />
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
         <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !prompt.trim() || !selectedTarget || !(selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>

@@ -1,4 +1,4 @@
-import type { Repo, Task } from './types.ts';
+import type { AgentQuota, Repo, Task } from './types.ts';
 
 const statusOrder: Record<Task['status'], number> = { open: 0, dispatched: 1, done: 2, archived: 3 };
 
@@ -17,4 +17,10 @@ export function sortRepos(repos: Repo[], tasks: Task[]): Repo[] {
   const lastUsed = new Map<string, number>();
   for (const task of tasks) lastUsed.set(task.repo_path, Math.max(lastUsed.get(task.repo_path) ?? 0, task.created_ms));
   return [...repos].sort((a, b) => (lastUsed.get(b.path) ?? 0) - (lastUsed.get(a.path) ?? 0) || a.name.localeCompare(b.name));
+}
+
+export function harnessLabel(harness: string, quotas: AgentQuota[]): string {
+  const quota = quotas.find((q) => q.agent === harness && q.windows.length > 0);
+  if (!quota) return harness;
+  return [harness, quota.plan, ...quota.windows.map((w) => `${w.label} ${Math.round(w.used_percent)}% used`), quota.stale ? "stale" : null].filter(Boolean).join(" · ").replace(" · ", " — ");
 }
