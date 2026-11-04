@@ -183,6 +183,8 @@ export const api = {
   scanRepos: (): Promise<{ added: Repo[]; total: number; roots: string[] }> =>
     post<{ added: Repo[]; total: number; roots: string[] }>("/api/repos/scan"),
 
+  listErrors: (): Promise<{ source: string; message: string; updated_ms: number }[]> => get("/api/errors"),
+
   // ---- misc ----
   getUsage: (range: UsageRange, refresh = false): Promise<UsageReport> =>
     get<UsageReport>(`/api/usage?range=${range}${refresh ? "&refresh=1" : ""}`),
