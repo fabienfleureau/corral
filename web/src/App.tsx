@@ -11,8 +11,9 @@ import { SessionsPage } from "./pages/Sessions";
 import { PullsPage } from "./pages/Pulls";
 import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
+import { UsagePage } from "./pages/Usage";
 
-type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "ideas" | "settings";
+type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "ideas" | "usage" | "settings";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
@@ -20,6 +21,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "pulls", label: "Pull Requests" },
   { key: "sessions", label: "Sessions" },
   { key: "ideas", label: "Ideas" },
+  { key: "usage", label: "Usage" },
   { key: "settings", label: "Settings" },
 ];
 
@@ -163,7 +165,7 @@ export function App() {
               onClick={() => selectTab(t.key)}
             >
               <span>{t.label}</span>
-              {t.key !== "settings" ? (
+              {t.key !== "settings" && t.key !== "usage" ? (
                 <span className={`nav-count ${t.key !== "sessions" && counts[t.key as keyof Counts] > 0 ? "nav-count-hot" : ""}`}>
                   {counts[t.key as keyof Counts]}
                 </span>
@@ -185,6 +187,7 @@ export function App() {
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
         {tab === "ideas" ? <IdeasPage eventVersion={eventVersion} refresh={refresh} /> : null}
+        {tab === "usage" ? <UsagePage /> : null}
         {tab === "settings" ? <SettingsPage /> : null}
       </main>
     </div>

@@ -76,6 +76,16 @@ type Idea = {
 - `POST /api/ideas` `{text, tag?, origin?}` → `Idea`
 - `PATCH /api/ideas/:id` `{status?, tag?}` → `{ok}`
 
+### Usage
+- `GET /api/usage?range=24h|7d|30d|all[&refresh=1]` → Claude Code + Codex usage from local session logs
+  (`~/.claude/projects`, `~/.codex/sessions`): `{range, since_ms, generated_ms, scanning, quota: AgentQuota[],
+  totals, by_agent[], by_model[], timeline[], bucket: "hour"|"day", efficiency}`. Cost is an API-list-price
+  estimate; models without a price count tokens only (`unpriced_calls`). Prices override via
+  `usage.prices` in config.json (`{"gpt-6*": {input, output, cacheRead?, cacheWrite5m?, cacheWrite1h?}}`, USD/MTok).
+  Claude quota comes from ccstatusline's cache, Codex quota from its latest `rate_limits` event.
+  `scanning: true` while the first log scan runs (poll). Spend is attributed to a task when the session
+  cwd is inside its `worktree_path`; `efficiency` = done tasks per $ and $ per done task.
+
 ### Misc
 - `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`
 - `GET /api/metrics/summary` → `{by_name: [{name, count, last_ms}], recent: [{id, ts, name, ref, data}]}`

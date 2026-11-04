@@ -128,3 +128,50 @@ export type Config = {
   jiraJql: string;
   token: string; // masked
 };
+
+// ---- usage page (GET /api/usage) ----
+
+export type UsageAgent = "claude" | "codex";
+export type UsageRange = "24h" | "7d" | "30d" | "all";
+
+export type UsageTotals = {
+  calls: number;
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+  cost_usd: number;
+  unpriced_calls: number;
+};
+
+export type AgentQuota = {
+  agent: UsageAgent;
+  source: string;
+  as_of_ms: number | null;
+  stale: boolean;
+  plan: string | null;
+  windows: { label: string; used_percent: number; resets_ms: number | null }[];
+  note: string | null;
+};
+
+export type UsageReport = {
+  range: UsageRange;
+  since_ms: number | null;
+  generated_ms: number;
+  scanning: boolean;
+  quota: AgentQuota[];
+  totals: UsageTotals;
+  by_agent: ({ agent: UsageAgent } & UsageTotals)[];
+  by_model: ({ agent: UsageAgent; model: string; priced: boolean } & UsageTotals)[];
+  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number }[];
+  bucket: "hour" | "day";
+  efficiency: {
+    tasks_with_spend: number;
+    tasks_done: number;
+    attributed_usd: number;
+    unattributed_usd: number;
+    tasks_per_usd: number | null;
+    usd_per_done_task: number | null;
+    top_tasks: { id: string; title: string; status: string; agent: UsageAgent | "mixed"; cost_usd: number; tokens: number }[];
+  };
+};
