@@ -1,20 +1,20 @@
 import type { Item } from "./types.js";
 
-/** Notify once per actionable period, including items reopened by the server. */
+/** Notify on arrival and when a PR becomes ready, including after reopening. */
 export function createNotificationTracker() {
-  const notified = new Set<string>();
+  const notified = new Map<string, "open" | "ready">();
   return (event: { type: string; item?: Item }) => {
     if (event.type !== "item.created" && event.type !== "item.updated") return null;
     const { item } = event;
     if (!item) return null;
-    const actionable = item.status === "open" && (item.kind === "question" || (item.kind === "pr" && item.ready === 1));
-    if (!actionable) {
+    if (item.status !== "open" || (item.kind !== "question" && item.kind !== "pr")) {
       notified.delete(item.id);
       return null;
     }
-    if (notified.has(item.id)) return null;
-    notified.add(item.id);
-    return item;
+    const previous = notified.get(item.id);
+    const state = item.kind === "pr" && item.ready === 1 ? "ready" : "open";
+    notified.set(item.id, state);
+    return !previous || (state === "ready" && previous !== "ready") ? item : null;
   };
 }
 
