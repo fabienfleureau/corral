@@ -34,7 +34,7 @@ export function SettingsPage() {
     typeof Notification !== "undefined" ? Notification.permission : "unsupported",
   );
 
-  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [notificationResult, setNotificationResult] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -250,13 +250,17 @@ export function SettingsPage() {
                   <p className="muted">Notifications are enabled.</p>
                   <div className="form-foot">
                     <button className="btn btn-primary" onClick={() => {
-                      setNotificationError(sendDesktopNotification("Corral test notification", "Desktop notifications are working.")
-                        ? null : "Could not send a notification. Check your browser and system settings.");
+                      const failed = () => setNotificationResult("Could not send a notification. Check your browser and system notification settings.");
+                      if (sendDesktopNotification("Corral test notification", "Desktop notifications are working.", failed)) {
+                        setNotificationResult("Test notification requested. If you don't see it, check your browser and system notification settings, including Focus or Do Not Disturb.");
+                      } else {
+                        failed();
+                      }
                     }}>
                       Test notification
                     </button>
                   </div>
-                  {notificationError && <p role="alert">{notificationError}</p>}
+                  {notificationResult && <p role="status">{notificationResult}</p>}
                 </div>
               ) : (
                 <p className="muted">This browser does not support desktop notifications.</p>
