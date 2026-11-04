@@ -201,7 +201,7 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
 
   // Each fetch is independent: a failing one degrades only its own field.
   const [full, changes, discussions] = await Promise.all([
-    api("").then((s) => JSON.parse(s) as { description?: string; head_pipeline?: { status?: string } | null }).catch(() => null),
+    api("").then((s) => JSON.parse(s) as { description?: string; has_conflicts?: boolean; head_pipeline?: { status?: string } | null }).catch(() => null),
     api("/changes").then((s) => JSON.parse(s) as { changes?: { diff?: string }[] }).catch(() => null),
     api("/discussions?per_page=100")
       .then((s) => JSON.parse(s) as {
@@ -241,7 +241,7 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
     additions,
     deletions,
     changed_files: diff.length,
-    mergeable: mr.has_conflicts === true ? "CONFLICTING" : mr.has_conflicts === false ? "MERGEABLE" : null,
+    mergeable: (full?.has_conflicts ?? mr.has_conflicts) === true ? "CONFLICTING" : (full?.has_conflicts ?? mr.has_conflicts) === false ? "MERGEABLE" : null,
     base_ref: mr.target_branch ? String(mr.target_branch) : null,
     review_decision: null,
     checks,
@@ -439,7 +439,7 @@ export interface SyncOptions {
  *    gate passes; otherwise "needs work" with the reasons,
  *  - unresolved comments are fed to the agent automatically (once per set),
  *  - merge conflicts are fed to the agent as a rebase request (once per episode),
- *  - the item auto-resolves when the PR merges/closes.
+ *  - the item resolves on close; a merge archives the task and its items.
  */
 export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOptions = {}): Promise<PrInfo | null> {
   const finder = opts.finder ?? findPr;
@@ -459,7 +459,6 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   const shouldResolve = pr.state !== "OPEN";
   const merged = pr.state === "MERGED";
   if (merged && task.terminal_address && opts.backend?.archive) {
-    // Retry on later syncs if the backend is unavailable.
     await opts.backend.archive(task.terminal_address).catch(() => undefined);
   }
   const doneStatus: Item["status"] = "resolved";
@@ -565,17 +564,17 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   return pr;
 }
 
-/** A merged PR completes the task and resolves its open inbox items. */
+/** A merged PR archives the task and its inbox items. */
 function resolveMergedTask(db: Db, hub: Hub, task: Task): void {
   const now = Date.now();
   for (const item of db.listItems()) {
-    if (item.task_id !== task.id || item.status !== "open") continue;
-    db.updateItem(item.id, { status: "resolved", resolved_ms: item.resolved_ms ?? now });
+    if (item.task_id !== task.id || item.status === "archived") continue;
+    db.updateItem(item.id, { status: "archived", resolved_ms: item.resolved_ms ?? now });
     hub.broadcast("item.updated", db.getItem(item.id));
   }
   const current = db.getTask(task.id);
-  if (current && current.status !== "archived" && current.status !== "done") {
-    db.updateTask(task.id, { status: "done" });
+  if (current && current.status !== "archived") {
+    db.updateTask(task.id, { status: "archived" });
     db.recordMetric("task.done", task.id, { how: "pr-merged" });
     hub.broadcast("task.updated", db.getTask(task.id));
   }

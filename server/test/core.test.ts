@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -11,7 +11,7 @@ import { Db } from "../db.ts";
 import { dispatchTask, slugify } from "../dispatch.ts";
 import type { Config } from "../config.ts";
 import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
-import { prReady, prItemBody, syncTaskPr, type PrInfo } from "../pr.ts";
+import { prReady, prItemBody, syncTaskPr, findPr, type PrInfo } from "../pr.ts";
 import { CaptureEngine } from "../capture.ts";
 import type {
   WorkerBackend,
@@ -369,7 +369,7 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
   }
 });
 
-test("pr sync: item flips ready->needs work and resolves on merge", async () => {
+test("pr sync: item flips ready->needs work and archives on merge", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-prsync-"));
   try {
     const db = new Db(join(dir, "test.db"));
@@ -411,9 +411,9 @@ test("pr sync: item flips ready->needs work and resolves on merge", async () => 
     await syncTaskPr(db, hub, db.getTask("task-1")!, { finder, backend });
     assert.deepEqual(archived, ["s1"]);
     item = db.listItems({ kind: "pr" })[0];
-    assert.equal(item.status, "resolved", "merged PR items are resolved");
+    assert.equal(item.status, "archived", "merged PR items are archived");
     assert.match(item.title, /PR merged/);
-    assert.equal(db.getTask("task-1")?.status, "done", "merged PR completes the task");
+    assert.equal(db.getTask("task-1")?.status, "archived", "merged PR archives the task");
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -590,6 +590,30 @@ test("pr sync: concurrent syncs deliver once", async () => {
     assert.equal(started.length, 1);
     db.close();
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("GitLab MR uses detailed mergeability when list omits conflicts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-glab-"));
+  const originalPath = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(dir, "glab"), `#!/bin/sh
+case "$*" in
+  "mr list"*) echo '[{"iid":7,"state":"opened","web_url":"https://gitlab.example/mr/7"}]' ;;
+  *'/changes') echo '{"changes":[]}' ;;
+  *'/discussions?per_page=100') echo '[]' ;;
+  *) echo '{"has_conflicts":false,"head_pipeline":{"status":"success"}}' ;;
+esac
+`, { mode: 0o755 });
+    process.env.PATH = `${dir}:${originalPath}`;
+    const pr = await findPr(dir, "feature");
+    assert.ok(pr);
+    assert.equal(prReady(pr).ready, true);
+  } finally {
+    process.env.PATH = originalPath;
     rmSync(dir, { recursive: true, force: true });
   }
 });
