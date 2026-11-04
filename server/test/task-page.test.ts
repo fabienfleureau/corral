@@ -18,3 +18,11 @@ test('sorts repos by most recent task creation, with unused repos last', () => {
   const tasks = [{ repo_path: '/a', created_ms: 1 }, { repo_path: '/b', created_ms: 3 }] as any;
   assert.deepEqual(sortRepos(repos, tasks).map((r) => r.name), ['B', 'A', 'C']);
 });
+
+test('orders repository groups by latest task creation', () => {
+  const tasks = [
+    { id: 'a', repo_path: '/a', status: 'open', created_ms: 1 },
+    { id: 'b', repo_path: '/b', status: 'open', created_ms: 3 },
+  ] as any;
+  assert.deepEqual(groupTasks(tasks).map(([path]) => path), ['/b', '/a']);
+});

@@ -178,14 +178,18 @@ export class OmnigentBackend implements WorkerBackend {
     }
   }
 
+  async registryAgents(): Promise<{ id: string; name: string }[]> {
+    return (await this.listAgents()).map(({ id, name }) => ({ id, name }));
+  }
+
   /** Harness dimension of the registry: "claude", "codex", "opencode", … */
   async harnesses(): Promise<{ harness: string; agents: { id: string; name: string }[] }[]> {
     const agents = await this.listAgents();
     let readiness: Record<string, unknown> = {};
     try {
-      const res = await this.request<{ hosts?: { id: string; configured_harnesses?: Record<string, unknown> }[] }>("GET", "/v1/hosts");
+      const res = await this.request<{ hosts?: { id?: string; host_id?: string; configured_harnesses?: Record<string, unknown> }[] }>("GET", "/v1/hosts");
       const hosts = res.hosts ?? [];
-      const host = this.cfg.hostId ? hosts.find((h) => h.id === this.cfg.hostId) : hosts.length === 1 ? hosts[0] : undefined;
+      const host = this.cfg.hostId ? hosts.find((h) => (h.host_id ?? h.id) === this.cfg.hostId) : hosts.length === 1 ? hosts[0] : undefined;
       readiness = host?.configured_harnesses ?? {};
     } catch {
       // Older or unreachable hosts may not report readiness.

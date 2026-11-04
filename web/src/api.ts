@@ -153,8 +153,8 @@ export const api = {
     patch<{ ok: boolean }>(`/api/ideas/${id}`, input),
 
   // ---- worker harnesses ----
-  listHarnesses: (): Promise<{ harnesses: { harness: string; agents: { id: string; name: string }[] }[] }> =>
-    get<{ harnesses: { harness: string; agents: { id: string; name: string }[] }[] }>("/api/harnesses"),
+  listHarnesses: (): Promise<{ harnesses: { harness: string; agents: { id: string; name: string }[] }[]; agents: { id: string; name: string }[] }> =>
+    get<{ harnesses: { harness: string; agents: { id: string; name: string }[] }[]; agents: { id: string; name: string }[] }>("/api/harnesses"),
 
   // ---- pull requests ----
   listPulls: (): Promise<{ pulls: Pull[]; fetched_ms: number }> =>

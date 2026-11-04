@@ -372,7 +372,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       const harnesses = state.backend.harnesses
         ? await state.backend.harnesses()
         : Object.keys(state.cfg.agents).map((harness) => ({ harness, agents: [] }));
-      json(res, 200, { harnesses });
+      const agents = state.backend.registryAgents
+        ? await state.backend.registryAgents()
+        : harnesses.flatMap((h) => h.agents);
+      json(res, 200, { harnesses, agents });
     } catch (err) {
       json(res, 500, { error: String(err) });
     }

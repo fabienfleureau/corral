@@ -28,7 +28,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
       .then((res) => {
         const list = res.harnesses.map((h) => h.harness);
         setTargets(list);
-        setAgentOptions(res.harnesses.flatMap((h) => h.agents));
+        setAgentOptions(res.agents);
       })
       .catch(() => undefined);
   }, []);
@@ -115,7 +115,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         </div>
 
         {showImport ? <JiraImport onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        <NewTaskForm repos={sortedRepos} onDone={refresh} />
+        <NewTaskForm repos={sortedRepos} targets={targets} agentOptions={agentOptions} onDone={refresh} />
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
@@ -312,12 +312,12 @@ function TaskRow({
               </>
             ) : (
               <>
-                <div style={{ whiteSpace: "pre-wrap" }}>{task.prompt}</div>
+
                 <button className="btn" onClick={() => { setPrompt(task.prompt); setEditingPrompt(true); }} disabled={busy !== null}>Modify prompt</button>
               </>
             )}
             <label className="field-inline">
-              <span>Target</span>
+              <span>Harness</span>
               <select value={selectedTarget} onChange={(e) => setTarget(e.target.value)}>
                 {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
                 {targets.map((t) => (
@@ -332,7 +332,7 @@ function TaskRow({
               <select value={agent} onChange={(e) => setAgent(e.target.value)}>
                 <option value="">— none (bare harness) —</option>
                 {agentOptions.map((a) => (
-                  <option key={a.id} value={a.name}>
+                  <option key={a.id} value={a.id}>
                     {a.name}
                   </option>
                 ))}
@@ -380,6 +380,7 @@ function TaskRow({
       </div>
 
       <div className="task-actions">
+        {task.status === "open" ? <button className="btn" disabled={busy !== null} onClick={() => void run("cancel", () => api.patchTask(task.id, { status: "archived" }))}>Cancel task</button> : null}
         {task.status === "dispatched" ? <button
           className="btn"
           onClick={() => setShowDispatch((v) => !v)}
@@ -414,9 +415,12 @@ function firstLine(text: string): string {
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
-function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
+function NewTaskForm({ repos, targets, agentOptions, onDone }: { repos: Repo[]; targets: string[]; agentOptions: { id: string; name: string }[]; onDone: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [repoChoice, setRepoChoice] = useState("");
+  const [target, setTarget] = useState("");
+  const [agent, setAgent] = useState("");
+  const [repoTouched, setRepoTouched] = useState(false);
   const [repoPath, setRepoPath] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
   const [busy, setBusy] = useState(false);
@@ -424,25 +428,35 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
 
   const clear = () => {
     setPrompt("");
-    setRepoChoice("");
     setRepoPath("");
     setBaseBranch("");
     setError(null);
   };
 
-  const submit = async () => {
+  const selectedRepo = repoTouched ? repoChoice : (repos[0]?.path ?? "");
+  const selectedTarget = targets.includes(target) ? target : targets[0] ?? "";
+
+  const submit = async (dispatch: boolean) => {
     if (!prompt.trim() || busy) return;
     setBusy(true);
     setError(null);
     try {
       const input: NewTaskInput = {
         prompt,
-        repo_path: repoChoice === "__custom__" ? repoPath.trim() : repoChoice,
+        repo_path: selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo,
         base_branch: baseBranch.trim() || null,
       };
-      await api.createTask(input);
+      const task = await api.createTask(input);
       clear();
       onDone();
+      if (dispatch) {
+        try {
+          await api.dispatchTask(task.id, { target: selectedTarget, use_worktree: true, agent: agent || null });
+          onDone();
+        } catch (err) {
+          setError(`Task created, but dispatch failed: ${errText(err)}`);
+        }
+      }
     } catch (err) {
       setError(errText(err));
     } finally {
@@ -465,7 +479,7 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
       <div className="field-row">
         <label className="field">
           <span>Repo</span>
-          <select value={repoChoice} onChange={(e) => setRepoChoice(e.target.value)}>
+          <select value={selectedRepo} onChange={(e) => { setRepoTouched(true); setRepoChoice(e.target.value); }}>
             <option value="">{repos.length ? "choose a repo…" : "no repos yet (add in Settings)"}</option>
             {repos.map((r) => (
               <option key={r.id} value={r.path}>
@@ -475,7 +489,7 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
             <option value="__custom__">custom path…</option>
           </select>
         </label>
-        {repoChoice === "__custom__" ? (
+        {selectedRepo === "__custom__" ? (
           <label className="field">
             <span>Repo path</span>
             <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/repo" />
@@ -486,9 +500,22 @@ function NewTaskForm({ repos, onDone }: { repos: Repo[]; onDone: () => void }) {
           <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
         </label>
       </div>
+      <div className="field-row">
+        <label className="field"><span>Harness</span><select value={selectedTarget} onChange={(e) => setTarget(e.target.value)}>
+          {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
+          {targets.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select></label>
+        <label className="field"><span>Agent</span><select value={agent} onChange={(e) => setAgent(e.target.value)}>
+          <option value="">— none (bare harness) —</option>
+          {agentOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select></label>
+      </div>
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
-        <button className="btn btn-primary" onClick={() => void submit()} disabled={busy || !prompt.trim()}>
+        <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !prompt.trim() || !selectedTarget || !(selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
+          Create and dispatch
+        </button>
+        <button className="btn" onClick={() => void submit(false)} disabled={busy || !prompt.trim()}>
           {busy ? <Spinner /> : null}
           {busy ? "Creating…" : "Create task"}
         </button>
