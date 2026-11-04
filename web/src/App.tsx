@@ -142,7 +142,7 @@ export function App() {
           {TABS.map((t) => t.key === "sessions" && omnigentUrl ? (
             <a key={t.key} className="nav-item" href={omnigentUrl} target="_blank" rel="noreferrer">
               <span>{t.label}</span>
-              <span className={`nav-count ${counts.sessions > 0 ? "nav-count-hot" : ""}`}>
+              <span className="nav-count">
                 {counts.sessions}
               </span>
             </a>
@@ -154,7 +154,7 @@ export function App() {
             >
               <span>{t.label}</span>
               {t.key !== "settings" ? (
-                <span className={`nav-count ${counts[t.key as keyof Counts] > 0 ? "nav-count-hot" : ""}`}>
+                <span className={`nav-count ${t.key !== "sessions" && counts[t.key as keyof Counts] > 0 ? "nav-count-hot" : ""}`}>
                   {counts[t.key as keyof Counts]}
                 </span>
               ) : null}
