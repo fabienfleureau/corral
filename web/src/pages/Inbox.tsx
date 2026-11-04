@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { api } from "../api";
-import type { Item, Task } from "../types";
+import type { Item, SessionInfo, Task } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
 import { ExternalLinkIcon, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
 import { selectedInboxItem } from "../inbox-selection";
+import { inboxTitle } from "../inbox-title";
 
 type StatusFilter = "open" | "resolved" | "archived";
 
@@ -21,6 +22,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
   const [allItems, setAllItems] = useState<Item[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Item | null>(null);
@@ -40,11 +42,12 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([api.listItems(), api.listTasks()])
-      .then(([itemList, taskList]) => {
+    Promise.all([api.listItems(), api.listTasks(), api.listSessions().catch(() => [] as SessionInfo[])])
+      .then(([itemList, taskList, sessionList]) => {
         if (cancelled) return;
         setAllItems(itemList);
         setTasks(taskList);
+        setSessions(sessionList);
         setError(null);
         setSelected((prev) => selectedInboxItem(prev, itemList, statusFilter));
       })
@@ -215,7 +218,7 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
                 >
                   <KindIcon kind={item.kind} />
                   <span className="item-row-main">
-                    <span className="item-row-title">{item.title}</span>
+                    <span className="item-row-title">{inboxTitle(item, sessions)}</span>
                     <span className="item-row-sub">
                       <span className="kind-label">{item.kind}</span>
                       <span>·</span>
