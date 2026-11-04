@@ -662,3 +662,17 @@ test("task model settings survive storage and are used for dispatch", async () =
     assert.equal(started[0].reasoning, "high");
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("dispatch includes the stored Jira link in the agent's task context", async () => {
+  const db = new Db(":memory:");
+  const dir = mkdtempSync(join(tmpdir(), "corral-jira-dispatch-"));
+  try {
+    execFileSync("git", ["init", dir], { stdio: "ignore" });
+    const task = makeTask({ repo_path: dir, title: "PROJ-42 Fix issue", prompt: "Ticket description", jira_key: "PROJ-42", jira_url: "https://jira.example/browse/PROJ-42" });
+    db.insertTask(task);
+    const { backend, started } = fakeBackend();
+    await dispatchTask(db, { configDir: dir, host: "localhost", port: 4787, token: "" } as Config, backend, db.getTask(task.id)!, "codex", { useWorktree: false });
+    assert.match(started[0].prompt, /https:\/\/jira\.example\/browse\/PROJ-42/);
+    assert.match(started[0].prompt, /Ticket description/);
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
