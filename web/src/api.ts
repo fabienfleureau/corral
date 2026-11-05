@@ -25,6 +25,9 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
 type CacheStateHandler = (stale: boolean) => void;
 let cacheStateHandler: CacheStateHandler | null = null;
 let connectivityVersion = 0;
+// Bumped on every successful mutation so subsequent GETs use a fresh cache key
+// (defeating the service worker's stale cached responses).
+let mutationVersion = 0;
 
 export function setCacheStateHandler(handler: CacheStateHandler | null): void {
   cacheStateHandler = handler;
@@ -38,7 +41,11 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
       init.body = JSON.stringify(body);
       init.headers = { "Content-Type": "application/json" };
     }
-    res = await fetch(path, init);
+    const requestPath =
+      method === "GET" && mutationVersion > 0
+        ? `${path}${path.includes("?") ? "&" : "?"}_mv=${mutationVersion}`
+        : path;
+    res = await fetch(requestPath, init);
     if (method === "GET") {
       const version = ++connectivityVersion;
       if (res.headers.has("X-Corral-Cache")) {
@@ -70,6 +77,7 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
     }
     throw new ApiError(res.status, message);
   }
+  if (method !== "GET") mutationVersion++;
   return (await res.json()) as T;
 }
 
