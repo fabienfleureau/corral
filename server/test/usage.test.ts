@@ -66,6 +66,11 @@ test("pricing: exact beats prefix, cache defaults derive from input", () => {
   assert.equal(recordCost(rec({ model: "gpt-6.1-terra", agent: "codex" }), DEFAULT_PRICES), null);
 });
 
+test("shared prices estimate MiMo and free Beam usage", () => {
+  assert.equal(recordCost(rec({ model: "mimo-v2.6-pro", input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }), DEFAULT_PRICES), 1.3086);
+  assert.equal(recordCost(rec({ model: "beam-free", input: 1_000_000, output: 1_000_000 }), DEFAULT_PRICES), 0);
+});
+
 test("parseCodexLines: deltas of running totals, cached is a subset of input", () => {
   const tc = (ts: string, input: number, cached: number, output: number, rl?: object) =>
     JSON.stringify({
