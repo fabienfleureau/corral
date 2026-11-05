@@ -79,15 +79,6 @@ export type Pull = {
   updated_ms: number;
 };
 
-export type Idea = {
-  id: string;
-  text: string;
-  tag: "workflow" | "product";
-  origin: "user" | "agent";
-  status: "new" | "promoted" | "dismissed";
-  created_ms: number;
-};
-
 export type JiraSearchResult = {
   title: string;
   prompt: string;

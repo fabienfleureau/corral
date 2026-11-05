@@ -450,26 +450,6 @@ button {
   color: var(--faint);
 }
 
-.tag-workflow {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-}
-
-.tag-product {
-  background: var(--ok-soft);
-  color: var(--ok-ink);
-}
-
-.origin-user {
-  background: var(--chip-bg);
-  color: var(--muted);
-}
-
-.origin-agent {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-}
-
 .kind-icon {
   width: 16px;
   height: 16px;
@@ -942,55 +922,6 @@ select:focus {
   flex-wrap: wrap;
   justify-content: flex-end;
   max-width: 300px;
-}
-
-/* ---------- ideas ---------- */
-
-.capture-box .tag-select {
-  width: auto;
-}
-
-.filter-bar {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-
-.idea-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.idea-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: var(--shadow);
-  padding: 12px 14px;
-}
-
-.idea-text {
-  font-size: 13px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.idea-meta {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.idea-actions {
-  display: flex;
-  gap: 8px;
 }
 
 /* ---------- settings ---------- */

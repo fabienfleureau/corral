@@ -1,7 +1,7 @@
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
-import type { Config, Idea, Item, JiraImportResult, JiraSearchResult, Pull, Repo, SessionInfo, Task, UsageRange, UsageReport } from "./types";
+import type { Config, Item, JiraImportResult, JiraSearchResult, Pull, Repo, SessionInfo, Task, UsageRange, UsageReport } from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -164,14 +164,6 @@ export const api = {
   jiraComment: (taskId: string, text: string): Promise<{ ok: boolean }> =>
     post<{ ok: boolean }>(`/api/jira/tasks/${taskId}/comment`, { text }),
 
-  // ---- ideas ----
-  listIdeas: (status?: Idea["status"]): Promise<Idea[]> =>
-    get<Idea[]>(`/api/ideas${query({ status })}`),
-  createIdea: (input: { text: string; tag?: Idea["tag"]; origin?: Idea["origin"] }): Promise<Idea> =>
-    post<Idea>("/api/ideas", input),
-  patchIdea: (id: string, input: { status?: Idea["status"]; tag?: Idea["tag"] }): Promise<{ ok: boolean }> =>
-    patch<{ ok: boolean }>(`/api/ideas/${id}`, input),
-
   // ---- worker harnesses ----
   listHarnesses: (): Promise<{ harnesses: { harness: string; agents: { id: string; name: string }[]; models?: { id: string; label: string; reasoning: string[] }[] }[]; agents: { id: string; name: string }[] }> =>
     get<{ harnesses: { harness: string; agents: { id: string; name: string }[]; models?: { id: string; label: string; reasoning: string[] }[] }[]; agents: { id: string; name: string }[] }>("/api/harnesses"),
@@ -214,7 +206,6 @@ export type ServerEvent =
   | { type: "item.created"; item: Item }
   | { type: "item.updated"; item: Item }
   | { type: "task.updated"; task: Task }
-  | { type: "idea.created"; idea: Idea }
   | { type: "pulls.updated" }
   | { type: "session.updated"; address: string; status: string | null };
 
@@ -242,11 +233,6 @@ export function subscribeEvents(onEvent: (event: ServerEvent) => void): () => vo
     const task = parse(ev) as Task | null;
     if (task) onEvent({ type: "task.updated", task });
   };
-  const onIdeaCreated = (ev: Event) => {
-    const idea = parse(ev) as Idea | null;
-    if (idea) onEvent({ type: "idea.created", idea });
-  };
-
   // Background refreshes and session status changes: pages just reload.
   const onPullsUpdated = () => onEvent({ type: "pulls.updated" });
   const onSessionUpdated = (ev: Event) => {
@@ -259,13 +245,11 @@ export function subscribeEvents(onEvent: (event: ServerEvent) => void): () => vo
   source.addEventListener("session.updated", onSessionUpdated);
   source.addEventListener("item.updated", onItemUpdated);
   source.addEventListener("task.updated", onTaskUpdated);
-  source.addEventListener("idea.created", onIdeaCreated);
 
   return () => {
     source.removeEventListener("item.created", onItemCreated);
     source.removeEventListener("item.updated", onItemUpdated);
     source.removeEventListener("task.updated", onTaskUpdated);
-    source.removeEventListener("idea.created", onIdeaCreated);
     source.removeEventListener("pulls.updated", onPullsUpdated);
     source.removeEventListener("session.updated", onSessionUpdated);
     source.close();
