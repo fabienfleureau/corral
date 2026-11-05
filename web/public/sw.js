@@ -10,7 +10,7 @@
 // Bump CACHE when the caching semantics change (not on every deploy — hashed
 // assets and network-first navigations pick up new deploys automatically).
 
-const CACHE = "corral-v2";
+const CACHE = "corral-v3";
 const SHELL = ["/"];
 const TIMEOUT_MS = 3000;
 
@@ -118,9 +118,36 @@ async function cacheFirst(request) {
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
-  if (request.method !== "GET") return; // mutations: network-only
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return; // cross-origin: browser default
+
+  // Mutations are network-only; on success, drop cached API responses so the
+  // next read reflects the new server state instead of a stale snapshot.
+  if (request.method !== "GET") {
+    if (url.pathname.startsWith("/api/")) {
+      event.respondWith(
+        (async () => {
+          const response = await fetch(request);
+          if (response.ok) {
+            try {
+              const cache = await caches.open(CACHE);
+              const keys = await cache.keys();
+              await Promise.all(
+                keys
+                  .filter((k) => new URL(k.url).pathname.startsWith("/api/"))
+                  .map((k) => cache.delete(k)),
+              );
+            } catch {
+              /* cache invalidation is best effort */
+            }
+          }
+          return response;
+        })(),
+      );
+    }
+    return;
+  }
+
   if (url.pathname === "/api/events") return; // SSE stream: never cache
 
   if (url.pathname.startsWith("/api/")) {
