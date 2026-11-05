@@ -139,7 +139,7 @@ export type Config = {
 
 // ---- usage page (GET /api/usage) ----
 
-export type UsageAgent = "claude" | "codex";
+export type UsageAgent = "claude" | "codex" | "opencode-go";
 export type UsageRange = "24h" | "7d" | "30d" | "all";
 
 export type UsageTotals = {
@@ -171,7 +171,7 @@ export type UsageReport = {
   totals: UsageTotals;
   by_agent: ({ agent: UsageAgent } & UsageTotals)[];
   by_model: ({ agent: UsageAgent; model: string; priced: boolean } & UsageTotals)[];
-  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number }[];
+  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number; opencode_go: number; opencode_go_tokens: number }[];
   bucket: "hour" | "day";
   efficiency: {
     tasks_with_spend: number;

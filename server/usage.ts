@@ -14,9 +14,10 @@ import { createReadStream, existsSync, readdirSync, readFileSync, statSync } fro
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { Task } from "./types.ts";
 
-export type UsageAgent = "claude" | "codex";
+export type UsageAgent = "claude" | "codex" | "opencode-go";
 
 /** One API call (Claude) or one token_count delta (Codex). */
 export interface UsageRecord {
@@ -224,6 +225,7 @@ export interface UsageSources {
   claudeDir: string;
   codexDir: string;
   claudeQuotaDir: string;
+  opencodeDir?: string;
 }
 
 export function defaultSources(): UsageSources {
@@ -232,6 +234,7 @@ export function defaultSources(): UsageSources {
     claudeDir: join(home, ".claude", "projects"),
     codexDir: join(home, ".codex", "sessions"),
     claudeQuotaDir: join(home, ".cache", "ccstatusline"),
+    opencodeDir: process.env.OPENCODE_DATA_DIR || join(process.env.XDG_DATA_HOME || join(home, ".local", "share"), "opencode"),
   };
 }
 
@@ -239,6 +242,7 @@ export class UsageScanner {
   private files = new Map<string, FileEntry>();
   private running: Promise<void> | null = null;
   private lastScan = 0;
+  private opencodeRecords: UsageRecord[] = [];
   ready = false;
   readonly sources: UsageSources;
 
@@ -259,6 +263,7 @@ export class UsageScanner {
   }
 
   private async scan(): Promise<void> {
+    this.opencodeRecords = readOpenCode(this.sources.opencodeDir);
     const seen = new Set<string>();
     const jobs: [string, UsageAgent][] = [
       ...listJsonl(this.sources.claudeDir).map((p): [string, UsageAgent] => [p, "claude"]),
@@ -299,7 +304,7 @@ export class UsageScanner {
 
   /** All records, deduped (Claude repeats a message across lines and resumed sessions). */
   records(): UsageRecord[] {
-    const out: UsageRecord[] = [];
+    const out: UsageRecord[] = [...this.opencodeRecords];
     const keys = new Set<string>();
     for (const f of this.files.values()) {
       for (const r of f.records) {
@@ -318,6 +323,31 @@ export class UsageScanner {
     for (const f of this.files.values()) if (f.rateLimits && (!best || f.rateLimits.ts > best.ts)) best = f.rateLimits;
     return best;
   }
+}
+
+/** Read completed OpenCode Go assistant messages from the local database. */
+function readOpenCode(dir?: string): UsageRecord[] {
+  if (!dir || !existsSync(join(dir, "opencode.db"))) return [];
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(join(dir, "opencode.db"), { readOnly: true });
+    const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(r => r.name));
+    const records: UsageRecord[] = [];
+    for (const [message, session, v2] of [["message", "session", false], ["session_message", "session_v2", true]] as const) {
+      if (!tables.has(message) || !tables.has(session)) continue;
+      const rows = db.prepare(`SELECT m.id, m.time_created, m.data, s.directory FROM ${message} m JOIN ${session} s ON s.id = m.session_id${v2 ? " WHERE m.type = 'assistant'" : ""}`).all();
+      for (const row of rows) {
+        try {
+          const data = JSON.parse(String(row.data));
+          const model = v2 ? data.model : { providerID: data.providerID, id: data.modelID };
+          if ((v2 ? data.model : data.role === "assistant") && model?.providerID === "opencode-go" && typeof model.id === "string" && data.tokens) {
+            records.push({ agent: "opencode-go", key: `opencode:${row.id}`, ts: Number(row.time_created), model: model.id, cwd: String(row.directory ?? ""), input: num(data.tokens.input), output: num(data.tokens.output), cacheRead: num(data.tokens.cache?.read), cacheWrite5m: num(data.tokens.cache?.write), cacheWrite1h: 0 });
+          }
+        } catch { /* Ignore malformed messages. */ }
+      }
+    }
+    return records;
+  } catch { return []; } finally { db?.close(); }
 }
 
 // ---- quota ----
@@ -443,7 +473,7 @@ export interface UsageReport {
   by_agent: ({ agent: UsageAgent } & UsageTotals)[];
   by_model: ({ agent: UsageAgent; model: string; priced: boolean } & UsageTotals)[];
   /** Buckets: hourly for 24h, daily otherwise (local time). */
-  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number }[];
+  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number; opencode_go: number; opencode_go_tokens: number }[];
   bucket: "hour" | "day";
   efficiency: {
     /** Tasks with spend in range. */
@@ -511,7 +541,7 @@ export function buildReport(input: {
   const totals = emptyTotals();
   const byAgent = new Map<UsageAgent, UsageTotals>();
   const byModel = new Map<string, { agent: UsageAgent; model: string; priced: boolean } & UsageTotals>();
-  const timeline = new Map<number, { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number }>();
+  const timeline = new Map<number, { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number; opencode_go: number; opencode_go_tokens: number }>();
   const perTask = new Map<string, { task: Task; cost: number; tokens: number; agents: Set<UsageAgent> }>();
   let attributed = 0;
   let unattributed = 0;
@@ -531,9 +561,10 @@ export function buildReport(input: {
 
     const b = bucketStart(r.ts, bucket);
     let tl = timeline.get(b);
-    if (!tl) timeline.set(b, (tl = { start_ms: b, claude: 0, codex: 0, claude_tokens: 0, codex_tokens: 0 }));
-    tl[r.agent] += cost ?? 0;
-    tl[r.agent === "claude" ? "claude_tokens" : "codex_tokens"] += tokensOf(r);
+    if (!tl) timeline.set(b, (tl = { start_ms: b, claude: 0, codex: 0, claude_tokens: 0, codex_tokens: 0, opencode_go: 0, opencode_go_tokens: 0 }));
+    const agent = r.agent === "opencode-go" ? "opencode_go" : r.agent;
+    tl[agent] += cost ?? 0;
+    tl[`${agent}_tokens`] += tokensOf(r);
 
     if (!cwdTask.has(r.cwd)) cwdTask.set(r.cwd, r.cwd ? taskForCwd(r.cwd, input.tasks) : null);
     const task = cwdTask.get(r.cwd) ?? null;
@@ -556,7 +587,7 @@ export function buildReport(input: {
     let cur = since !== null ? bucketStart(since, bucket) : keys[0];
     const end = bucketStart(now, bucket);
     while (cur <= end) {
-      filled.push(timeline.get(cur) ?? { start_ms: cur, claude: 0, codex: 0, claude_tokens: 0, codex_tokens: 0 });
+      filled.push(timeline.get(cur) ?? { start_ms: cur, claude: 0, codex: 0, claude_tokens: 0, codex_tokens: 0, opencode_go: 0, opencode_go_tokens: 0 });
       const d = new Date(cur);
       if (bucket === "hour") d.setHours(d.getHours() + 1);
       else d.setDate(d.getDate() + 1);
