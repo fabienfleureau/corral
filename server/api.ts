@@ -17,7 +17,7 @@ import { dispatchTask } from "./dispatch.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import { startSyncAllPrs, syncTaskPr } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
-import type { Idea, Item, Task } from "./types.ts";
+import type { Item, Task } from "./types.ts";
 import { taskLabel } from "./types.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, opencodeGoQuota, type UsageRange } from "./usage.ts";
 
@@ -570,35 +570,6 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     } catch (err) {
       json(res, 502, { error: String(err) });
     }
-  });
-
-  // ---- ideas ----
-  on("GET", "/api/ideas", (_req, res, { url }) => {
-    json(res, 200, state.db.listIdeas(url.searchParams.get("status") ?? undefined));
-  });
-
-  on("POST", "/api/ideas", (req, res, { body }) => {
-    const b = body as { text?: string; tag?: string; origin?: string };
-    if (!b?.text?.trim()) return json(res, 400, { error: "text required" });
-    const idea: Idea = {
-      id: randomUUID(),
-      text: b.text.trim(),
-      tag: b.tag === "product" ? "product" : "workflow",
-      origin: b.origin === "agent" ? "agent" : "user",
-      status: "new",
-      created_ms: Date.now(),
-    };
-    state.db.insertIdea(idea);
-    state.db.recordMetric("idea.created", idea.id, { origin: idea.origin, tag: idea.tag });
-    state.hub.broadcast("idea.created", idea);
-    json(res, 200, idea);
-  });
-
-  on("PATCH", "/api/ideas/:id", (req, res, { body, params }) => {
-    const patch = body as Partial<Idea>;
-    delete patch.id;
-    state.db.updateIdea(params.id, patch);
-    json(res, 200, { ok: true });
   });
 
   // ---- metrics / terminals / config ----

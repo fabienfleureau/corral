@@ -1,7 +1,7 @@
-// SQLite storage. One file at <dataDir>/corral.db. Schema is additive only.
+// SQLite storage. One file at <dataDir>/corral.db.
 
 import { DatabaseSync } from "node:sqlite";
-import type { Idea, Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskStatus, TrackedTerminal } from "./types.ts";
+import type { Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskStatus, TrackedTerminal } from "./types.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -50,16 +50,6 @@ CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_task ON items(task_id);
 CREATE INDEX IF NOT EXISTS idx_items_source ON items(source_ref);
 
-CREATE TABLE IF NOT EXISTS ideas (
-  id TEXT PRIMARY KEY,
-  text TEXT NOT NULL,
-  tag TEXT NOT NULL DEFAULT 'workflow',
-  origin TEXT NOT NULL DEFAULT 'user',
-  status TEXT NOT NULL DEFAULT 'new',
-  created_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_ideas_status ON ideas(status);
-
 CREATE TABLE IF NOT EXISTS repos (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -99,8 +89,10 @@ export class Db {
     this.migrate();
   }
 
-  /** Additive column migrations for databases created before a field existed. */
+  /** Migrate databases created by older versions. */
   private migrate(): void {
+    // Ideas were removed; discard the legacy data and index.
+    this.raw.exec("DROP TABLE IF EXISTS ideas");
     const cols = this.raw.prepare("PRAGMA table_info(items)").all() as { name: string }[];
     const names = new Set(cols.map((c) => c.name));
     if (!names.has("context")) this.raw.exec(`ALTER TABLE items ADD COLUMN context TEXT NOT NULL DEFAULT ''`);
@@ -215,29 +207,6 @@ export class Db {
   questionItemForTerminal(address: string): Item | null {
     const row = this.raw.prepare(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' AND status IN ('open', 'resolved') ORDER BY created_ms DESC LIMIT 1`).get(address);
     return (row as unknown as Item) ?? null;
-  }
-
-  // ---- ideas ----
-
-  insertIdea(i: Idea): void {
-    this.raw
-      .prepare(`INSERT INTO ideas (id, text, tag, origin, status, created_ms) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(i.id, i.text, i.tag, i.origin, i.status, i.created_ms);
-  }
-
-  updateIdea(id: string, patch: Partial<Idea>): void {
-    const keys = Object.keys(patch).filter((k) => k !== "id") as (keyof Idea)[];
-    if (keys.length === 0) return;
-    const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
-    const values = keys.map((k) => patch[k] as never);
-    this.raw.prepare(`UPDATE ideas SET ${sets} WHERE id = ?`).run(...values, id);
-  }
-
-  listIdeas(status?: string): Idea[] {
-    const rows = status
-      ? this.raw.prepare(`SELECT * FROM ideas WHERE status = ? ORDER BY created_ms DESC`).all(status)
-      : this.raw.prepare(`SELECT * FROM ideas ORDER BY created_ms DESC`).all();
-    return rows as unknown as Idea[];
   }
 
   // ---- repos ----

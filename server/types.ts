@@ -68,18 +68,6 @@ export interface Item {
   snooze_until_ms: number | null;
 }
 
-export type IdeaTag = "workflow" | "product";
-export type IdeaStatus = "new" | "promoted" | "dismissed";
-
-export interface Idea {
-  id: string;
-  text: string;
-  tag: IdeaTag;
-  origin: "user" | "agent";
-  status: IdeaStatus;
-  created_ms: number;
-}
-
 export interface TrackedTerminal {
   address: string;
   task_id: string | null;

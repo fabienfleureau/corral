@@ -32,8 +32,6 @@ idea → Jira (clarify outside Corral) → task backlog → dispatch (worktree +
   **Archived** tab);
   tasks close when the agent exits. Manual snooze + archive on top.
 - **Notifications** — in-app + desktop, for new actionable items only.
-- **Ideas** — free-form capture (`corral idea`) through the CLI and API
-  (workflow/product), the seed of the planned daily self-improvement loop.
 - **Metrics** — every event (created/dispatched/replied/resolved/…) is recorded
   from day one (`/api/metrics/summary`), feeding the future daily analysis.
 - **Offline mode** — a service worker caches the app shell and the last-known
@@ -62,7 +60,6 @@ CLI (talks to the running server):
 
 ```sh
 corral add "Fix flaky upload test" --repo ~/work/api --prompt "…" --target claude
-corral idea "snooze-until-green for PR items" --tag product
 corral status
 ```
 
@@ -91,8 +88,8 @@ server/       Node 22 (type-stripped TS), no runtime deps
   capture.ts  events → inbox items → auto-resolution (+ 30s reconcile)
   dispatch.ts worktree creation, prompt assembly, terminal.run
   jira.ts     REST v3 (search, transitions, ADF comments)
-  db.ts       SQLite (tasks, items, ideas, terminals, metrics_events)
-  cli.ts      corral add / idea / status / serve
+  db.ts       SQLite (tasks, items, terminals, metrics_events)
+  cli.ts      corral add / status / serve
 skills/       question-report.md (injected into agent prompts), clarify.md
 ```
 
