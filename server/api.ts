@@ -286,7 +286,25 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/tasks/:id/dispatch", async (req, res, { body, params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
-    if (task.status === "dispatched") return json(res, 409, { error: "task already dispatched" });
+    if (task.status === "dispatched") {
+      // A task marked dispatched with no live session behind it (e.g. the
+      // agent already finished, or the session vanished) is effectively still
+      // open: reopen it instead of refusing to dispatch.
+      let active = false;
+      if (task.terminal_address && typeof state.backend.get === "function") {
+        try {
+          const session = await state.backend.get(task.terminal_address);
+          active = !!session && session.state !== "finished"
+            && session.status !== "done" && session.status !== "error";
+        } catch {
+          active = false;
+        }
+      } else if (task.terminal_address) {
+        active = true;
+      }
+      if (active) return json(res, 409, { error: "task already dispatched" });
+      state.db.updateTask(task.id, { status: "open", terminal_address: null });
+    }
     const b = (body ?? {}) as {
       target?: string;
       use_worktree?: boolean;
