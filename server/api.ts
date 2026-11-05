@@ -19,7 +19,7 @@ import { startSyncAllPrs, syncTaskPr } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Idea, Item, Task } from "./types.ts";
 import { taskLabel } from "./types.ts";
-import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, type UsageRange } from "./usage.ts";
+import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, opencodeGoQuota, type UsageRange } from "./usage.ts";
 
 export interface AppState {
   db: Db;
@@ -624,7 +624,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         tasks: state.db.listTasks(),
         prices: { ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
         range: raw as UsageRange,
-        quota: [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits())],
+        quota: [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), await opencodeGoQuota()],
         scanning: !scanner.ready,
       }),
     );

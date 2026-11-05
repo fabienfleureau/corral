@@ -328,7 +328,7 @@ export interface QuotaWindow {
   resets_ms: number | null;
 }
 export interface AgentQuota {
-  agent: UsageAgent;
+  agent: UsageAgent | "opencode-go";
   /** Where the numbers come from + when they were captured. */
   source: string;
   as_of_ms: number | null;
@@ -337,6 +337,27 @@ export interface AgentQuota {
   plan: string | null;
   windows: QuotaWindow[];
   note: string | null;
+}
+
+/** Account-wide Go quota, using the credential registered with OpenCode. */
+export async function opencodeGoQuota(dir = process.env.OPENCODE_DATA_DIR || join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "opencode"), fetcher: typeof fetch = fetch, now = Date.now()): Promise<AgentQuota> {
+  const empty = (note: string): AgentQuota => ({ agent: "opencode-go", source: "OpenCode Go", as_of_ms: null, stale: true, plan: null, windows: [], note });
+  let key: unknown;
+  try { key = JSON.parse(readFileSync(join(dir, "auth.json"), "utf8"))["opencode-go"]?.key; } catch { return empty("Connect OpenCode Go in OpenCode to see quota."); }
+  if (typeof key !== "string" || !key) return empty("Connect OpenCode Go in OpenCode to see quota.");
+  try {
+    const response = await fetcher("https://opencode.ai/zen/go/v1/usage", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(5000), redirect: "error" });
+    if (!response.ok) return empty(`OpenCode Go quota unavailable (HTTP ${response.status}).`);
+    const data = await response.json() as any;
+    const windows: QuotaWindow[] = [];
+    for (const [name, label] of [["rolling", "5-hour session"], ["weekly", "Weekly"], ["monthly", "Monthly"]]) {
+      const w = data?.usage?.[name];
+      const reset = typeof w?.resetsAt === "string" ? Date.parse(w.resetsAt) : NaN;
+      if (!w || !["ok", "rate-limited"].includes(w.status) || typeof w.percent !== "number" || !Number.isFinite(w.percent) || !Number.isFinite(reset)) return empty("OpenCode Go returned an invalid quota response.");
+      windows.push({ label, used_percent: Math.max(0, Math.min(100, w.percent)), resets_ms: reset });
+    }
+    return { agent: "opencode-go", source: "OpenCode Go", as_of_ms: now, stale: windows.some(w => w.resets_ms !== null && w.resets_ms < now), plan: null, windows, note: null };
+  } catch { return empty("Could not reach OpenCode Go quota service."); }
 }
 
 /** Claude quota from ccstatusline's cache (the freshest usage*.json). */

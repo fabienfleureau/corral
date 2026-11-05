@@ -158,3 +158,20 @@ test("buildReport: range filter, task attribution and efficiency", () => {
   assert.equal(r.bucket, "day");
   assert.ok(r.timeline.length >= 7);
 });
+
+test("OpenCode Go quota reads subscription windows and handles failures", async () => {
+  const { opencodeGoQuota } = await import("../usage.ts");
+  const dir = mkdtempSync(join(tmpdir(), "corral-go-"));
+  try {
+    writeFileSync(join(dir, "auth.json"), JSON.stringify({ "opencode-go": { type: "api", key: "test-key" } }));
+    const fetcher: typeof fetch = async (_url, init) => {
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-key");
+      return new Response(JSON.stringify({ usage: { rolling: { status: "ok", percent: 12.5, resetsAt: "2026-11-06T00:00:00Z" }, weekly: { status: "ok", percent: 30, resetsAt: "2026-11-10T00:00:00Z" }, monthly: { status: "ok", percent: 40, resetsAt: "2026-12-01T00:00:00Z" } } }));
+    };
+    const q = await opencodeGoQuota(dir, fetcher, Date.parse("2026-11-05T00:00:00Z"));
+    assert.deepEqual(q.windows.map(w => [w.label, w.used_percent]), [["5-hour session", 12.5], ["Weekly", 30], ["Monthly", 40]]);
+    assert.equal(q.stale, false);
+    assert.equal((await opencodeGoQuota(dir, async () => new Response("", { status: 401 }))).windows.length, 0);
+    assert.equal((await opencodeGoQuota(join(dir, "missing"), fetcher)).windows.length, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

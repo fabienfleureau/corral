@@ -14,7 +14,7 @@ const RANGES: { key: UsageRange; label: string }[] = [
   { key: "all", label: "All time" },
 ];
 type Metric = "cost" | "tokens";
-const AGENT_LABEL: Record<UsageAgent, string> = { claude: "Claude", codex: "Codex" };
+const AGENT_LABEL: Record<AgentQuota["agent"], string> = { claude: "Claude", codex: "Codex", "opencode-go": "OpenCode Go" };
 
 function paramsFromHash(): { range: UsageRange; metric: Metric } {
   const q = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
