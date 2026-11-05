@@ -59,11 +59,22 @@ test("parseClaudeLine: reads usage, splits cache writes, skips synthetic", () =>
 test("pricing: exact beats prefix, cache defaults derive from input", () => {
   assert.equal(priceFor("claude-opus-5-5", DEFAULT_PRICES)?.input, 4);
   assert.equal(priceFor("claude-sonnet-5-5", DEFAULT_PRICES)?.input, 2);
-  assert.equal(priceFor("gpt-6.1-terra", DEFAULT_PRICES), null);
+  assert.equal(priceFor("gpt-unknown", DEFAULT_PRICES), null);
   // opus 5.5: 10*4 + 1000*20 + 100k*0.2 + 2000*(4*2) = 40 + 20000 + 20000 + 16000
   const cost = recordCost(parseClaudeLine(claudeLine())!, DEFAULT_PRICES);
   assert.ok(cost !== null && Math.abs(cost - 56_040 / 1e6) < 1e-12);
-  assert.equal(recordCost(rec({ model: "gpt-6.1-terra", agent: "codex" }), DEFAULT_PRICES), null);
+  assert.equal(recordCost(rec({ model: "gpt-unknown", agent: "codex" }), DEFAULT_PRICES), null);
+});
+
+test("shared prices estimate MiMo and free Beam usage", () => {
+  assert.equal(recordCost(rec({ model: "mimo-v2.6-pro", input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }), DEFAULT_PRICES), 1.3086);
+  assert.equal(recordCost(rec({ model: "beam-free", input: 1_000_000, output: 1_000_000 }), DEFAULT_PRICES), 0);
+});
+
+test("shared OpenAI prices include discounted cached input", () => {
+  for (const [model, expected] of [["gpt-6.1-terra", 6.05], ["gpt-6.1-sol", 12.1]] as const) {
+    assert.equal(recordCost(rec({ model, agent: "codex", input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }), DEFAULT_PRICES), expected);
+  }
 });
 
 test("parseCodexLines: deltas of running totals, cached is a subset of input", () => {

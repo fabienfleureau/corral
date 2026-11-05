@@ -44,8 +44,8 @@ export interface ModelPrice {
   cacheWrite1h?: number;
 }
 
-// Anthropic first-party list prices, as of 2026-10-06. OpenAI models have no
-// default: add them under usage.prices in config.json (exact id or "prefix*").
+// API list prices in USD per million tokens. Config prices can override these.
+// Anthropic: as of 2026-10-06; OpenAI, Xiaomi and OpenCode: as of 2026-11-05.
 export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   "claude-fable-5*": { input: 10, output: 50, cacheRead: 0.25 },
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
@@ -55,6 +55,13 @@ export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   "claude-sonnet-4*": { input: 3, output: 15 },
   "claude-haiku-5-5": { input: 0.1, output: 0.5 },
   "claude-haiku-4*": { input: 1, output: 5 },
+  // Standard short-context rates: https://developers.openai.com/api/docs/pricing
+  "gpt-6.1-terra": { input: 1, output: 5, cacheRead: 0.05 },
+  "gpt-6.1-sol": { input: 2, output: 10, cacheRead: 0.1 },
+  // https://mimo.mi.com/docs/price
+  "mimo-v2.6-pro": { input: 0.435, output: 0.87, cacheRead: 0.0036 },
+  // https://dev.opencode.ai/v2/docs/console/models
+  "beam-free": { input: 0, output: 0 },
 };
 
 export function priceFor(model: string, prices: Record<string, ModelPrice>): ModelPrice | null {
