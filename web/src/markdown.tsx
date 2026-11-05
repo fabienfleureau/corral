@@ -7,7 +7,7 @@
 import type { ReactNode } from "react";
 
 const INLINE_RE =
-  /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<>"']+)/g;
+  /(<(?:b|strong|code)>[^<\n]*<\/(?:b|strong|code)>)|(!\[[^\]\n]*\]\([^)\s]+\))|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<>"']+)/g;
 
 function inline(text: string, keyBase = "i"): ReactNode[] {
   const nodes: ReactNode[] = [];
@@ -22,7 +22,16 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
     if (m.index > last) nodes.push(text.slice(last, m.index));
     const tok = m[0];
     const key = `${keyBase}-${k++}`;
-    if (tok.startsWith("`")) {
+    if (/^<(b|strong)>/i.test(tok)) {
+      nodes.push(<strong key={key}>{inline(tok.replace(/^<[^>]+>|<\/[^>]+>$/g, ""), key)}</strong>);
+    } else if (tok.startsWith("<code>")) {
+      nodes.push(<code key={key}>{tok.slice(6, -7)}</code>);
+    } else if (tok.startsWith("![")) {
+      const image = /^!\[([^\]]*)\]\(([^)\s]+)\)$/.exec(tok);
+      const alt = image?.[1] ?? "";
+      const url = image?.[2] ?? "";
+      nodes.push(/^https?:\/\//i.test(url) ? <img key={key} src={url} alt={alt} loading="lazy" /> : <span key={key}>{alt}</span>);
+    } else if (tok.startsWith("`")) {
       nodes.push(<code key={key}>{tok.slice(1, -1)}</code>);
     } else if (tok.startsWith("**") || tok.startsWith("__")) {
       nodes.push(<strong key={key}>{inline(tok.slice(2, -2), key)}</strong>);
@@ -62,6 +71,7 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
 }
 
 type Block =
+  | { type: "details"; summary: string; lines: string[] }
   | { type: "code"; lang: string; lines: string[] }
   | { type: "heading"; level: number; text: string }
   | { type: "hr" }
@@ -95,6 +105,16 @@ function parseBlocks(src: string): Block[] {
     if (!line.trim()) {
       i++;
       continue;
+    }
+
+    const details = /^\s*<details>\s*<summary>(.*?)<\/summary>\s*$/i.exec(line);
+    if (details) {
+      const end = lines.findIndex((value, index) => index > i && /^\s*<\/details>\s*$/i.test(value));
+      if (end !== -1) {
+        blocks.push({ type: "details", summary: details[1], lines: lines.slice(i + 1, end) });
+        i = end + 1;
+        continue;
+      }
     }
 
     const fence = FENCE_RE.exec(line);
@@ -203,6 +223,8 @@ export function Markdown({ text, className }: { text: string; className?: string
       {blocks.map((block, bi) => {
         const key = `b${bi}`;
         switch (block.type) {
+          case "details":
+            return <details key={key}><summary>{inline(block.summary, key)}</summary><Markdown text={block.lines.join("\n")} /></details>;
           case "code":
             return (
               <pre key={key} className="md-code">

@@ -1208,6 +1208,19 @@ select:focus {
   font-size: 1.2em;
 }
 
+.md img {
+  max-width: 100%;
+  height: auto;
+}
+
+.md details {
+  margin: 0 0 10px;
+}
+
+.md summary {
+  cursor: pointer;
+}
+
 .md p {
   margin: 0 0 10px;
 }
