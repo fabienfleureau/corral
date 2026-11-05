@@ -10,24 +10,22 @@ import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
 import { SessionsPage } from "./pages/Sessions";
 import { PullsPage } from "./pages/Pulls";
-import { IdeasPage } from "./pages/Ideas";
 import { SettingsPage } from "./pages/Settings";
 import { UsagePage } from "./pages/Usage";
 
-type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "ideas" | "usage" | "settings" | "errors";
+type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "settings" | "errors";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
   { key: "tasks", label: "Tasks" },
   { key: "pulls", label: "Pull Requests" },
   { key: "sessions", label: "Sessions" },
-  { key: "ideas", label: "Ideas" },
   { key: "usage", label: "Usage" },
   { key: "settings", label: "Settings" },
   { key: "errors", label: "Errors" },
 ];
 
-type Counts = { inbox: number; tasks: number; pulls: number; sessions: number; ideas: number; errors: number };
+type Counts = { inbox: number; tasks: number; pulls: number; sessions: number; errors: number };
 
 function tabFromHash(): Tab {
   const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
@@ -37,7 +35,7 @@ function tabFromHash(): Tab {
 export function App() {
   const [unauthorized, setUnauthorized] = useState(false);
   const [tab, setTab] = useState<Tab>(tabFromHash);
-  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, pulls: 0, sessions: 0, ideas: 0, errors: 0 });
+  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, pulls: 0, sessions: 0, errors: 0 });
   const [eventVersion, setEventVersion] = useState(0);
   const [errors, setErrors] = useState<{ source: string; message: string; updated_ms: number }[]>([]);
   const [bootError, setBootError] = useState<string | null>(null);
@@ -90,8 +88,8 @@ export function App() {
   // Sidebar open counts.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.listItems({ status: "open" }), api.listTasks("open"), api.listIdeas("new"), api.listSessions(), api.listPulls(), api.listErrors()])
-      .then(([items, tasks, ideas, sessions, pullsRes, syncErrors]) => {
+    Promise.all([api.listItems({ status: "open" }), api.listTasks("open"), api.listSessions(), api.listPulls(), api.listErrors()])
+      .then(([items, tasks, sessions, pullsRes, syncErrors]) => {
         if (!cancelled) {
           setErrors(syncErrors);
           setCounts({
@@ -100,7 +98,6 @@ export function App() {
             tasks: tasks.length,
             pulls: pullsRes.pulls.filter((p) => p.color !== "green").length,
             sessions: sessions.filter((s) => s.state === "live").length,
-            ideas: ideas.length,
           });
         }
       })
@@ -183,7 +180,6 @@ export function App() {
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
-        {tab === "ideas" ? <IdeasPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "usage" ? <UsagePage /> : null}
         {tab === "settings" ? <SettingsPage /> : null}
         {tab === "errors" ? <section><h1>Error center</h1><p className="muted">Current background synchronization errors. Errors clear after a successful refresh.</p>{errors.length === 0 ? <p>No current errors.</p> : errors.map((error) => <div className="inline-error" key={error.source}><strong>{error.source}</strong><p>{error.message}</p><small>{new Date(error.updated_ms).toLocaleString()}</small></div>)}</section> : null}

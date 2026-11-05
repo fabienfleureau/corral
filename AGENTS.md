@@ -86,7 +86,7 @@ never commit screenshots or generated fixture data.
 | | |
 |---|---|
 | `server/` | API (`api.ts`), worker seam (`worker.ts`, `omnigent.ts`), PR loop (`pr.ts`), inbox lifecycle (`capture.ts`), dispatch (`dispatch.ts`) |
-| `web/` | React UI, hash-routed pages (`#/inbox`, `#/tasks`, `#/pulls`, `#/sessions`, `#/ideas`, `#/settings`) |
+| `web/` | React UI, hash-routed pages (`#/inbox`, `#/tasks`, `#/pulls`, `#/sessions`, `#/settings`) |
 | `skills/` | Prompt conventions for dispatched agents (question reports, PR loop, handoff) |
 | `API.md` | HTTP contract — keep in sync with `server/api.ts` |
 

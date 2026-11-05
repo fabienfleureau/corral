@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // Corral CLI: capture work from wherever you are.
 //   corral add "title" --repo ~/work/foo [--prompt "..."] [--target claude] [--jira KEY-1]
-//   corral idea "free-form idea" [--tag product|workflow]
 //   corral status
 //   corral serve
 //
@@ -77,16 +76,6 @@ async function main(): Promise<void> {
       }
       break;
     }
-    case "idea": {
-      const text = rest.find((a) => !a.startsWith("--"));
-      if (!text) throw new Error('usage: corral idea "text" [--tag product|workflow]');
-      const idea = await api<{ id: string }>("POST", "/api/ideas", {
-        text,
-        tag: arg("--tag") ?? "workflow",
-      });
-      console.log(`idea ${idea.id} captured`);
-      break;
-    }
     case "status": {
       const [items, tasks] = await Promise.all([
         api<unknown[]>("GET", "/api/items?status=open"),
@@ -104,7 +93,6 @@ async function main(): Promise<void> {
       console.log("corral — feed your workers, answer from one inbox\n");
       console.log("usage:");
       console.log('  corral add "title" --repo <path> [--prompt "..."] [--target claude] [--jira KEY] [--dispatch]');
-      console.log('  corral idea "text" [--tag product|workflow]');
       console.log("  corral status");
       console.log("  corral serve");
   }

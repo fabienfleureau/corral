@@ -5,7 +5,7 @@ either `Authorization: Bearer <token>` or the `corral_token` cookie. The web app
 served at `/`; visiting `/?token=<token>` sets the cookie and redirects to `/`.
 On 401 the UI shows a token-entry screen (send the token as `?token=` once).
 
-Live updates: `GET /api/events` (SSE). Events: `event: item.created|item.updated|task.updated|idea.created|session.updated|pulls.updated`
+Live updates: `GET /api/events` (SSE). Events: `event: item.created|item.updated|task.updated|session.updated|pulls.updated`
 with the entity JSON as `data`. Use `item.created` for desktop notifications.
 
 ## Entities
@@ -37,13 +37,6 @@ type Item = {
   resolved_ms: number | null; snooze_until_ms: number | null;
 };
 
-type Idea = {
-  id: string; text: string;
-  tag: "workflow" | "product";
-  origin: "user" | "agent";
-  status: "new" | "promoted" | "dismissed";
-  created_ms: number;
-};
 ```
 
 ## Endpoints
@@ -70,11 +63,6 @@ type Idea = {
 - `POST /api/jira/import` `{items: [{key, fingerprint}]}` (or `{keys: string[]}`, no fingerprint check) → `{created: Task[], changed: SearchResult[], skipped: string[], failed: string[]}` — an item whose fingerprint no longer matches the issue (content or repo mapping changed since search) lands in `changed` with its current preview and is not imported; keys with an existing task land in `skipped`
 - `POST /api/jira/tasks/:id/done` `{transition_id?}` → `{ok, transition}` — auto-picks a done-like transition when omitted
 - `POST /api/jira/tasks/:id/comment` `{text}` → `{ok}`
-
-### Ideas
-- `GET /api/ideas?status=new|promoted|dismissed` → `Idea[]`
-- `POST /api/ideas` `{text, tag?, origin?}` → `Idea`
-- `PATCH /api/ideas/:id` `{status?, tag?}` → `{ok}`
 
 ### Usage
 - `GET /api/usage?range=24h|7d|30d|all[&refresh=1]` → Claude Code, Codex and OpenCode Go usage from local session data

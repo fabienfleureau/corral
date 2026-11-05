@@ -32,8 +32,6 @@ idea → Jira (clarify outside Corral) → task backlog → dispatch (worktree +
   **Archived** tab);
   tasks close when the agent exits. Manual snooze + archive on top.
 - **Notifications** — in-app + desktop, for new actionable items only.
-- **Ideas** — free-form capture (`corral idea`) into a tagged list
-  (workflow/product), the seed of the planned daily self-improvement loop.
 - **Metrics** — every event (created/dispatched/replied/resolved/…) is recorded
   from day one (`/api/metrics/summary`), feeding the future daily analysis.
 - **Offline mode** — a service worker caches the app shell and the last-known
@@ -62,7 +60,6 @@ CLI (talks to the running server):
 
 ```sh
 corral add "Fix flaky upload test" --repo ~/work/api --prompt "…" --target claude
-corral idea "snooze-until-green for PR items" --tag product
 corral status
 ```
 
@@ -83,7 +80,7 @@ corral status
 ## Architecture
 
 ```
-web/          React UI (inbox, tasks, ideas, settings) — vite build → web/dist
+web/          React UI (inbox, tasks, settings) — vite build → web/dist
 server/       Node 22 (type-stripped TS), no runtime deps
   index.ts    wiring: config → db → herdr streams → HTTP
   api.ts      REST + SSE + token auth + static hosting
@@ -91,8 +88,8 @@ server/       Node 22 (type-stripped TS), no runtime deps
   capture.ts  events → inbox items → auto-resolution (+ 30s reconcile)
   dispatch.ts worktree creation, prompt assembly, terminal.run
   jira.ts     REST v3 (search, transitions, ADF comments)
-  db.ts       SQLite (tasks, items, ideas, terminals, metrics_events)
-  cli.ts      corral add / idea / status / serve
+  db.ts       SQLite (tasks, items, terminals, metrics_events)
+  cli.ts      corral add / status / serve
 skills/       question-report.md (injected into agent prompts), clarify.md
 ```
 
@@ -102,7 +99,7 @@ Storage: `~/.local/share/corral/corral.db` (SQLite). The data model carries
 ## Roadmap (agreed design)
 
 - **v2** — PR/MR watchlist (readiness = CI green + threads resolved + mergeable;
-  watched-repo polling via `gh`/`glab`), Ideas page + daily digest
+  watched-repo polling via `gh`/`glab`), daily digest
 - **v3** — daily self-improvement analysis (propose + prepare, human approves
   everything), subscription usage page (live quota windows + history charts),
   routing suggestions (quota headroom + editable rules)
