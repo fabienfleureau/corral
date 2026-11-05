@@ -201,7 +201,7 @@ function TaskRow({
   catalog: Record<string, ModelOption[]>;
   refresh: () => void;
 }) {
-  const [showDispatch, setShowDispatch] = useState(task.status === "open");
+  const [showDispatch, setShowDispatch] = useState(task.status === "open" || (task.status === "dispatched" && !task.terminal_address));
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [prompt, setPrompt] = useState(task.prompt);
   const [target, setTarget] = useState(task.target || "claude");
@@ -217,8 +217,8 @@ function TaskRow({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setShowDispatch(task.status === "open");
-  }, [task.status]);
+    setShowDispatch(task.status === "open" || (task.status === "dispatched" && !task.terminal_address));
+  }, [task.status, task.terminal_address]);
 
   const run = async (label: string, fn: () => Promise<unknown>, okMsg?: string) => {
     if (busy) return;
@@ -442,13 +442,13 @@ function TaskRow({
 
       <div className="task-actions">
         {task.status === "open" ? <button className="btn" disabled={busy !== null} onClick={() => void run("cancel", () => api.patchTask(task.id, { status: "archived" }))}>Cancel task</button> : null}
-        {task.status === "dispatched" ? <button
+        {task.status === "dispatched" && !!task.terminal_address ? <button
           className="btn"
           onClick={() => setShowDispatch((v) => !v)}
-          disabled={task.status === "dispatched" || busy !== null}
-          title={task.status === "dispatched" ? "Already dispatched" : undefined}
+          disabled={busy !== null}
+          title="Already dispatched"
         >
-          {task.status === "dispatched" ? "Dispatched" : "Dispatch"}
+          Dispatched
         </button> : null}
         {task.jira_key ? (
           <>
