@@ -90,8 +90,9 @@ function Timeline({ report, metric }: { report: UsageReport; metric: Metric }) {
     start: b.start_ms,
     claude: metric === "cost" ? b.claude : b.claude_tokens,
     codex: metric === "cost" ? b.codex : b.codex_tokens,
+    opencode: metric === "cost" ? b.opencode_go : b.opencode_go_tokens,
   }));
-  const max = Math.max(0, ...rows.map((r) => r.claude + r.codex));
+  const max = Math.max(0, ...rows.map((r) => r.claude + r.codex + r.opencode));
   if (!rows.length || max === 0) return <div className="pane-note">No usage in this range.</div>;
   const fmt = metric === "cost" ? usd : tokens;
   const label = (ms: number) =>
@@ -107,9 +108,10 @@ function Timeline({ report, metric }: { report: UsageReport; metric: Metric }) {
           <div
             key={r.start}
             className="usage-chart-col"
-            title={`${label(r.start)} — Claude ${fmt(r.claude)}, Codex ${fmt(r.codex)}`}
+            title={`${label(r.start)} — Claude ${fmt(r.claude)}, Codex ${fmt(r.codex)}, OpenCode Go ${fmt(r.opencode)}`}
           >
             <div className="usage-chart-stack">
+              <div className="usage-seg usage-seg-opencode" style={{ height: `${(r.opencode / max) * 100}%` }} />
               <div className="usage-seg usage-seg-codex" style={{ height: `${(r.codex / max) * 100}%` }} />
               <div className="usage-seg usage-seg-claude" style={{ height: `${(r.claude / max) * 100}%` }} />
             </div>
@@ -120,6 +122,7 @@ function Timeline({ report, metric }: { report: UsageReport; metric: Metric }) {
       <div className="usage-legend muted">
         <span><i className="usage-dot usage-seg-claude" /> Claude</span>
         <span><i className="usage-dot usage-seg-codex" /> Codex</span>
+        <span><i className="usage-dot usage-seg-opencode" /> OpenCode Go</span>
       </div>
     </div>
   );
@@ -210,7 +213,7 @@ export function UsagePage() {
           <>
             {report.scanning ? (
               <div className="pane-note">
-                <Spinner label="Reading Claude and Codex session logs…" />
+                <Spinner label="Reading session usage…" />
               </div>
             ) : null}
 

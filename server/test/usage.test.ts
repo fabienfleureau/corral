@@ -175,3 +175,27 @@ test("OpenCode Go quota reads subscription windows and handles failures", async 
     assert.equal((await opencodeGoQuota(join(dir, "missing"), fetcher)).windows.length, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("UsageScanner reads OpenCode Go messages and includes them in the timeline", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = mkdtempSync(join(tmpdir(), "corral-go-usage-"));
+  try {
+    const db = new DatabaseSync(join(dir, "opencode.db"));
+    db.exec("CREATE TABLE session_v2 (id TEXT, directory TEXT); CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)");
+    db.prepare("INSERT INTO session_v2 VALUES (?, ?)").run("s", "/wt/go");
+    const insert = db.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)");
+    const now = Date.now();
+    insert.run("m1", "s", "assistant", now, JSON.stringify({ model: { providerID: "opencode-go", id: "mimo" }, tokens: { input: 100, output: 20, cache: { read: 30, write: 4 } } }));
+    insert.run("m2", "s", "assistant", now, JSON.stringify({ model: { providerID: "other", id: "mimo" }, tokens: { input: 500 } }));
+    db.close();
+    const scanner = new UsageScanner({ claudeDir: dir + "/none", codexDir: dir + "/none", claudeQuotaDir: dir, opencodeDir: dir });
+    await scanner.refresh();
+    const report = buildReport({ records: scanner.records(), tasks: [], prices: { mimo: { input: 1, output: 2 } }, range: "24h", quota: [], scanning: false, now });
+    assert.equal(report.by_model[0].agent, "opencode-go");
+    assert.equal(report.totals.input, 100);
+    assert.equal(report.totals.cache_read, 30);
+    assert.equal(report.totals.cache_write, 4);
+    assert.equal(report.timeline.reduce((sum, b) => sum + b.opencode_go_tokens, 0), 154);
+    assert.ok(report.timeline.some(b => b.opencode_go > 0));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -77,7 +77,7 @@ type Idea = {
 - `PATCH /api/ideas/:id` `{status?, tag?}` → `{ok}`
 
 ### Usage
-- `GET /api/usage?range=24h|7d|30d|all[&refresh=1]` → Claude Code + Codex usage from local session logs
+- `GET /api/usage?range=24h|7d|30d|all[&refresh=1]` → Claude Code, Codex and OpenCode Go usage from local session data
   (`~/.claude/projects`, `~/.codex/sessions`): `{range, since_ms, generated_ms, scanning, quota: AgentQuota[],
   totals, by_agent[], by_model[], timeline[], bucket: "hour"|"day", efficiency}`. Cost is an API-list-price
   estimate; models without a price count tokens only (`unpriced_calls`). Prices override via

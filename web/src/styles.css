@@ -1706,3 +1706,7 @@ select:focus {
   width: auto;
   margin: 0;
 }
+
+.usage-seg-opencode {
+  background: #8c6ac8;
+}
