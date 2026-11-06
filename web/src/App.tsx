@@ -5,6 +5,8 @@ import type { FormEvent } from "react";
 import { ApiError, api, setCacheStateHandler, setUnauthorizedHandler, subscribeEvents } from "./api";
 import { errText } from "./util";
 import { createNotificationTracker, sendDesktopNotification } from "./notifications";
+import type { Item } from "./types";
+import { useVisibleInboxItems } from "./use-visible-inbox-items";
 import { Spinner } from "./ui";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
@@ -35,7 +37,10 @@ function tabFromHash(): Tab {
 export function App() {
   const [unauthorized, setUnauthorized] = useState(false);
   const [tab, setTab] = useState<Tab>(tabFromHash);
-  const [counts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, pulls: 0, sessions: 0, errors: 0 });
+  const [otherCounts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, pulls: 0, sessions: 0, errors: 0 });
+  const [openItems, setOpenItems] = useState<Item[]>([]);
+  const visibleOpenItems = useVisibleInboxItems(openItems);
+  const counts = { ...otherCounts, inbox: visibleOpenItems.length };
   const [eventVersion, setEventVersion] = useState(0);
   const [errors, setErrors] = useState<{ source: string; message: string; updated_ms: number }[]>([]);
   const [bootError, setBootError] = useState<string | null>(null);
@@ -92,9 +97,10 @@ export function App() {
       .then(([items, tasks, sessions, pullsRes, syncErrors]) => {
         if (!cancelled) {
           setErrors(syncErrors);
+          setOpenItems(items);
           setCounts({
             errors: syncErrors.length,
-            inbox: items.length,
+            inbox: 0,
             tasks: tasks.length,
             pulls: pullsRes.pulls.filter((p) => p.color !== "green").length,
             sessions: sessions.filter((s) => s.state === "live").length,
@@ -111,8 +117,8 @@ export function App() {
 
   useEffect(() => {
     const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (icon) icon.href = counts.inbox > 0 ? "/favicon-inbox.svg" : "/favicon.svg";
-  }, [counts.inbox]);
+    if (icon) icon.href = visibleOpenItems.length > 0 ? "/favicon-inbox.svg" : "/favicon.svg";
+  }, [visibleOpenItems.length]);
 
   // Offline mode: track connectivity (the service worker serves cached data).
   const [online, setOnline] = useState(() =>
