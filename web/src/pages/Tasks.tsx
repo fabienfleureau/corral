@@ -1,7 +1,7 @@
 // Tasks — dispatch queue grouped by repository.
 
 import { useEffect, useMemo, useState } from "react";
-import { groupTasks, harnessLabel, sortRepos, lastHarnessSettings, modelChoices, reasoningChoices } from "../task-page";
+import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, modelChoices, reasoningChoices } from "../task-page";
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
@@ -14,6 +14,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [showDoneArchived, setShowDoneArchived] = useState(false);
   const [showImport, setShowImport] = useState(() => {
     // Deep link: #/tasks?import=1 opens the Jira import panel directly.
     const q = window.location.hash.split("?")[1] ?? "";
@@ -80,7 +81,8 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
     };
   }, [eventVersion]);
 
-  const groups = useMemo(() => groupTasks(tasks), [tasks]);
+  const visibleTasks = useMemo(() => filterTasks(tasks, showDoneArchived), [tasks, showDoneArchived]);
+  const groups = useMemo(() => groupTasks(visibleTasks), [visibleTasks]);
   const sortedRepos = useMemo(() => sortRepos(repos, tasks), [repos, tasks]);
 
   const toggleGroup = (key: string) => {
@@ -126,6 +128,14 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         <div className="page-toolbar">
           <h1 className="page-title">Tasks</h1>
           <div className="toolbar-actions">
+            <label className="check-inline">
+              <input
+                type="checkbox"
+                checked={showDoneArchived}
+                onChange={(e) => setShowDoneArchived(e.target.checked)}
+              />
+              <span>Show done &amp; archived</span>
+            </label>
             <button className="btn" onClick={() => setShowImport((v) => !v)}>
               {showImport ? "Close import" : "Import from Jira"}
             </button>
@@ -142,6 +152,8 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
           </div>
         ) : tasks.length === 0 ? (
           <div className="pane-note">No tasks yet. Create one or import from Jira.</div>
+        ) : visibleTasks.length === 0 ? (
+          <div className="pane-note">All tasks are done or archived. Check “Show done &amp; archived” to view them.</div>
         ) : (
           <div className="task-groups">
             {groups.map(([key, members]) =>
