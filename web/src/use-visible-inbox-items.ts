@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Item } from "./types";
 import { visibleInboxItems } from "./inbox-selection";
 
@@ -13,5 +13,5 @@ export function useVisibleInboxItems(items: Item[]): Item[] {
     const timer = setTimeout(() => setNow(Date.now()), delay);
     return () => clearTimeout(timer);
   }, [items, now]);
-  return visibleInboxItems(items, now);
+  return useMemo(() => visibleInboxItems(items, now), [items, now]);
 }
