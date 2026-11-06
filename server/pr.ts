@@ -34,6 +34,8 @@ export interface PrInfo {
   /** Branch the PR merges into (rebase target when conflicting). */
   base_ref: string | null;
   review_decision: string | null;
+  /** Current human approvals, or null when unavailable. */
+  human_approvals?: string[] | null;
   checks: { total: number; failed: number; pending: boolean };
   /** Unresolved review threads — the "comments to manage". */
   threads: PrThread[];
@@ -72,6 +74,7 @@ export function prItemBody(pr: PrInfo): string {
     `| Files changed | ${pr.changed_files} |`,
     `| Lines | +${pr.additions} / -${pr.deletions} |`,
     `| Review comments | ${pr.threads.length} unresolved |`,
+    `| Human approvals | ${pr.human_approvals == null ? "unavailable" : pr.human_approvals.length ? pr.human_approvals.map((name) => name.replace(/[|\\]/g, "\\$&")).join(", ") : "none"} |`,
     `| Checks | ${pr.checks.total === 0 ? "none configured" : pr.checks.pending ? "running" : pr.checks.failed > 0 ? `${pr.checks.failed} failing` : "green"} |`,
     `| Mergeable | ${pr.mergeable ? pr.mergeable.toLowerCase() : "unknown"} |`,
     "",
@@ -132,6 +135,19 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
   );
   const d = JSON.parse(out) as Record<string, unknown>;
   const slug = await repoSlug(repoPath);
+  let humanApprovals: string[] | null = null;
+  if (slug) {
+    try {
+      const pages = JSON.parse(await run("gh", ["api", `repos/${slug}/pulls/${Number(d.number)}/reviews`, "--paginate", "--slurp"], repoPath)) as { state?: string; user?: { login?: string; type?: string } }[][];
+      const latest = new Map<string, string>();
+      for (const review of pages.flat()) {
+        const user = review.user;
+        if (!user?.login || user.type !== "User" || !["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(review.state ?? "")) continue;
+        latest.set(user.login, review.state!);
+      }
+      humanApprovals = [...latest].filter(([, state]) => state === "APPROVED").map(([login]) => login);
+    } catch { /* approval data unavailable */ }
+  }
   const threads: PrThread[] = [];
   let threadsKnown = false;
   if (slug) {
@@ -185,6 +201,7 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
     mergeable: d.mergeable ? String(d.mergeable).toUpperCase() : null,
     base_ref: d.baseRefName ? String(d.baseRefName) : null,
     review_decision: d.reviewDecision ? String(d.reviewDecision).toUpperCase() : null,
+    human_approvals: humanApprovals,
     checks: summarizeChecks((d.statusCheckRollup as unknown[]) ?? []),
     threads,
     threads_known: threadsKnown,
@@ -204,8 +221,9 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
   const api = (path: string) => run("glab", ["api", `projects/:id/merge_requests/${iid}${path}`], repoPath);
 
   // Each fetch is independent: a failing one degrades only its own field.
-  const [full, changes, discussions] = await Promise.all([
+  const [full, approvals, changes, discussions] = await Promise.all([
     api("").then((s) => JSON.parse(s) as { description?: string; has_conflicts?: boolean; head_pipeline?: { status?: string } | null }).catch(() => null),
+    api("/approvals").then((s) => JSON.parse(s) as { approved_by?: { user?: { username?: string; bot?: boolean } }[] }).catch(() => null),
     api("/changes").then((s) => JSON.parse(s) as { changes?: { diff?: string }[] }).catch(() => null),
     api("/discussions?per_page=100")
       .then((s) => JSON.parse(s) as {
@@ -248,6 +266,7 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
     mergeable: (full?.has_conflicts ?? mr.has_conflicts) === true ? "CONFLICTING" : (full?.has_conflicts ?? mr.has_conflicts) === false ? "MERGEABLE" : null,
     base_ref: mr.target_branch ? String(mr.target_branch) : null,
     review_decision: null,
+    human_approvals: approvals?.approved_by ? approvals.approved_by.flatMap(({ user }) => user?.username && !user.bot && !/^gitlab[ _-]*duo$/i.test(user.username) ? [user.username] : []) : null,
     checks,
     threads,
     threads_known: discussions !== null,

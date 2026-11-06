@@ -598,6 +598,54 @@ test("pr sync: concurrent syncs deliver once", async () => {
 });
 
 
+test("GitHub inbox approval reflects each human's latest review", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-gh-approvals-"));
+  const originalPath = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "git"), "#!/bin/sh\necho https://github.com/example/repo.git\n", { mode: 0o755 });
+    writeFileSync(join(dir, "gh"), `#!/bin/sh
+case "$*" in
+  "pr view"*) echo '{"url":"https://github.com/example/repo/pull/7","title":"PR","state":"OPEN","number":7}' ;;
+  *"/reviews"*) echo '[[{"state":"APPROVED","user":{"login":"alice","type":"User"}},{"state":"APPROVED","user":{"login":"bob","type":"User"}},{"state":"CHANGES_REQUESTED","user":{"login":"bob","type":"User"}},{"state":"APPROVED","user":{"login":"bot","type":"Bot"}}]]' ;;
+  *) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}' ;;
+esac
+`, { mode: 0o755 });
+    process.env.PATH = `${dir}:${originalPath}`;
+    const pr = await findPr(dir, "feature");
+    assert.ok(pr);
+    assert.deepEqual(pr.human_approvals, ["alice"]);
+    assert.match(prItemBody(pr), /Human approvals \| alice/);
+  } finally {
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("GitLab inbox approval lists humans and excludes bots", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-approvals-"));
+  const originalPath = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(dir, "glab"), `#!/bin/sh
+case "$*" in
+  "mr list"*) echo '[{"iid":7,"state":"opened","web_url":"https://gitlab.example/mr/7"}]' ;;
+  *'/approvals') echo '{"approved_by":[{"user":{"username":"alice","bot":false}},{"user":{"username":"GitLabDuo","bot":true}}]}' ;;
+  *'/changes') echo '{"changes":[]}' ;;
+  *'/discussions?per_page=100') echo '[]' ;;
+  *) echo '{"has_conflicts":false}' ;;
+esac
+`, { mode: 0o755 });
+    process.env.PATH = `${dir}:${originalPath}`;
+    const pr = await findPr(dir, "feature");
+    assert.ok(pr);
+    assert.match(prItemBody(pr), /Human approvals \| alice/);
+    assert.doesNotMatch(prItemBody(pr), /GitLabDuo/);
+  } finally {
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("GitLab MR uses detailed mergeability when list omits conflicts", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-glab-"));
   const originalPath = process.env.PATH;
