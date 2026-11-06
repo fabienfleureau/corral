@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { groupTasks, sortRepos } from '../../web/src/task-page.ts';
+import { filterTasks, groupTasks, sortRepos } from '../../web/src/task-page.ts';
 
 test('groups by repo and orders tasks by status then recency', () => {
   const tasks = [
@@ -53,4 +53,15 @@ test('model options retain saved values and use model-specific reasoning', async
   assert.deepEqual(modelChoices(models, 'legacy').map((m) => m.id), ['legacy', 'one', 'two']);
   assert.deepEqual(reasoningChoices(models, 'one', 'old'), ['old', 'low', 'high']);
   assert.deepEqual(reasoningChoices(models, 'two', ''), ['medium']);
+});
+
+test('filters done and archived tasks unless opted in', () => {
+  const tasks = [
+    { id: 'open', status: 'open' },
+    { id: 'dispatched', status: 'dispatched' },
+    { id: 'done', status: 'done' },
+    { id: 'archived', status: 'archived' },
+  ] as any;
+  assert.deepEqual(filterTasks(tasks, false).map((t: any) => t.id), ['open', 'dispatched']);
+  assert.deepEqual(filterTasks(tasks, true).map((t: any) => t.id), ['open', 'dispatched', 'done', 'archived']);
 });

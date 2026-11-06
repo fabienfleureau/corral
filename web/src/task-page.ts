@@ -2,6 +2,11 @@ import type { AgentQuota, Repo, Task } from './types.ts';
 
 const statusOrder: Record<Task['status'], number> = { open: 0, dispatched: 1, done: 2, archived: 3 };
 
+export function filterTasks(tasks: Task[], showDoneAndArchived: boolean = false): Task[] {
+  if (showDoneAndArchived) return tasks;
+  return tasks.filter((task) => task.status !== "done" && task.status !== "archived");
+}
+
 export function groupTasks(tasks: Task[]): [string, Task[]][] {
   const groups = new Map<string, Task[]>();
   for (const task of tasks) {
