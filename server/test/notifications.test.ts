@@ -83,3 +83,14 @@ test("reports asynchronous notification errors", async () => {
     globals.Notification = original;
   }
 });
+
+test("inbox indicator tracks unseen items rather than the open count", async () => {
+  const { unseenInboxItems, rememberInboxItems } = await import("../../web/src/inbox-seen.ts");
+  const first = item();
+  const second = item({ id: "two" });
+  assert.equal(unseenInboxItems([first], []), true);
+  const seen = rememberInboxItems([], [first]);
+  assert.equal(unseenInboxItems([first], seen), false);
+  assert.equal(unseenInboxItems([first, second], seen), true);
+  assert.equal(unseenInboxItems([first, second], rememberInboxItems(seen, [first, second])), false);
+});

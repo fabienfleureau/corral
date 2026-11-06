@@ -21,7 +21,7 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "archived", label: "Archived" },
 ];
 
-export function InboxPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
+export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: number; refresh: () => void; onSeen: (items: Item[]) => void }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
   const [allItems, setAllItems] = useState<Item[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -75,7 +75,16 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
   }, []);
 
   const visibleItems = useVisibleInboxItems(allItems);
-  const items = visibleItems.filter((i) => i.status === statusFilter);
+  const items = useMemo(() => visibleItems.filter((i) => i.status === statusFilter), [visibleItems, statusFilter]);
+  useEffect(() => {
+    const acknowledge = () => {
+      if (!loading && !error && statusFilter === "open" && document.visibilityState === "visible") onSeen(items);
+    };
+    acknowledge();
+    document.addEventListener("visibilitychange", acknowledge);
+    return () => document.removeEventListener("visibilitychange", acknowledge);
+  }, [items, loading, error, statusFilter, onSeen]);
+
   const counts = useMemo(() => {
     const c: Record<StatusFilter, number> = { open: 0, resolved: 0, archived: 0 };
     for (const i of visibleItems) c[i.status]++;

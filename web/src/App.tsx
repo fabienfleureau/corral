@@ -8,6 +8,7 @@ import { createNotificationTracker, sendDesktopNotification } from "./notificati
 import type { Item } from "./types";
 import { useVisibleInboxItems } from "./use-visible-inbox-items";
 import { Spinner } from "./ui";
+import { rememberInboxItems, unseenInboxItems } from "./inbox-seen";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
 import { SessionsPage } from "./pages/Sessions";
@@ -41,6 +42,19 @@ export function App() {
   const [openItems, setOpenItems] = useState<Item[]>([]);
   const visibleOpenItems = useVisibleInboxItems(openItems);
   const counts = { ...otherCounts, inbox: visibleOpenItems.length };
+  const [seenItems, setSeenItems] = useState<string[]>(() => {
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem("corral.seenInboxItems") || "[]");
+      return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : [];
+    } catch { return []; }
+  });
+  const markInboxSeen = useCallback((items: Item[]) => {
+    setSeenItems((previous) => {
+      const seen = rememberInboxItems(previous, items);
+      try { localStorage.setItem("corral.seenInboxItems", JSON.stringify(seen)); } catch { /* Storage may be unavailable. */ }
+      return seen;
+    });
+  }, []);
   const [eventVersion, setEventVersion] = useState(0);
   const [errors, setErrors] = useState<{ source: string; message: string; updated_ms: number }[]>([]);
   const [bootError, setBootError] = useState<string | null>(null);
@@ -117,8 +131,8 @@ export function App() {
 
   useEffect(() => {
     const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (icon) icon.href = visibleOpenItems.length > 0 ? "/favicon-inbox.svg" : "/favicon.svg";
-  }, [visibleOpenItems.length]);
+    if (icon) icon.href = unseenInboxItems(visibleOpenItems, seenItems) ? "/favicon-inbox.svg" : "/favicon.svg";
+  }, [visibleOpenItems, seenItems]);
 
   // Offline mode: track connectivity (the service worker serves cached data).
   const [online, setOnline] = useState(() =>
@@ -182,7 +196,7 @@ export function App() {
             will fail until the connection is back.
           </div>
         ) : null}
-        {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} /> : null}
+        {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} onSeen={markInboxSeen} /> : null}
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
