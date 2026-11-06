@@ -8,6 +8,7 @@ import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../
 import { ExternalLinkIcon, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
 import { selectedInboxItem } from "../inbox-selection";
+import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
 import { QuestionReply } from "../QuestionReply";
@@ -73,16 +74,19 @@ export function InboxPage({ eventVersion, refresh }: { eventVersion: number; ref
     return () => document.removeEventListener("visibilitychange", sync);
   }, []);
 
-  const items = useMemo(() => allItems.filter((i) => i.status === statusFilter), [allItems, statusFilter]);
+  const visibleItems = useVisibleInboxItems(allItems);
+  const items = visibleItems.filter((i) => i.status === statusFilter);
   const counts = useMemo(() => {
     const c: Record<StatusFilter, number> = { open: 0, resolved: 0, archived: 0 };
-    for (const i of allItems) c[i.status]++;
+    for (const i of visibleItems) c[i.status]++;
     return c;
-  }, [allItems]);
+  }, [visibleItems]);
 
   // Auto-select the first row when nothing is selected.
   useEffect(() => {
-    if (selected === null && items.length > 0) setSelected(items[0]);
+    const current = selectedInboxItem(selected, items, statusFilter);
+    if (current !== selected) setSelected(current ?? items[0] ?? null);
+    else if (selected === null && items.length > 0) setSelected(items[0]);
   }, [items, selected]);
 
   const tasksById = useMemo(() => {
