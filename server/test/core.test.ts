@@ -127,13 +127,20 @@ test("dispatch: worktree starts from the freshly fetched remote default branch",
     db.insertTask(explicit);
     await dispatchTask(db, cfg, backend, explicit, "codex");
     assert.equal(git(clone, "rev-parse", started[1].git!.base!), expected);
+    git(clone, "remote", "add", "duplicate", remote);
+    git(clone, "config", "remote.duplicate.fetch", "+refs/heads/*:refs/remotes/origin/*");
+    const ambiguous = makeTask({ id: "task-4", repo_path: clone });
+    db.insertTask(ambiguous);
+    await dispatchTask(db, cfg, backend, ambiguous, "codex");
+    git(clone, "worktree", "add", "-b", "test-ambiguous", join(dir, "worktree"), started[2].git!.base!);
+    assert.equal(git(join(dir, "worktree"), "rev-parse", "HEAD"), expected);
     git(clone, "remote", "set-url", "origin", join(dir, "missing.git"));
     const broken = makeTask({ id: "task-3", repo_path: clone });
     db.insertTask(broken);
     await assert.rejects(dispatchTask(db, cfg, backend, broken, "codex"), /dispatch failed/);
     assert.equal(db.getTask(broken.id)?.status, "open");
     await dispatchTask(db, cfg, backend, broken, "codex", { useWorktree: false });
-    assert.equal(started[2].git, null);
+    assert.equal(started[3].git, null);
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

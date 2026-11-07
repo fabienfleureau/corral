@@ -77,21 +77,24 @@ async function worktreeBase(repo: string, base: string | null): Promise<string |
     encoding: "utf8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   })).stdout.trim();
   const remotes = (await git("remote")).split("\n");
-  if (!remotes.includes("origin")) return base;
+  // A commit avoids Git's automatic upstream inference, which can fail when
+  // multiple remotes map their fetch refspecs to the same tracking ref.
+  const commit = (ref: string) => git("rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`);
+  if (!remotes.includes("origin")) return base ? commit(base) : null;
   await git("fetch", "origin");
   if (base) {
-    if (base.startsWith("origin/")) return base;
+    if (base.startsWith("origin/")) return commit(base);
     try {
       await git("show-ref", "--verify", "--quiet", `refs/remotes/origin/${base}`);
-      return `origin/${base}`;
+      return await commit(`origin/${base}`);
     } catch {
-      return base;
+      return commit(base);
     }
   }
   const remoteHead = await git("ls-remote", "--symref", "origin", "HEAD");
   const branch = remoteHead.match(/^ref: refs\/heads\/(.+)\s+HEAD$/m)?.[1];
   if (!branch) throw new Error("origin has no default branch; set a base branch for this task");
-  return `origin/${branch}`;
+  return commit(`origin/${branch}`);
 }
 
 export interface DispatchResult {
