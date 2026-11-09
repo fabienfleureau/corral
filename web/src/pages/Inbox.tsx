@@ -258,7 +258,7 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
                       <span>{item.structured ? "structured" : "auto-captured"}</span>
                       {item.kind === "pr" && item.status === "open" ? (
                         item.ready === 1 ? (
-                          <span className="badge badge-ready">ready for review</span>
+                          <span className="badge badge-ready">{item.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
                         ) : (
                           <span className="badge badge-wait">needs work</span>
                         )
@@ -323,7 +323,7 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
                 </span>
                 {selected.kind === "pr" && selected.status === "open" ? (
                   selected.ready === 1 ? (
-                    <span className="badge badge-ready">ready for review</span>
+                    <span className="badge badge-ready">{selected.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
                   ) : (
                     <span className="badge badge-wait">needs work — {selected.summary || "see body"}</span>
                   )
