@@ -17,3 +17,14 @@ test("snoozed open items disappear until their deadline", async () => {
   assert.deepEqual(visibleInboxItems([snoozed, open], 2000), [snoozed, open]);
   assert.equal(selectedInboxItem(snoozed, visibleInboxItems([snoozed, open], 1000), "open"), null);
 });
+
+test("snoozed view contains only open items postponed beyond the current time", async () => {
+  const { visibleInboxItems, selectedInboxItem } = await import("../../web/src/inbox-selection.ts");
+  const snoozed = { id: "snoozed", status: "open", snooze_until_ms: 2000 } as Item;
+  const expired = { id: "expired", status: "open", snooze_until_ms: 1000 } as Item;
+  const resolved = { id: "resolved", status: "resolved", snooze_until_ms: 2000 } as Item;
+  const items = [snoozed, expired, resolved];
+  assert.deepEqual(visibleInboxItems(items, 1000, "snoozed"), [snoozed]);
+  assert.equal(selectedInboxItem(snoozed, [snoozed], "snoozed"), snoozed);
+  assert.deepEqual(visibleInboxItems(items, 2000, "snoozed"), []);
+});

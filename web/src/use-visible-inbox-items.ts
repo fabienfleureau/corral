@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Item } from "./types";
 import { visibleInboxItems } from "./inbox-selection";
 
-export function useVisibleInboxItems(items: Item[]): Item[] {
+export function useVisibleInboxItems(items: Item[], view: "visible" | "snoozed" = "visible"): Item[] {
   const [now, setNow] = useState(Date.now);
   useEffect(() => { setNow(Date.now()); }, [items]);
   useEffect(() => {
@@ -13,5 +13,5 @@ export function useVisibleInboxItems(items: Item[]): Item[] {
     const timer = setTimeout(() => setNow(Date.now()), delay);
     return () => clearTimeout(timer);
   }, [items, now]);
-  return useMemo(() => visibleInboxItems(items, now), [items, now]);
+  return useMemo(() => visibleInboxItems(items, now, view), [items, now, view]);
 }
