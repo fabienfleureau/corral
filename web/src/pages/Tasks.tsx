@@ -8,6 +8,8 @@ import type { DispatchResult, NewTaskInput } from "../api";
 import type { AgentQuota, Favorite, JiraSearchResult, Repo, Task } from "../types";
 import { errText, formatTs, prLabel, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
+import { batchImportItems } from "../jira-import";
+import type { ImportSettings } from "../jira-import";
 
 export function TasksPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -601,8 +603,6 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
 
 // ---- jira import ----
 
-type ImportSettings = { repo_path: string; base_branch: string; target: string; agent: string; model: string; reasoning: string };
-
 function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported, onClose }: { repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; onImported: () => void; onClose: () => void }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<JiraSearchResult[] | null>(null);
@@ -613,7 +613,8 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported,
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
-  const [settings, setSettings] = useState<Record<string, ImportSettings>>({});
+  const [values, setSettings] = useState<ImportSettings>({ repo_path: "", base_branch: "", target: "", agent: "", model: "", reasoning: "" });
+  const update = (patch: Partial<ImportSettings>) => setSettings((prev) => ({ ...prev, ...patch }));
 
   const selected = useMemo(
     () => (results ?? []).filter((r) => selectedKeys.has(r.jira_key)),
@@ -645,7 +646,6 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported,
       setResults(await api.jiraSearch(q));
       setSelectedKeys(new Set());
       setExpandedKeys(new Set());
-      setSettings({});
       setReviewing(false);
     } catch (err) {
       setError(errText(err));
@@ -669,7 +669,7 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported,
     setError(null);
     setMsg(null);
     try {
-      const res = await api.jiraImport(selected.map((r) => ({ key: r.jira_key, fingerprint: r.fingerprint, ...settings[r.jira_key] })));
+      const res = await api.jiraImport(batchImportItems(selected, values));
       const createdIds = new Map(res.created.map((t) => [t.jira_key, t.id]));
       const fresh = new Map(res.changed.map((r) => [r.jira_key, r]));
       const skipped = new Set(res.skipped);
@@ -743,22 +743,11 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported,
           <div className="muted import-summary">
             {selected.length} task{selected.length === 1 ? "" : "s"} will be created:
           </div>
-          <div className="import-list">
-            {selected.map((r) => {
-              const values = settings[r.jira_key] ?? { repo_path: r.repo_path ?? "", base_branch: "", target: "", agent: "", model: "", reasoning: "" };
-              const update = (patch: Partial<ImportSettings>) => setSettings((prev) => ({ ...prev, [r.jira_key]: { ...values, ...patch } }));
-              return (
-              <div className="import-review" key={r.jira_key}>
-                <div className="import-row-head">
-                  <span className="import-title">{r.title}</span>
-                  {r.jira_status ? <span className="badge">{r.jira_status}</span> : null}
-                  {repoBadge(r)}
-                </div>
-                <pre className="import-prompt">{r.prompt || "No description."}</pre>
+          <div className="import-review">
+                <div className="muted">Settings apply to all selected tasks.</div>
                 <div className="field-row">
                   <label className="field"><span>Repo</span><select value={values.repo_path} onChange={(e) => update({ repo_path: e.target.value })}>
-                    <option value="">No repository</option>
-                    {values.repo_path && !repos.some((repo) => repo.path === values.repo_path) ? <option value={values.repo_path}>{values.repo_path}</option> : null}
+                    <option value="">Use Jira prefix mappings</option>
                     {repos.map((repo) => <option key={repo.id} value={repo.path}>{repo.name} — {repo.path}</option>)}
                   </select></label>
                   <label className="field"><span>Base branch (optional)</span><input value={values.base_branch} onChange={(e) => update({ base_branch: e.target.value })} placeholder="main" /></label>
@@ -769,8 +758,18 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported,
                   <label className="field"><span>Agent</span><select value={values.agent} onChange={(e) => update({ agent: e.target.value })} disabled={!values.target}><option value="">— none (bare harness) —</option>{values.agent && !(agentOptions[values.target] ?? []).some((a) => a.id === values.agent) ? <option value={values.agent}>{values.agent} (unavailable)</option> : null}{(agentOptions[values.target] ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
                 </div>
                 {values.target ? <div className="field-row"><ModelSettings models={catalog[values.target] ?? []} model={values.model} reasoning={values.reasoning} setModel={(model) => update({ model })} setReasoning={(reasoning) => update({ reasoning })} fieldClass="field" /></div> : null}
+          </div>
+          <div className="import-list">
+            {selected.map((r) => (
+              <div className="import-review" key={r.jira_key}>
+                <div className="import-row-head">
+                  <span className="import-title">{r.title}</span>
+                  {r.jira_status ? <span className="badge">{r.jira_status}</span> : null}
+                  {!values.repo_path ? repoBadge(r) : null}
+                </div>
+                <pre className="import-prompt">{r.prompt || "No description."}</pre>
               </div>
-            ); })}
+            ))}
           </div>
           <div className="form-foot">
             <button className="btn btn-primary" onClick={() => void importSelected()} disabled={busy !== null}>
