@@ -210,3 +210,14 @@ test("UsageScanner reads OpenCode Go messages and includes them in the timeline"
     assert.ok(report.timeline.some(b => b.opencode_go > 0));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("PR additions deduplicate links and report unavailable counts", async () => {
+  const { collectPrAdditions } = await import("../usage-pr.ts");
+  const result = await collectPrAdditions([
+    { pr_url: "https://github.com/a/b/pull/1" },
+    { pr_url: "https://github.com/a/b/pull/1" },
+    { pr_url: "https://example.com/a/-/merge_requests/2" },
+    { pr_url: null },
+  ], async (url) => url.includes("github") ? 42 : null);
+  assert.deepEqual(result, { additions: 42, available: 1, total: 2 });
+});

@@ -66,6 +66,7 @@ type Item = {
 
 ### Usage
 - `GET /api/usage?range=24h|7d|30d|all[&refresh=1]` → Claude Code, Codex and OpenCode Go usage from local session data
+  - `pr_additions` is an asynchronously refreshed all-time snapshot of unique task-linked PR/MR diffs, with available and total counts; it is independent of `range`.
   (`~/.claude/projects`, `~/.codex/sessions`): `{range, since_ms, generated_ms, scanning, quota: AgentQuota[],
   totals, by_agent[], by_model[], timeline[], bucket: "hour"|"day", efficiency}`. Cost is an API-list-price
   estimate; models without a price count tokens only (`unpriced_calls`). Shared prices are in

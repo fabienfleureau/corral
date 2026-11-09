@@ -154,6 +154,7 @@ export type AgentQuota = {
 };
 
 export type UsageReport = {
+  pr_additions: { data: { additions: number; available: number; total: number } | null; scanning: boolean };
   range: UsageRange;
   since_ms: number | null;
   generated_ms: number;

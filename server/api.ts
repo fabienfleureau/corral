@@ -20,6 +20,7 @@ import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Item, Task } from "./types.ts";
 import { taskLabel } from "./types.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, opencodeGoQuota, type UsageRange } from "./usage.ts";
+import { PrAdditionsCache } from "./usage-pr.ts";
 
 export interface AppState {
   db: Db;
@@ -30,6 +31,7 @@ export interface AppState {
   hub: Hub & { clients: Set<ServerResponse> };
   /** Agent usage scanner (Claude/Codex logs); created on first use when absent. */
   usage?: UsageScanner;
+  prAdditions?: PrAdditionsCache;
 }
 
 /** A Jira issue as the import would create it, plus the fingerprint of those fields. */
@@ -602,20 +604,22 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const raw = url.searchParams.get("range") ?? "7d";
     if (!USAGE_RANGES.includes(raw as UsageRange)) return json(res, 400, { error: `range must be one of ${USAGE_RANGES.join(", ")}` });
     const scanner = (state.usage ??= new UsageScanner(defaultSources()));
+    const tasks = state.db.listTasks();
+    const prAdditions = (state.prAdditions ??= new PrAdditionsCache()).get(tasks, url.searchParams.get("refresh") === "1");
     // First scan of ~1GB of logs takes a while: answer "scanning" instead of hanging.
     const pass = scanner.refresh(url.searchParams.get("refresh") === "1");
     if (scanner.ready) await pass;
     json(
       res,
       200,
-      buildReport({
+      { ...buildReport({
         records: scanner.records(),
-        tasks: state.db.listTasks(),
+        tasks,
         prices: { ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
         range: raw as UsageRange,
         quota: [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), await opencodeGoQuota()],
         scanning: !scanner.ready,
-      }),
+      }), pr_additions: prAdditions },
     );
   });
 

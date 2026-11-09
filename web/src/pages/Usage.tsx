@@ -159,7 +159,7 @@ export function UsagePage() {
         setReport(r);
         setError(null);
         // First scan still running on the server: poll until it lands.
-        if (r.scanning) timer = setTimeout(() => setTick((t) => t + 1), 2000);
+        if (r.scanning || r.pr_additions.scanning) timer = setTimeout(() => setTick((t) => t + 1), 2000);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(errText(err));
@@ -230,6 +230,13 @@ export function UsagePage() {
                 <div className="muted">Estimated cost</div>
                 <div className="usage-big">{usd(report.totals.cost_usd)}</div>
                 <div className="muted usage-small">API list prices; subscriptions are not billed per token</div>
+              </div>
+              <div className="usage-card">
+                <div className="muted">Lines added in PRs / MRs</div>
+                <div className="usage-big">{report.pr_additions.data ? report.pr_additions.data.additions.toLocaleString() : "—"}</div>
+                <div className="muted usage-small">
+                  {report.pr_additions.scanning ? "Updating · " : ""}All time · current diffs · {report.pr_additions.data ? `${report.pr_additions.data.available} of ${report.pr_additions.data.total} linked PRs / MRs available` : "loading"}
+                </div>
               </div>
               <div className="usage-card">
                 <div className="muted">Tokens</div>
