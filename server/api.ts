@@ -20,6 +20,7 @@ import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Item, Task } from "./types.ts";
 import { taskLabel } from "./types.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, opencodeGoQuota, type UsageRange } from "./usage.ts";
+import { getBenchmarks, syncBenchmarks } from "./benchmarks.ts";
 import { PrAdditionsCache } from "./usage-pr.ts";
 
 export interface AppState {
@@ -602,6 +603,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   on("GET", "/api/terminals", (_req, res) => json(res, 200, state.db.listTerminals()));
+
+  on("GET", "/api/benchmarks", (_req, res) => json(res, 200, getBenchmarks(state.db)));
+  on("POST", "/api/benchmarks/sync", async (_req, res) => {
+    await syncBenchmarks(state.db);
+    json(res, 200, getBenchmarks(state.db));
+  });
 
   // ---- usage (Claude Code + Codex local logs) ----
   on("GET", "/api/usage", async (_req, res, { url }) => {
