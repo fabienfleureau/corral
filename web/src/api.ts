@@ -1,3 +1,4 @@
+import type { BenchmarkSnapshot } from "./types";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
@@ -203,6 +204,8 @@ export const api = {
   getUsage: (range: UsageRange, refresh = false): Promise<UsageReport> =>
     get<UsageReport>(`/api/usage?range=${range}${refresh ? "&refresh=1" : ""}`),
 
+  getBenchmarks: (): Promise<BenchmarkSnapshot> => get<BenchmarkSnapshot>("/api/benchmarks"),
+  syncBenchmarks: (): Promise<BenchmarkSnapshot> => post<BenchmarkSnapshot>("/api/benchmarks/sync"),
   getConfig: (): Promise<Config> => get<Config>("/api/config"),
   putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[] }): Promise<{ ok: boolean }> =>
     put<{ ok: boolean }>("/api/config", input),

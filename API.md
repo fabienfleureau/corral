@@ -86,3 +86,8 @@ type Item = {
 - `GET /api/health` → `{ok: true}` (no auth)
 
 - `GET /api/errors` → current background synchronization errors (`source`, `message`, `updated_ms`); cleared when the operation succeeds.
+
+### Benchmarks
+
+- `GET /api/benchmarks` returns the last persisted snapshot as `{ fetched_ms, results }`, or an empty snapshot before the first sync.
+- `POST /api/benchmarks/sync` fetches published SWE-bench and Terminal-Bench 4.0 results and replaces the snapshot only after both sources succeed. Results identify their source and report the publisher's agent, model, reasoning level (when disclosed), score and date.
