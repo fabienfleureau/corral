@@ -315,19 +315,22 @@ function TaskRow({
             {timeAgo(task.updated_ms)}
           </span>
         </div>
-        {!task.repo_path && task.status !== "archived" ? (
+        {task.status === "open" || (!task.repo_path && task.status !== "archived") ? (
           <div className="task-sub">
             <label className="field-inline">
               <span>Repo</span>
               <select
-                value=""
+                value={task.repo_path || ""}
                 onChange={(e) => {
                   const path = e.target.value;
-                  if (path) void run("repo", () => api.patchTask(task.id, { repo_path: path }), "Repo assigned.");
+                  if (path && path !== task.repo_path) void run("repo", () => api.patchTask(task.id, { repo_path: path }), "Repo updated.");
                 }}
                 disabled={busy !== null}
               >
-                <option value="">{repos.length ? "assign a repo…" : "no repos registered (Settings)"}</option>
+                <option value="" disabled>{repos.length ? "assign a repo…" : "no repos registered (Settings)"}</option>
+                {task.repo_path && !repos.some((r) => r.path === task.repo_path) ? (
+                  <option value={task.repo_path}>{task.repo_path} (not registered)</option>
+                ) : null}
                 {repos.map((r) => (
                   <option key={r.id} value={r.path}>
                     {r.name} — {r.path}
