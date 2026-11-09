@@ -101,6 +101,8 @@ export interface WorkerBackend {
   start(start: WorkerStart): Promise<WorkerSession>;
   list(): Promise<WorkerSession[]>;
   get(address: string): Promise<WorkerSession | null>;
+  /** Original prompt if the first turn failed before the worker started. */
+  initialFailurePrompt?(address: string): Promise<string | null>;
   /** Recent output (screen + history) as plain text. */
   read(address: string, lines: number): Promise<string>;
   /** Deliver input to a live session (reply to a question). */

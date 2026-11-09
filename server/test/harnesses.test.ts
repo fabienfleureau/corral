@@ -105,3 +105,18 @@ test("includes paginated user agents alongside built-in agents", async () => {
   };
   assert.deepEqual((await backend.harnesses())[0].agents, [{ id: "builtin", name: "codex-ui" }, { id: "polie", name: "polie" }]);
 });
+
+test("only identifies a terminal startup error before any agent work", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  const prompt = { type: "message", role: "user", response_id: "r", content: [{ type: "input_text", text: "original request" }] };
+  const failure = { type: "error", code: "native_terminal_start_failed", response_id: "r" };
+  let data: unknown[] = [prompt, failure];
+  (backend as unknown as { request: () => Promise<unknown> }).request = async () => ({ data });
+  assert.equal(await backend.initialFailurePrompt("s"), "original request");
+  data = [prompt, { ...failure, code: "other" }];
+  assert.equal(await backend.initialFailurePrompt("s"), null);
+  data = [prompt, { type: "function_call" }, failure];
+  assert.equal(await backend.initialFailurePrompt("s"), null);
+  data = [prompt, failure, prompt];
+  assert.equal(await backend.initialFailurePrompt("s"), null);
+});

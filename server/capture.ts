@@ -26,6 +26,7 @@ export class CaptureEngine {
   private backend: WorkerBackend;
   private hub: Hub;
   private cfg: Config | null;
+  private retrying = new Set<string>();
 
   constructor(db: Db, backend: WorkerBackend, hub: Hub, cfg: Config | null = null) {
     this.db = db;
@@ -78,10 +79,31 @@ export class CaptureEngine {
       this.hub.broadcast("session.updated", { address: e.address, task_id: taskId, status: e.status ?? null });
     }
 
+    if (["idle", "done", "error"].includes(e.status ?? "")) await this.retryInitialFailure(e.address, taskId);
+
     if (blocked) {
       await this.ensureQuestionItem(e, taskId);
     } else if (wasBlocked) {
       this.resolveOpenQuestion(e.address, "auto");
+    }
+  }
+
+  private async retryInitialFailure(address: string, taskId: string | null): Promise<void> {
+    const task = taskId ? this.db.getTask(taskId) : null;
+    if (!task || task.status !== "dispatched" || task.terminal_address !== address ||
+        Date.now() - task.updated_ms > 10 * 60_000 ||
+        !this.backend.initialFailurePrompt || this.retrying.has(address) ||
+        this.db.raw.prepare("SELECT 1 FROM metrics_events WHERE name = ? AND ref = ? LIMIT 1").get("task.initial_retry", address)) return;
+    this.retrying.add(address);
+    try {
+      const prompt = await this.backend.initialFailurePrompt(address);
+      const current = this.db.getTask(task.id);
+      if (!prompt || current?.status !== "dispatched" || current.terminal_address !== address) return;
+      // Claim before sending: an uncertain delivery must never trigger duplicates.
+      this.db.recordMetric("task.initial_retry", address, { task_id: task.id });
+      await this.backend.send(address, prompt);
+    } finally {
+      this.retrying.delete(address);
     }
   }
 

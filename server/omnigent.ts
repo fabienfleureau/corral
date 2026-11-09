@@ -446,6 +446,18 @@ export class OmnigentBackend implements WorkerBackend {
     }
   }
 
+  async initialFailurePrompt(address: string): Promise<string | null> {
+    const res = await this.request<Record<string, unknown>>("GET", `/v1/sessions/${address}/items?limit=200&order=asc`);
+    const items = (res.data ?? res.items ?? []) as Record<string, unknown>[];
+    if (items.length !== 2 || items[0].type !== "message" || items[0].role !== "user" ||
+        items[1].type !== "error" || items[1].code !== "native_terminal_start_failed" ||
+        (!str(items[0].response_id) || items[0].response_id !== items[1].response_id)) return null;
+    const content = items[0].content;
+    if (!Array.isArray(content)) return null;
+    const text = content.map((part) => part?.type === "input_text" ? str(part.text) : null).filter(Boolean).join("\n");
+    return text || null;
+  }
+
   async read(address: string, lines: number): Promise<string> {
     // Conversation history doubles as "recent output" — cleaner than raw
     // terminal capture and it survives across sessions.
@@ -604,7 +616,7 @@ export class OmnigentBackend implements WorkerBackend {
         this.last.set(s.address, sig);
         if (s.task_id) this.taskIds.set(s.address, s.task_id);
         this.emit({ type: "created", address: s.address, task_id: s.task_id, parent: s.parent, status: s.status, elicitations });
-      } else if (prev !== sig) {
+      } else if (prev !== sig || (s.task_id && ["idle", "done", "error"].includes(s.status ?? ""))) {
         this.last.set(s.address, sig);
         this.emit({
           type: "status",
