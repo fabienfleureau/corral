@@ -320,7 +320,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         useWorktree: b.use_worktree,
         model: b.model === undefined ? task.model : b.model,
         reasoning: b.reasoning === undefined ? task.reasoning : b.reasoning,
-        agent: b.agent ?? null,
+        agent: b.agent === undefined ? task.agent ?? null : b.agent,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
       json(res, 200, result);
@@ -513,12 +513,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   on("POST", "/api/jira/import", async (req, res, { body }) => {
     // items carry the fingerprint the user reviewed; bare keys skip that check.
-    const b = body as { items?: { key: string; fingerprint?: string }[]; keys?: string[] };
-    const items = b?.items ?? (b?.keys ?? []).map((key) => ({ key, fingerprint: undefined }));
+    const b = body as { items?: { key: string; fingerprint?: string; repo_path?: string; base_branch?: string | null; target?: string; agent?: string | null; model?: string | null; reasoning?: string | null }[]; keys?: string[] };
+    const items: NonNullable<typeof b.items> = b?.items ?? (b?.keys ?? []).map((key) => ({ key }));
     if (!items.length) return json(res, 400, { error: "items or keys required" });
     const out: { created: Task[]; changed: ReturnType<typeof jiraImportCandidate>[]; skipped: string[]; failed: string[] } =
       { created: [], changed: [], skipped: [], failed: [] };
-    for (const { key, fingerprint } of items) {
+    for (const item of items) {
+      const { key, fingerprint } = item;
       if (state.db.getTaskByJiraKey(key)) {
         out.skipped.push(key); // dedupe by issue key
         continue;
@@ -534,10 +535,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
           id: randomUUID(),
           title: f.title,
           prompt: f.prompt,
-          repo_path: f.repo_path ?? "",
-          target: "",
+          repo_path: item.repo_path ?? f.repo_path ?? "",
+          target: item.target ?? "",
           target_state: "suggested",
-          base_branch: null,
+          agent: item.agent?.trim() || null,
+          model: item.model?.trim() || null,
+          reasoning: item.reasoning?.trim() || null,
+          base_branch: item.base_branch?.trim() || null,
           branch: null,
           worktree_path: null,
           assignee: null,

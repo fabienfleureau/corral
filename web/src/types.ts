@@ -7,6 +7,7 @@ export type Task = {
   repo_path: string;
   target: string; // "", "claude", "codex", "opencode"
   target_state: "suggested" | "confirmed";
+  agent: string | null;
   model: string | null;
   reasoning: string | null;
   session_model: string | null;
