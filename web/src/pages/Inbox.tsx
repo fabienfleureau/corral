@@ -13,10 +13,11 @@ import { inboxTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
 import { QuestionReply } from "../QuestionReply";
 
-type StatusFilter = "open" | "resolved" | "archived";
+type StatusFilter = "open" | "snoozed" | "resolved" | "archived";
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "open", label: "Open" },
+  { key: "snoozed", label: "Snoozed" },
   { key: "resolved", label: "Resolved" },
   { key: "archived", label: "Archived" },
 ];
@@ -75,7 +76,8 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
   }, []);
 
   const visibleItems = useVisibleInboxItems(allItems);
-  const items = useMemo(() => visibleItems.filter((i) => i.status === statusFilter), [visibleItems, statusFilter]);
+  const snoozedItems = useVisibleInboxItems(allItems, "snoozed");
+  const items = useMemo(() => statusFilter === "snoozed" ? snoozedItems : visibleItems.filter((i) => i.status === statusFilter), [visibleItems, snoozedItems, statusFilter]);
   useEffect(() => {
     const acknowledge = () => {
       if (!loading && !error && statusFilter === "open" && document.visibilityState === "visible") onSeen(items);
@@ -86,17 +88,17 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
   }, [items, loading, error, statusFilter, onSeen]);
 
   const counts = useMemo(() => {
-    const c: Record<StatusFilter, number> = { open: 0, resolved: 0, archived: 0 };
+    const c: Record<StatusFilter, number> = { open: 0, snoozed: snoozedItems.length, resolved: 0, archived: 0 };
     for (const i of visibleItems) c[i.status]++;
     return c;
-  }, [visibleItems]);
+  }, [visibleItems, snoozedItems]);
 
   // Auto-select the first row when nothing is selected.
   useEffect(() => {
     const current = selectedInboxItem(selected, items, statusFilter);
     if (current !== selected) setSelected(current ?? items[0] ?? null);
     else if (selected === null && items.length > 0) setSelected(items[0]);
-  }, [items, selected]);
+  }, [items, selected, statusFilter]);
 
   const tasksById = useMemo(() => {
     const map: Record<string, Task> = {};
