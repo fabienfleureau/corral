@@ -7,7 +7,7 @@ import type { Item, SessionInfo, Task } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
 import { ExternalLinkIcon, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
-import { inProgressInboxItems, selectedInboxItem } from "../inbox-selection";
+import { inProgressInboxItems, inProgressInboxTasks, selectedInboxItem } from "../inbox-selection";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
@@ -29,6 +29,7 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Item | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const [replyText, setReplyText] = useState("");
   const [replyBusy, setReplyBusy] = useState(false);
@@ -77,6 +78,7 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
   const visibleItems = useVisibleInboxItems(allItems);
   const snoozedItems = useVisibleInboxItems(allItems, "snoozed");
   const inProgressItems = useMemo(() => inProgressInboxItems(allItems, tasks), [allItems, tasks]);
+  const inProgressTasks = useMemo(() => inProgressInboxTasks(tasks), [tasks]);
   const openItems = useMemo(() => visibleItems.filter((i) => i.status === "open"), [visibleItems]);
   const items = statusFilter === "snoozed" ? snoozedItems : statusFilter === "in-progress" ? inProgressItems : openItems;
   useEffect(() => {
@@ -88,14 +90,16 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
     return () => document.removeEventListener("visibilitychange", acknowledge);
   }, [items, loading, error, statusFilter, onSeen]);
 
-  const counts: Record<StatusFilter, number> = { open: openItems.length, snoozed: snoozedItems.length, "in-progress": inProgressItems.length };
+  const counts: Record<StatusFilter, number> = { open: openItems.length, snoozed: snoozedItems.length, "in-progress": inProgressItems.length + inProgressTasks.length };
 
   // Auto-select the first row when nothing is selected.
   useEffect(() => {
+    if (selectedTaskId && statusFilter === "in-progress" && inProgressTasks.some((task) => task.id === selectedTaskId)) return;
+    if (selectedTaskId) setSelectedTaskId(null);
     const current = selectedInboxItem(selected, items, statusFilter);
     if (current !== selected) setSelected(current ?? items[0] ?? null);
     else if (selected === null && items.length > 0) setSelected(items[0]);
-  }, [items, selected, statusFilter]);
+  }, [items, selected, selectedTaskId, inProgressTasks, statusFilter]);
 
   const tasksById = useMemo(() => {
     const map: Record<string, Task> = {};
@@ -179,9 +183,11 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
     if (next === statusFilter) return;
     setStatusFilter(next);
     setSelected(null);
+    setSelectedTaskId(null);
   };
 
   const linkedTask = selected?.task_id ? tasksById[selected.task_id] ?? null : null;
+  const selectedTask = selectedTaskId ? inProgressTasks.find((task) => task.id === selectedTaskId) ?? null : null;
   const prUrl = selected ? itemPrUrl(selected.body, linkedTask?.pr_url) : null;
   const now = Date.now();
 
@@ -204,11 +210,23 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
         </div>
         {error ? <div className="inline-error">{error}</div> : null}
         <div className="item-list">
-          {loading && items.length === 0 ? (
+          {statusFilter === "in-progress" && inProgressTasks.map((task) => (
+            <div key={task.id} role="button" tabIndex={0}
+              className={`item-row ${selectedTaskId === task.id ? "selected" : ""}`}
+              onClick={() => { setSelected(null); setSelectedTaskId(task.id); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(null); setSelectedTaskId(task.id); } }}>
+              <span className="item-row-main">
+                <span className="item-row-title">{task.title || task.prompt.trim().split("\n")[0] || "Untitled task"}</span>
+                <span className="item-row-sub">Task · in progress</span>
+              </span>
+              <span className="item-row-side"><span className="time" title={formatTs(task.created_ms)}>{timeAgo(task.created_ms)}</span></span>
+            </div>
+          ))}
+          {loading && items.length === 0 && (statusFilter !== "in-progress" || inProgressTasks.length === 0) ? (
             <div className="pane-note">
               <Spinner label="Loading…" />
             </div>
-          ) : items.length === 0 ? (
+          ) : items.length === 0 && (statusFilter !== "in-progress" || inProgressTasks.length === 0) ? (
             <div className="pane-note">{statusFilter === "open" ? "Nothing needs you." : "Nothing here."}</div>
           ) : (
             items.map((item) => {
@@ -221,11 +239,12 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
                   role="button"
                   tabIndex={0}
                   className={`item-row ${needsYou ? "needs-you" : ""} ${selected?.id === item.id ? "selected" : ""}`}
-                  onClick={() => setSelected(item)}
+                  onClick={() => { setSelectedTaskId(null); setSelected(item); }}
                   onKeyDown={(e) => {
                     if (e.target !== e.currentTarget) return;
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
+                      setSelectedTaskId(null);
                       setSelected(item);
                     }
                   }}
@@ -274,7 +293,16 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
       </div>
 
       <div className="detail-pane">
-        {!selected ? (
+        {selectedTask ? (
+          <>
+            <div className="detail-head">
+              <h2 className="detail-title">{selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"}</h2>
+              <div className="detail-meta"><span className="chip chip-static status-dispatched">in progress</span></div>
+            </div>
+            <div className="detail-body"><Markdown text={selectedTask.prompt} className="body-text" /></div>
+            <div className="detail-actions"><a className="btn" href="#/tasks">View tasks</a></div>
+          </>
+        ) : !selected ? (
           <div className="pane-note">Select an item to review it.</div>
         ) : (
           <>
