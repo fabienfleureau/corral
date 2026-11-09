@@ -13,3 +13,7 @@ export function inProgressInboxItems(items: Item[], tasks: Task[]): Item[] {
   const active = new Set(tasks.filter((task) => task.status === "dispatched").map((task) => task.id));
   return items.filter((item) => item.status === "resolved" && item.task_id !== null && active.has(item.task_id));
 }
+
+export function inProgressInboxTasks(tasks: Task[]): Task[] {
+  return tasks.filter((task) => task.status === "dispatched");
+}
