@@ -219,5 +219,25 @@ test("PR additions deduplicate links and report unavailable counts", async () =>
     { pr_url: "https://example.com/a/-/merge_requests/2" },
     { pr_url: null },
   ], async (url) => url.includes("github") ? 42 : null);
-  assert.deepEqual(result, { additions: 42, available: 1, total: 2 });
+  assert.deepEqual({ additions: result.additions, available: result.available, total: result.total }, { additions: 42, available: 1, total: 2 });
+});
+
+test("PR additions group unique links by project, configured model and task", async () => {
+  const { collectPrAdditions } = await import("../usage-pr.ts");
+  const tasks = [
+    { id: "1", title: "First", prompt: "", repo_path: "/work/a", model: "gpt", pr_url: "https://github.com/a/b/pull/1" },
+    { id: "2", title: "Second", prompt: "", repo_path: "/work/a", model: null, pr_url: "https://github.com/a/b/pull/1" },
+    { id: "3", title: "Third", prompt: "", repo_path: "/work/b", model: "gpt", pr_url: "https://github.com/a/b/pull/2" },
+  ];
+  const result = await collectPrAdditions(tasks, async (url) => url.endsWith("1") ? 10 : null);
+  assert.deepEqual(result.by_project, [
+    { key: "/work/a", additions: 10, available: 1, total: 1 },
+    { key: "/work/b", additions: 0, available: 0, total: 1 },
+  ]);
+  assert.deepEqual(result.by_model, [
+    { key: "", additions: 10, available: 1, total: 1 },
+    { key: "gpt", additions: 10, available: 1, total: 2 },
+  ]);
+  assert.equal(result.by_task.length, 3);
+  assert.equal(result.by_task[1].additions, 10);
 });

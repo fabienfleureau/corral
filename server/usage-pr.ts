@@ -1,11 +1,17 @@
 // Current diff sizes of unique PRs linked to Corral tasks.
 import { mapLimit, runAsync } from "./exec.ts";
-import type { Task } from "./types.ts";
+import { taskLabel, type Task } from "./types.ts";
+
+type LinkedTask = Pick<Task, "pr_url"> & Partial<Pick<Task, "id" | "title" | "prompt" | "repo_path" | "model">>;
+export interface PrGroup { key: string; additions: number; available: number; total: number }
 
 export interface PrAdditions {
   additions: number;
   available: number;
   total: number;
+  by_project: PrGroup[];
+  by_model: PrGroup[];
+  by_task: PrGroup[];
 }
 
 export async function fetchPrAdditions(url: string): Promise<number | null> {
@@ -26,12 +32,24 @@ export async function fetchPrAdditions(url: string): Promise<number | null> {
   }
 }
 
-export async function collectPrAdditions(tasks: Pick<Task, "pr_url">[], fetcher = fetchPrAdditions): Promise<PrAdditions> {
+export async function collectPrAdditions(tasks: LinkedTask[], fetcher = fetchPrAdditions): Promise<PrAdditions> {
   const urls = [...new Set(tasks.flatMap((t) => t.pr_url ? [t.pr_url] : []))];
   const counts = await mapLimit(urls, 4, async (url) => {
     try { return await fetcher(url); } catch { return null; }
   });
-  return { additions: counts.reduce<number>((sum, n) => sum + (n ?? 0), 0), available: counts.filter((n) => n !== null).length, total: urls.length };
+  const values = new Map(urls.map((url, i) => [url, counts[i]]));
+  const summarize = (links: string[]) => ({ additions: links.reduce((sum, url) => sum + (values.get(url) ?? 0), 0), available: links.filter((url) => values.get(url) != null).length, total: links.length });
+  const groups = (keyFor: (task: LinkedTask) => string) => {
+    const grouped = new Map<string, Set<string>>();
+    for (const task of tasks) {
+      if (!task.pr_url) continue;
+      const key = keyFor(task);
+      if (!grouped.has(key)) grouped.set(key, new Set());
+      grouped.get(key)!.add(task.pr_url);
+    }
+    return [...grouped].map(([key, links]) => ({ key, ...summarize([...links]) })).sort((a, b) => b.additions - a.additions || a.key.localeCompare(b.key));
+  };
+  return { ...summarize(urls), by_project: groups((t) => t.repo_path ?? ""), by_model: groups((t) => t.model ?? ""), by_task: groups((t) => t.id ? `${t.id}\u0000${taskLabel({ title: t.title ?? "", prompt: t.prompt ?? "" })}` : "") };
 }
 
 export class PrAdditionsCache {
@@ -40,8 +58,8 @@ export class PrAdditionsCache {
   private pending: Promise<void> | null = null;
   private key = "";
 
-  get(tasks: Pick<Task, "pr_url">[], force = false): { data: PrAdditions | null; scanning: boolean } {
-    const key = JSON.stringify([...new Set(tasks.flatMap((t) => t.pr_url ? [t.pr_url] : []))].sort());
+  get(tasks: LinkedTask[], force = false): { data: PrAdditions | null; scanning: boolean } {
+    const key = JSON.stringify(tasks.filter((t) => t.pr_url).map((t) => [t.pr_url, t.id, t.title, t.prompt, t.repo_path, t.model]).sort());
     if (!this.pending && (force || key !== this.key || Date.now() - this.updated > 300_000)) {
       this.pending = collectPrAdditions(tasks).then((data) => { this.value = data; this.updated = Date.now(); this.key = key; }).finally(() => { this.pending = null; });
     }
