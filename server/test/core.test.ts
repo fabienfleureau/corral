@@ -827,3 +827,18 @@ test("dispatch includes the stored Jira link in the agent's task context", async
     assert.match(started[0].prompt, /Ticket description/);
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("retries an initial worker failure once with the original prompt", async () => {
+  const db = new Db(":memory:");
+  try {
+    db.insertTask(makeTask({ status: "dispatched", terminal_address: "s1" }));
+    const { backend, sent } = fakeBackend();
+    Object.assign(backend, { initialFailurePrompt: async () => "original prompt" });
+    const capture = new CaptureEngine(db, backend, { broadcast() {} });
+    const event = { type: "status" as const, address: "s1", task_id: "task-1", status: "idle" };
+    await capture.handleEvent(event);
+    await capture.handleEvent(event);
+    await new CaptureEngine(db, backend, { broadcast() {} }).handleEvent(event);
+    assert.deepEqual(sent, [{ address: "s1", text: "original prompt" }]);
+  } finally { db.close(); }
+});
