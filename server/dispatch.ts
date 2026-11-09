@@ -3,6 +3,7 @@
 // the git request on session create.
 
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -128,13 +129,8 @@ export async function dispatchTask(
   }
 
   const useWorktree = opts.useWorktree !== false;
-  const branch = task.branch ?? `${slugify(taskLabel(task), 32)}-${task.id.slice(0, 6)}`;
-
-  if (useWorktree && target === "claude") {
-    // omnigent places the tree at `<repo>-worktrees/<branch>` (sibling of the repo)
-    trustClaudeWorkspace(`${task.repo_path}-worktrees/${branch}`);
-    trustClaudeWorkspace(`${task.repo_path}-worktrees/${branch.replaceAll("/", "-")}`);
-  }
+  const originalBranch = task.branch ?? `${slugify(taskLabel(task), 32)}-${task.id.slice(0, 6)}`;
+  let branch = originalBranch;
 
   // Untitled task: send no title so omnigent generates one; capture adopts it.
   const name = task.title.trim() ? `corral-${slugify(task.title, 24)}` : null;
@@ -145,23 +141,37 @@ export async function dispatchTask(
   let session: WorkerSession;
   try {
     const base = useWorktree ? await worktreeBase(task.repo_path, task.base_branch) : null;
-    session = await backend.start({
-      taskId: task.id,
-    project: task.repo_path ? db.getRepoByPath(task.repo_path)?.name ?? task.repo_path : null,
-      name,
-      repoPath: task.repo_path,
-      git: useWorktree ? { branch, base } : null,
-      prompt: fullPrompt,
-      harness: target,
-      agent: opts.agent ?? null,
-      model: opts.model === undefined ? task.model ?? null : opts.model,
-      reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
-      env: {
-        CORRAL_URL: `http://${cfg.host}:${cfg.port}`,
-        CORRAL_TOKEN: cfg.token,
-        CORRAL_TASK_ID: task.id,
-      },
-    });
+    for (let attempt = 0; ; attempt++) {
+      if (useWorktree && target === "claude") {
+        trustClaudeWorkspace(`${task.repo_path}-worktrees/${branch}`);
+        trustClaudeWorkspace(`${task.repo_path}-worktrees/${branch.replaceAll("/", "-")}`);
+      }
+      try {
+        session = await backend.start({
+          taskId: task.id,
+          project: db.getRepoByPath(task.repo_path)?.name ?? task.repo_path,
+          name,
+          repoPath: task.repo_path,
+          git: useWorktree ? { branch, base } : null,
+          prompt: fullPrompt,
+          harness: target,
+          agent: opts.agent ?? null,
+          model: opts.model === undefined ? task.model ?? null : opts.model,
+          reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
+          env: {
+            CORRAL_URL: `http://${cfg.host}:${cfg.port}`,
+            CORRAL_TOKEN: cfg.token,
+            CORRAL_TASK_ID: task.id,
+          },
+        });
+        break;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "";
+        if (!useWorktree || attempt >= 3 || !message.startsWith("omnigent POST /v1/sessions -> 400:") ||
+            !message.includes(`worktree creation failed: a branch named '${branch}' already exists; choose a different branch name`)) throw err;
+        branch = `${originalBranch}-${randomBytes(4).toString("hex")}`;
+      }
+    }
   } catch (err) {
     throw new Error(`dispatch failed: ${err instanceof Error ? err.message : err}`);
   }
