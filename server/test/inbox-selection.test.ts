@@ -28,3 +28,14 @@ test("snoozed view contains only open items postponed beyond the current time", 
   assert.equal(selectedInboxItem(snoozed, [snoozed], "snoozed"), snoozed);
   assert.deepEqual(visibleInboxItems(items, 2000, "snoozed"), []);
 });
+
+test("in-progress inbox contains resolved items only for dispatched tasks", async () => {
+  const { inProgressInboxItems } = await import("../../web/src/inbox-selection.ts");
+  const active = { id: "active", status: "resolved", task_id: "working" } as Item;
+  const open = { id: "open", status: "open", task_id: "working" } as Item;
+  const archived = { id: "archived", status: "archived", task_id: "working" } as Item;
+  const finished = { id: "finished", status: "resolved", task_id: "done" } as Item;
+  const unlinked = { id: "unlinked", status: "resolved", task_id: null } as Item;
+  const tasks = [{ id: "working", status: "dispatched" }, { id: "done", status: "done" }] as import("../../web/src/types.ts").Task[];
+  assert.deepEqual(inProgressInboxItems([active, open, archived, finished, unlinked], tasks), [active]);
+});

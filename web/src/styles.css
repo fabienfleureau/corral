@@ -839,6 +839,10 @@ select:focus {
 
 /* ---------- tasks ---------- */
 
+.task-list-controls {
+  margin: 0 0 12px;
+}
+
 .task-groups {
   display: flex;
   flex-direction: column;

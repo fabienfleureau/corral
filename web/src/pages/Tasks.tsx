@@ -128,14 +128,6 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         <div className="page-toolbar">
           <h1 className="page-title">Tasks</h1>
           <div className="toolbar-actions">
-            <label className="check-inline">
-              <input
-                type="checkbox"
-                checked={showDoneArchived}
-                onChange={(e) => setShowDoneArchived(e.target.checked)}
-              />
-              <span>Show done &amp; archived</span>
-            </label>
             <button className="btn" onClick={() => setShowImport((v) => !v)}>
               {showImport ? "Close import" : "Import from Jira"}
             </button>
@@ -144,6 +136,17 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
 
         {showImport ? <JiraImport onImported={refresh} onClose={() => setShowImport(false)} /> : null}
         <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} onDone={refresh} />
+
+        <div className="task-list-controls">
+            <label className="check-inline">
+              <input
+                type="checkbox"
+                checked={showDoneArchived}
+                onChange={(e) => setShowDoneArchived(e.target.checked)}
+              />
+              <span>Show done &amp; archived</span>
+            </label>
+        </div>
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
