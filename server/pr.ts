@@ -529,10 +529,11 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
     }
   }
 
+  const readyStatus = pr.human_approvals?.length ? "ready to merge" : "ready for review";
   const title = shouldResolve
     ? `PR ${pr.state.toLowerCase()}: ${pr.title}`
     : ready
-      ? `PR ready for review: ${pr.title}`
+      ? `PR ${readyStatus}: ${pr.title}`
       : `PR needs work: ${pr.title}`;
 
   if (!existing) {
@@ -541,7 +542,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
       kind: "pr",
       status: shouldResolve ? doneStatus : "open",
       title,
-      summary: ready && !shouldResolve ? "ready for review" : reasons.join(", ") || "ready",
+      summary: ready && !shouldResolve ? readyStatus : reasons.join(", ") || "ready",
       body: prItemBody(pr),
       context: "",
       options: null,
@@ -568,7 +569,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   if (address && existing.source_ref !== address) patch.source_ref = address;
   const body = prItemBody(pr);
   if (existing.body !== body) patch.body = body;
-  const summary = ready && !shouldResolve ? "ready for review" : reasons.join(", ") || "ready";
+  const summary = ready && !shouldResolve ? readyStatus : reasons.join(", ") || "ready";
   if (existing.summary !== summary) patch.summary = summary;
   const readyFlag = shouldResolve ? 1 : ready ? 1 : 0;
   if (existing.ready !== readyFlag) patch.ready = readyFlag;

@@ -463,6 +463,12 @@ test("pr sync: merge completes the task and archives its items and session", asy
     assert.equal(item.ready, 1);
     assert.equal(item.title, "PR ready for review: feat: x");
 
+    current = { ...current, human_approvals: ["alice"] };
+    await syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
+    item = db.listItems({ kind: "pr" })[0];
+    assert.equal(item.summary, "ready to merge");
+    assert.equal(item.title, "PR ready to merge: feat: x");
+
     current = { ...current, threads: [{ id: "t1", author: "bot", body: "fix" }] };
     await syncTaskPr(db, hub, db.getTask("task-1")!, { finder });
     item = db.listItems({ kind: "pr" })[0];
