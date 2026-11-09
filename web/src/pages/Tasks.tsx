@@ -171,34 +171,6 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
 
 // ---- one task row ----
 
-function HarnessQuotas({ targets, quotas, selected }: { targets: string[]; quotas: AgentQuota[]; selected: string }) {
-  const known = quotas.filter((q) => targets.includes(q.agent) && q.windows.length > 0);
-  if (!known.length) return null;
-  return (
-    <div className="harness-quotas" aria-label="Harness quota usage">
-      {known.map((q) => (
-        <div className={`harness-quota${q.agent === selected ? " harness-quota-selected" : ""}`} key={q.agent}>
-          <div className="harness-quota-head">
-            <strong>{q.agent}</strong>
-            {q.plan ? <span className="badge badge-mute">{q.plan}</span> : null}
-            {q.stale ? <span className="badge badge-wait">stale</span> : null}
-          </div>
-          {q.windows.map((w) => {
-            const pct = Math.max(0, Math.min(100, w.used_percent));
-            const tone = pct >= 90 ? "usage-bar-hot" : pct >= 70 ? "usage-bar-warm" : "";
-            return (
-              <div className="usage-quota-row" key={w.label}>
-                <div className="usage-quota-label"><span>{w.label}</span><strong>{Math.round(w.used_percent)}% used</strong></div>
-                <div className="usage-bar"><div className={`usage-bar-fill ${tone}`} style={{ width: `${pct}%` }} /></div>
-              </div>
-            );
-          })}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function TaskRow({
   task,
   repos,
@@ -219,6 +191,7 @@ function TaskRow({
   const [showDispatch, setShowDispatch] = useState(task.status === "open" || (task.status === "dispatched" && !task.terminal_address));
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [prompt, setPrompt] = useState(task.prompt);
+  const [baseBranch, setBaseBranch] = useState(task.base_branch ?? "");
   const [target, setTarget] = useState(task.target || "claude");
   const [model, setModel] = useState(task.model ?? "");
   const [reasoning, setReasoning] = useState(task.reasoning ?? "");
@@ -259,6 +232,8 @@ function TaskRow({
     setError(null);
     setMsg(null);
     try {
+      const base = baseBranch.trim() || null;
+      if (base !== task.base_branch) await api.patchTask(task.id, { base_branch: base });
       const result = await api.dispatchTask(task.id, {
         target: selectedTarget,
         use_worktree: useWorktree,
@@ -413,7 +388,11 @@ function TaskRow({
               </select>
             </label>
             <ModelSettings models={catalog[selectedTarget] ?? []} model={model} reasoning={reasoning} setModel={setModel} setReasoning={setReasoning} fieldClass="field-inline" />
-            <HarnessQuotas targets={targets} quotas={quotas} selected={selectedTarget} />
+            <label className="field-inline">
+              <span>Base branch (optional)</span>
+              <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="Default branch" disabled={busy !== null} />
+            </label>
+            <button className="btn" onClick={() => void run("base", () => api.patchTask(task.id, { base_branch: baseBranch.trim() || null }), "Base branch saved.")} disabled={busy !== null || (baseBranch.trim() || null) === task.base_branch}>Save base branch</button>
             <label className="check-inline">
               <input
                 type="checkbox"
