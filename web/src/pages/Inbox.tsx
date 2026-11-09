@@ -7,19 +7,18 @@ import type { Item, SessionInfo, Task } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
 import { ExternalLinkIcon, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
-import { selectedInboxItem } from "../inbox-selection";
+import { inProgressInboxItems, selectedInboxItem } from "../inbox-selection";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
 import { QuestionReply } from "../QuestionReply";
 
-type StatusFilter = "open" | "snoozed" | "resolved" | "archived";
+type StatusFilter = "open" | "snoozed" | "in-progress";
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "open", label: "Open" },
   { key: "snoozed", label: "Snoozed" },
-  { key: "resolved", label: "Resolved" },
-  { key: "archived", label: "Archived" },
+  { key: "in-progress", label: "In progress" },
 ];
 
 export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: number; refresh: () => void; onSeen: (items: Item[]) => void }) {
@@ -77,7 +76,9 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
 
   const visibleItems = useVisibleInboxItems(allItems);
   const snoozedItems = useVisibleInboxItems(allItems, "snoozed");
-  const items = useMemo(() => statusFilter === "snoozed" ? snoozedItems : visibleItems.filter((i) => i.status === statusFilter), [visibleItems, snoozedItems, statusFilter]);
+  const inProgressItems = useMemo(() => inProgressInboxItems(allItems, tasks), [allItems, tasks]);
+  const openItems = useMemo(() => visibleItems.filter((i) => i.status === "open"), [visibleItems]);
+  const items = statusFilter === "snoozed" ? snoozedItems : statusFilter === "in-progress" ? inProgressItems : openItems;
   useEffect(() => {
     const acknowledge = () => {
       if (!loading && !error && statusFilter === "open" && document.visibilityState === "visible") onSeen(items);
@@ -87,11 +88,7 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
     return () => document.removeEventListener("visibilitychange", acknowledge);
   }, [items, loading, error, statusFilter, onSeen]);
 
-  const counts = useMemo(() => {
-    const c: Record<StatusFilter, number> = { open: 0, snoozed: snoozedItems.length, resolved: 0, archived: 0 };
-    for (const i of visibleItems) c[i.status]++;
-    return c;
-  }, [visibleItems, snoozedItems]);
+  const counts: Record<StatusFilter, number> = { open: openItems.length, snoozed: snoozedItems.length, "in-progress": inProgressItems.length };
 
   // Auto-select the first row when nothing is selected.
   useEffect(() => {
