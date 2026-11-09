@@ -155,7 +155,7 @@ export type AgentQuota = {
 };
 
 export type UsageReport = {
-  pr_additions: { data: { additions: number; available: number; total: number } | null; scanning: boolean };
+  pr_additions: { data: { additions: number; available: number; total: number; by_project: PrAdditionsGroup[]; by_model: PrAdditionsGroup[]; by_task: PrAdditionsGroup[] } | null; scanning: boolean };
   range: UsageRange;
   since_ms: number | null;
   generated_ms: number;
@@ -176,3 +176,5 @@ export type UsageReport = {
     top_tasks: { id: string; title: string; status: string; agent: UsageAgent | "mixed"; cost_usd: number; tokens: number }[];
   };
 };
+
+export interface PrAdditionsGroup { key: string; additions: number; available: number; total: number }

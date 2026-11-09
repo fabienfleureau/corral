@@ -135,6 +135,7 @@ export function UsagePage() {
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [force, setForce] = useState(false);
+  const [linesGroup, setLinesGroup] = useState<"project" | "model" | "task">("project");
 
   useEffect(() => {
     const onHash = () => setParams(paramsFromHash());
@@ -260,6 +261,24 @@ export function UsagePage() {
                 </div>
               </div>
             </div>
+
+            <div className="usage-section-head">
+              <h2 className="usage-h">Lines added by {linesGroup}</h2>
+              <div className="chip-row">
+                {(["project", "model", "task"] as const).map((group) => (
+                  <button key={group} className={`chip ${linesGroup === group ? "chip-active" : ""}`} onClick={() => setLinesGroup(group)}>{group[0].toUpperCase() + group.slice(1)}</button>
+                ))}
+              </div>
+            </div>
+            <div className="muted usage-small">All time · current PR / MR diffs · model is the task's configured model. Shared PRs count once per group.</div>
+            {!report.pr_additions.data ? <div className="pane-note">Loading…</div> : report.pr_additions.data[`by_${linesGroup}`].length === 0 ? <div className="pane-note">No linked PRs / MRs.</div> : (
+              <table className="usage-table">
+                <thead><tr><th>{linesGroup === "model" ? "Configured model" : linesGroup === "project" ? "Project" : "Task"}</th><th className="num">Lines added</th><th className="num">PRs / MRs available</th></tr></thead>
+                <tbody>{report.pr_additions.data[`by_${linesGroup}`].map((row) => (
+                  <tr key={row.key}><td>{linesGroup === "task" ? row.key.split("\0")[1] : row.key || (linesGroup === "model" ? "Not pinned" : "Unknown project")}</td><td className="num">{row.available ? row.additions.toLocaleString() : "—"}</td><td className="num">{row.available} / {row.total}</td></tr>
+                ))}</tbody>
+              </table>
+            )}
 
             <div className="usage-section-head">
               <h2 className="usage-h">Over time</h2>
