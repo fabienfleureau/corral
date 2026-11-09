@@ -165,7 +165,7 @@ export const api = {
   // ---- jira ----
   jiraSearch: (q: string): Promise<JiraSearchResult[]> =>
     get<JiraSearchResult[]>(`/api/jira/search${query({ q })}`),
-  jiraImport: (items: { key: string; fingerprint: string }[]): Promise<JiraImportResult> =>
+  jiraImport: (items: { key: string; fingerprint: string; repo_path?: string; base_branch?: string | null; target?: string; agent?: string | null; model?: string | null; reasoning?: string | null }[]): Promise<JiraImportResult> =>
     post<JiraImportResult>("/api/jira/import", { items }),
   jiraDone: (taskId: string, transitionId?: string): Promise<{ ok: boolean; transition: string }> =>
     post<{ ok: boolean; transition: string }>(`/api/jira/tasks/${taskId}/done`, { transition_id: transitionId }),
