@@ -218,7 +218,10 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
   if (list.length === 0) return null;
   const mr = list[0];
   const iid = Number(mr.iid ?? 0);
-  const api = (path: string) => run("glab", ["api", `projects/:id/merge_requests/${iid}${path}`], repoPath);
+  // The MR may live in another project than the task repo (`:id` resolves
+  // from the cwd's remote): address it by its own project.
+  const project = Number(mr.project_id) > 0 ? String(Number(mr.project_id)) : ":id";
+  const api = (path: string) => run("glab", ["api", `projects/${project}/merge_requests/${iid}${path}`], repoPath);
 
   // Each fetch is independent: a failing one degrades only its own field.
   const [full, approvals, changes, discussions] = await Promise.all([

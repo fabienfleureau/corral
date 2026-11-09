@@ -736,6 +736,32 @@ esac
   }
 });
 
+test("GitLab MR in another project than the task repo reads that project's MR", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-glab-cross-"));
+  const originalPath = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    // projects/:id would resolve to the task repo's project (a different MR 23).
+    writeFileSync(join(dir, "glab"), `#!/bin/sh
+case "$*" in
+  "mr view"*) echo '{"iid":23,"project_id":42,"state":"opened","web_url":"https://gitlab.example/g/other/-/merge_requests/23"}' ;;
+  *'projects/42/merge_requests/23/approvals') echo '{"approved_by":[{"user":{"username":"alice"}}]}' ;;
+  *'projects/42/merge_requests/23/changes') echo '{"changes":[]}' ;;
+  *'projects/42/merge_requests/23/discussions?per_page=100') echo '[]' ;;
+  *'projects/42/merge_requests/23') echo '{"has_conflicts":false,"head_pipeline":{"status":"success"}}' ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+    process.env.PATH = `${dir}:${originalPath}`;
+    const pr = await findPr(dir, "https://gitlab.example/g/other/-/merge_requests/23");
+    assert.ok(pr);
+    assert.deepEqual(pr.human_approvals, ["alice"]);
+    assert.equal(prReady(pr).ready, true);
+  } finally {
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("PR sync endpoint responds before a slow lookup and completes it in the background", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-pr-background-"));
