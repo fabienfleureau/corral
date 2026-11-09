@@ -147,6 +147,35 @@ test("dispatch: worktree starts from the freshly fetched remote default branch",
   }
 });
 
+test("dispatch: fetches a custom remote branch outside the clone refspec", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-branch-"));
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const db = new Db(join(dir, "test.db"));
+  try {
+    const remote = join(dir, "remote.git"), source = join(dir, "source"), clone = join(dir, "clone");
+    execFileSync("git", ["init", "--bare", "--initial-branch=main", remote], { stdio: "ignore" });
+    execFileSync("git", ["clone", remote, source], { stdio: "ignore" });
+    git(source, "config", "user.email", "test@example.com");
+    git(source, "config", "user.name", "Test");
+    git(source, "config", "commit.gpgsign", "false");
+    git(source, "commit", "--allow-empty", "-m", "initial");
+    git(source, "push", "origin", "main");
+    execFileSync("git", ["clone", "--single-branch", remote, clone], { stdio: "ignore" });
+    git(source, "checkout", "-b", "feature/custom");
+    git(source, "commit", "--allow-empty", "-m", "custom base");
+    git(source, "push", "origin", "feature/custom");
+    const expected = git(source, "rev-parse", "HEAD");
+    const task = makeTask({ repo_path: clone, base_branch: "feature/custom" });
+    db.insertTask(task);
+    const { backend, started } = fakeBackend();
+    await dispatchTask(db, { configDir: dir, host: "localhost", port: 4787, token: "" } as Config, backend, task, "codex");
+    assert.equal(started[0].git?.base, expected);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 for (const target of ["codex", "claude", "opencode"]) {
   for (const scenario of [
     { name: "title only", title: " Fix missing task context ", prompt: "", expected: "Fix missing task context" },

@@ -83,13 +83,15 @@ async function worktreeBase(repo: string, base: string | null): Promise<string |
   if (!remotes.includes("origin")) return base ? commit(base) : null;
   await git("fetch", "origin");
   if (base) {
-    if (base.startsWith("origin/")) return commit(base);
-    try {
-      await git("show-ref", "--verify", "--quiet", `refs/remotes/origin/${base}`);
-      return await commit(`origin/${base}`);
-    } catch {
-      return commit(base);
+    const branch = base.startsWith("origin/") ? base.slice("origin/".length) : base;
+    const remoteRef = `refs/heads/${branch}`;
+    const remoteBranch = await git("ls-remote", "--heads", "origin", remoteRef);
+    if (remoteBranch.split("\n").some((line) => line.split("\t")[1] === remoteRef)) {
+      // Explicit fetch works even when the clone tracks only its default branch.
+      await git("fetch", "origin", remoteRef);
+      return commit("FETCH_HEAD");
     }
+    return commit(base);
   }
   const remoteHead = await git("ls-remote", "--symref", "origin", "HEAD");
   const branch = remoteHead.match(/^ref: refs\/heads\/(.+)\s+HEAD$/m)?.[1];
