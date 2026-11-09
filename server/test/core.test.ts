@@ -95,6 +95,31 @@ test("slugify produces url-safe names", () => {
   assert.ok(slugify("x".repeat(100)).length <= 40);
 });
 
+test("dispatch retries a branch collision and saves the successful branch", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-collision-"));
+  const db = new Db(join(dir, "test.db"));
+  try {
+    execFileSync("git", ["init", "-q", dir]);
+    const task = makeTask({ repo_path: dir });
+    db.insertTask(task);
+    const { backend, started } = fakeBackend();
+    const start = backend.start.bind(backend);
+    let attempts = 0;
+    backend.start = async (request) => {
+      if (attempts++ < 2) throw new Error(`omnigent POST /v1/sessions -> 400: {"error":{"code":"invalid_input","message":"worktree creation failed: a branch named '${request.git!.branch}' already exists; choose a different branch name"}}`);
+      return start(request);
+    };
+    const result = await dispatchTask(db, { configDir: dir, host: "localhost", port: 4787, token: "" } as Config, backend, task, "codex");
+    assert.equal(attempts, 3);
+    assert.notEqual(result.branch, "add-caching-task-1");
+    assert.equal(db.getTask(task.id)?.branch, result.branch);
+    assert.equal(started[0].git?.branch, result.branch);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("dispatch: worktree starts from the freshly fetched remote default branch", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-dispatch-"));
   const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
