@@ -81,7 +81,7 @@ test('harness models without a published result stay listed, published strangers
     [result('Gemini 3.8 Flash', 'SWE-bench Verified', 75.8)],
   );
   assert.deepEqual(rows.map((row) => [row.label, row.availability.length]), [
-    ['opencode/gemini-3.5-flash-lite', 1],
+    ['gemini-3.5-flash-lite', 1],
     ['Gemini 3.8 Flash', 0],
   ]);
   assert.deepEqual(benchmarkColumns(rows), ['SWE-bench Verified']);

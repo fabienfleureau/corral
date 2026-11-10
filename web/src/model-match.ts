@@ -201,7 +201,7 @@ export function buildBenchmarkRows<T extends BenchmarkResultInput>(
     const picks = Object.values(entry.picks);
     const best = picks.reduce<BenchmarkPick<T> | null>((top, pick) => (!top || isBetter(pick.result, top.result) ? pick : top), null);
     entry.published = best?.result.model ?? null;
-    entry.label = entry.published ?? entry.availability[0]?.label ?? entry.availability[0]?.id ?? "";
+    entry.label = entry.published ?? ((entry.availability[0]?.label || entry.availability[0]?.id || "").split("/").pop() || "");
   }
 
   return [...rows.values()].sort((a, b) => {
