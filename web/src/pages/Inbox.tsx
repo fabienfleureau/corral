@@ -161,12 +161,12 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
     }
   };
 
-  const archiveTask = async (task: Task) => {
+  const archiveTask = async (task: Task, cleanSession = false) => {
     if (actionBusy) return;
     setActionBusy(true);
     setActionError(null);
     try {
-      const updated = await api.patchTask(task.id, { status: "archived" });
+      const updated = cleanSession ? await api.archiveTaskSession(task.id) : await api.patchTask(task.id, { status: "archived" });
       setTasks((prev) => prev.map((entry) => entry.id === updated.id ? updated : entry));
       setSelectedTaskId(null);
       refresh();
@@ -343,8 +343,11 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask)} title="Archive this task; its session keeps running">
                   Archive task
                 </button>
+                {selectedTask.terminal_address ? <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask, true)} title="Archive this task and its session">
+                  Archive &amp; clean session
+                </button> : null}
               </div>
-              <div className="muted">Archiving does not stop the session.</div>
+              <div className="muted">Archive task leaves the session running. Archive &amp; clean session archives it in Omnigent.</div>
               {actionError ? <div className="inline-error">{actionError}</div> : null}
             </div>
           </>

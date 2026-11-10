@@ -842,3 +842,30 @@ test("retries an initial worker failure once with the original prompt", async ()
     assert.deepEqual(sent, [{ address: "s1", text: "original prompt" }]);
   } finally { db.close(); }
 });
+
+test("archive and clean session preserves the task when session archiving fails", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-archive-session-"));
+  const db = new Db(join(dir, "test.db"));
+  db.insertTask(makeTask({ status: "dispatched", terminal_address: "s1" }));
+  const { backend } = fakeBackend();
+  let fail = true;
+  const addresses: string[] = [];
+  backend.archive = async (address) => { addresses.push(address); if (fail) throw new Error("unavailable"); };
+  const server = createHttpServer({ db, backend, hub: { broadcast: () => undefined }, cfg: { token: "test" } } as unknown as AppState);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/tasks/task-1/archive-session`;
+    const request = () => fetch(url, { method: "POST", headers: { Authorization: "Bearer test" } });
+    assert.equal((await request()).status, 500);
+    assert.equal(db.getTask("task-1")?.status, "dispatched");
+    fail = false;
+    assert.equal((await request()).status, 200);
+    assert.equal(db.getTask("task-1")?.status, "archived");
+    assert.deepEqual(addresses, ["s1", "s1"]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
