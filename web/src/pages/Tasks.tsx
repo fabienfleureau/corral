@@ -6,7 +6,7 @@ import type { ModelOption } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
 import type { AgentQuota, Favorite, JiraSearchResult, Repo, Task } from "../types";
-import { errText, formatTs, prLabel, timeAgo } from "../util";
+import { errText, formatTs, isPrUrl, prLabel, REVIEW_HARNESS, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 import { batchImportItems } from "../jira-import";
 import type { ImportSettings } from "../jira-import";
@@ -226,7 +226,9 @@ function TaskRow({
     }
   };
 
-  const selectedTarget = targets.includes(target) ? target : targets[0] ?? "";
+  const review = task.kind === "review";
+  const rowTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
+  const selectedTarget = rowTargets.includes(target) ? target : rowTargets[0] ?? "";
 
   const dispatch = async () => {
     if (busy) return;
@@ -235,10 +237,10 @@ function TaskRow({
     setMsg(null);
     try {
       const base = baseBranch.trim() || null;
-      if (base !== task.base_branch) await api.patchTask(task.id, { base_branch: base });
+      if (!review && base !== task.base_branch) await api.patchTask(task.id, { base_branch: base });
       const result = await api.dispatchTask(task.id, {
         target: selectedTarget,
-        use_worktree: useWorktree,
+        use_worktree: review ? false : useWorktree,
         agent: agent || null,
         model: model.trim() || null,
         reasoning: reasoning.trim() || null,
@@ -295,6 +297,7 @@ function TaskRow({
         </div>
         <div className="task-sub">
           <span className={`badge status-${task.status}`} title={task.worktree_path ? `Worktree: ${task.worktree_path}` : undefined}>{task.status}</span>
+          {review ? <span className="badge badge-review" title="Reviews the linked PR/MR; comments are published after your approval">review</span> : null}
           {task.target ? <span className="badge badge-target">{task.target}</span> : null}
           {task.terminal_address ? <>
             <span className="muted">Model: {task.session_model || "Unknown"}</span>
@@ -345,7 +348,7 @@ function TaskRow({
         {dispatchResult ? (
           <div className="task-sub">
             <span className="inline-ok">Dispatched</span>
-            <span className="mono">branch: {dispatchResult.branch}</span>
+            {dispatchResult.branch ? <span className="mono">branch: {dispatchResult.branch}</span> : null}
             <span className="mono">terminal: {dispatchResult.address}</span>
           </div>
         ) : null}
@@ -372,8 +375,8 @@ function TaskRow({
             <label className="field-inline">
               <span>Harness</span>
               <select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setAgent(""); setModel(e.target.value === task.target ? task.model ?? "" : ""); setReasoning(e.target.value === task.target ? task.reasoning ?? "" : ""); }}>
-                {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
-                {targets.map((t) => (
+                {rowTargets.length === 0 ? <option value="">{review ? "Claude harness unavailable" : "No configured harnesses"}</option> : null}
+                {rowTargets.map((t) => (
                   <option key={t} value={t}>
                     {harnessLabel(t, quotas)}
                   </option>
@@ -393,6 +396,7 @@ function TaskRow({
               </select>
             </label>
             <ModelSettings models={catalog[selectedTarget] ?? []} model={model} reasoning={reasoning} setModel={setModel} setReasoning={setReasoning} fieldClass="field-inline" />
+            {review ? null : <>
             <label className="field-inline">
               <span>Base branch (optional)</span>
               <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="Default branch" disabled={busy !== null} />
@@ -406,6 +410,7 @@ function TaskRow({
               />
               <span>Create worktree</span>
             </label>
+            </>}
             <button
               className="btn btn-primary"
               onClick={() => void dispatch()}
@@ -478,6 +483,8 @@ function firstLine(text: string): string {
 function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; onDone: () => void }) {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   useEffect(() => { api.getConfig().then((cfg) => setFavorites(cfg.favorites ?? [])).catch(() => undefined); }, []);
+  const [kind, setKind] = useState<"code" | "review">("code");
+  const [prUrl, setPrUrl] = useState("");
   const [prompt, setPrompt] = useState("");
   const [repoChoice, setRepoChoice] = useState("");
   const [target, setTarget] = useState("");
@@ -491,36 +498,42 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
 
   const clear = () => {
     setPrompt("");
+    setPrUrl("");
     setRepoPath("");
     setBaseBranch("");
     setError(null);
   };
 
   const selectedRepo = repoTouched ? repoChoice : (repos[0]?.path ?? "");
-  const selectedTarget = targets.includes(target) ? target : targets[0] ?? "";
+  const review = kind === "review";
+  const formTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
+  const selectedTarget = formTargets.includes(target) ? target : formTargets[0] ?? "";
+  const prUrlValid = isPrUrl(prUrl);
+  const hasContent = review ? prUrlValid : !!prompt.trim();
 
   const selectedSettings = settings[selectedTarget] ?? lastHarnessSettings(tasks, selectedTarget);
   const setSetting = (key: "model" | "reasoning", value: string) => setSettings((prev) => ({ ...prev, [selectedTarget]: { ...selectedSettings, [key]: value } }));
 
   const submit = async (dispatch: boolean) => {
-    if (!prompt.trim() || busy) return;
+    if (!hasContent || busy) return;
     setBusy(true);
     setError(null);
     try {
       const input: NewTaskInput = {
+        ...(review ? { kind, pr_url: prUrl.trim(), title: `Review ${prLabel(prUrl.trim())}` } : {}),
         prompt,
         target: selectedTarget,
         model: selectedSettings.model.trim() || null,
         reasoning: selectedSettings.reasoning.trim() || null,
         repo_path: selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo,
-        base_branch: baseBranch.trim() || null,
+        base_branch: review ? null : baseBranch.trim() || null,
       };
       const task = await api.createTask(input);
       clear();
       onDone();
       if (dispatch) {
         try {
-          await api.dispatchTask(task.id, { target: selectedTarget, use_worktree: true, agent: agent || null });
+          await api.dispatchTask(task.id, { target: selectedTarget, use_worktree: !review, agent: agent || null });
           onDone();
         } catch (err) {
           setError(`Task created, but dispatch failed: ${errText(err)}`);
@@ -536,13 +549,27 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
   return (
     <div className="panel-form">
       <h2 className="panel-title">New task</h2>
+      <div className="seg" role="radiogroup" aria-label="Task type">
+        <button type="button" role="radio" aria-checked={!review} className={`seg-btn${review ? "" : " active"}`} onClick={() => setKind("code")}>Code change</button>
+        <button type="button" role="radio" aria-checked={review} className={`seg-btn${review ? " active" : ""}`} onClick={() => setKind("review")}>Review a PR/MR</button>
+      </div>
+      {review ? (
+        <>
+          <label className="field">
+            <span>PR/MR URL</span>
+            <input value={prUrl} onChange={(e) => setPrUrl(e.target.value)} placeholder="https://gitlab.com/group/project/-/merge_requests/123" />
+          </label>
+          {prUrl.trim() && !prUrlValid ? <div className="inline-error">Paste a GitHub pull request or GitLab merge request URL.</div> : null}
+          <p className="muted form-hint">The agent reviews with the fabien-reviewer skill and posts comments as drafts. Nothing is published until you approve the list in the inbox. No branch, no code changes.</p>
+        </>
+      ) : null}
       <label className="field">
-        <span>Prompt</span>
+        <span>{review ? "Focus (optional)" : "Prompt"}</span>
         <textarea
-          rows={6}
+          rows={review ? 3 : 6}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="What should the agent do?"
+          placeholder={review ? "Anything to look at in particular?" : "What should the agent do?"}
         />
       </label>
       <div className="field-row">
@@ -564,16 +591,18 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
             <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/repo" />
           </label>
         ) : null}
-        <label className="field">
-          <span>Base branch (optional)</span>
-          <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
-        </label>
+        {review ? null : (
+          <label className="field">
+            <span>Base branch (optional)</span>
+            <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
+          </label>
+        )}
       </div>
-      {favorites.length > 0 ? <div className="field"><span>Favorites</span><div className="chip-row">{favorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!targets.includes(f.harness)} title={!targets.includes(f.harness) ? "Harness unavailable" : [f.harness, f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")} onClick={() => { setTarget(f.harness); setAgent(f.agent); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}>{f.name}</button>)}</div></div> : null}
+      {favorites.length > 0 ? <div className="field"><span>Favorites</span><div className="chip-row">{favorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!formTargets.includes(f.harness)} title={!formTargets.includes(f.harness) ? "Harness unavailable" : [f.harness, f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")} onClick={() => { setTarget(f.harness); setAgent(f.agent); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}>{f.name}</button>)}</div></div> : null}
       <div className="field-row">
         <label className="field"><span>Harness</span><select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setAgent(""); }}>
-          {targets.length === 0 ? <option value="">No configured harnesses</option> : null}
-          {targets.map((t) => <option key={t} value={t}>{harnessLabel(t, quotas)}</option>)}
+          {formTargets.length === 0 ? <option value="">{review ? "Claude harness unavailable" : "No configured harnesses"}</option> : null}
+          {formTargets.map((t) => <option key={t} value={t}>{harnessLabel(t, quotas)}</option>)}
         </select></label>
         <label className="field"><span>Agent</span><select value={agent} onChange={(e) => setAgent(e.target.value)}>
           <option value="">— none (bare harness) —</option>
@@ -586,10 +615,10 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
       </div>
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
-        <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !prompt.trim() || !selectedTarget || (!!agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent)) || !(selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
+        <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !hasContent || !selectedTarget || (!!agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent)) || !(selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
           Create and dispatch
         </button>
-        <button className="btn" onClick={() => void submit(false)} disabled={busy || !prompt.trim()}>
+        <button className="btn" onClick={() => void submit(false)} disabled={busy || !hasContent}>
           {busy ? <Spinner /> : null}
           {busy ? "Creating…" : "Create task"}
         </button>

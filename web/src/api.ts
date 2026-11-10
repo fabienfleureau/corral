@@ -140,6 +140,9 @@ export type NewTaskInput = {
   /** Omit to let omnigent title the session after dispatch. */
   title?: string;
   prompt?: string;
+  kind?: "code" | "review";
+  /** Required for kind "review": the PR/MR to review. */
+  pr_url?: string;
   repo_path?: string;
   target?: string;
   model?: string | null;

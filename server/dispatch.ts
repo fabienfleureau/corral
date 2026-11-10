@@ -35,15 +35,19 @@ export function questionConvention(cfg: Config, task: Task): string {
       return fallback;
     }
   };
-  const report = read(
-    "question-report.md",
-    "When you need the human, ask clearly and wait. Do not guess.",
-  );
-  const prLoop = read("pr-loop.md", "");
-  return [report, prLoop].filter(Boolean).join("\n\n---\n\n")
+  // A review must not commit, push or open a PR: its convention replaces both
+  // the finish flow of question-report.md and the PR loop.
+  const parts = task.kind === "review"
+    ? [read("review.md", "Review the PR/MR. Do not change code. Ask before posting any comment.")]
+    : [
+      read("question-report.md", "When you need the human, ask clearly and wait. Do not guess."),
+      read("pr-loop.md", ""),
+    ];
+  return parts.filter(Boolean).join("\n\n---\n\n")
     .replaceAll("{task_id}", task.id)
     .replaceAll("{corral_url}", `http://${cfg.host}:${cfg.port}`)
-    .replaceAll("{corral_token}", cfg.token);
+    .replaceAll("{corral_token}", cfg.token)
+    .replaceAll("{pr_url}", task.pr_url ?? "");
 }
 
 /**
@@ -128,7 +132,13 @@ export async function dispatchTask(
     throw new Error(`not a git repository: ${task.repo_path}`);
   }
 
-  const useWorktree = opts.useWorktree !== false;
+  const review = task.kind === "review";
+  if (review) {
+    if (target !== "claude") throw new Error("review tasks run on the claude harness only");
+    if (!task.pr_url) throw new Error("review task has no PR/MR URL");
+  }
+  // A review reads the MR head without checking it out: no worktree, no branch.
+  const useWorktree = !review && opts.useWorktree !== false;
   const originalBranch = task.branch ?? `${slugify(taskLabel(task), 32)}-${task.id.slice(0, 6)}`;
   let branch = originalBranch;
 
@@ -136,12 +146,14 @@ export async function dispatchTask(
   const name = task.title.trim() ? `corral-${slugify(task.title, 24)}` : null;
   const taskContext = [...new Set([task.title.trim(), task.prompt.trim()].filter(Boolean))];
   if (task.jira_url) taskContext.push(`Jira: ${task.jira_url}`);
+  if (review) taskContext.push(`Review this PR/MR: ${task.pr_url}`);
   const fullPrompt = `${taskContext.join("\n\n")}\n\n---\n${questionConvention(cfg, task)}`;
 
   let session: WorkerSession;
   try {
     const base = useWorktree ? await worktreeBase(task.repo_path, task.base_branch) : null;
     for (let attempt = 0; ; attempt++) {
+      if (!useWorktree && target === "claude") trustClaudeWorkspace(task.repo_path);
       if (useWorktree && target === "claude") {
         trustClaudeWorkspace(`${task.repo_path}-worktrees/${branch}`);
         trustClaudeWorkspace(`${task.repo_path}-worktrees/${branch.replaceAll("/", "-")}`);
@@ -182,7 +194,7 @@ export async function dispatchTask(
     target_state: "confirmed",
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
-    branch,
+    branch: review ? null : branch,
     worktree_path: useWorktree && session.cwd ? session.cwd : null,
     terminal_address: session.address,
   });
@@ -203,5 +215,5 @@ export async function dispatchTask(
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
   });
 
-  return { address: session.address, worktreePath: session.cwd, branch };
+  return { address: session.address, worktreePath: session.cwd, branch: review ? "" : branch };
 }

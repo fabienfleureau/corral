@@ -18,7 +18,7 @@ import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, 
 import { startSyncAllPrs, syncTaskPr } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Item, Task } from "./types.ts";
-import { taskLabel } from "./types.ts";
+import { PR_URL_RE, taskLabel } from "./types.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type UsageRange } from "./usage.ts";
 import { getBenchmarks, syncBenchmarks } from "./benchmarks.ts";
 import { PrAdditionsCache } from "./usage-pr.ts";
@@ -253,13 +253,20 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   on("POST", "/api/tasks", (req, res, { body }) => {
     const b = body as Partial<Task>;
-    if (!b?.title?.trim() && !b?.prompt?.trim()) return json(res, 400, { error: "title or prompt required" });
+    const kind = b?.kind ?? "code";
+    if (kind !== "code" && kind !== "review") return json(res, 400, { error: "kind must be code or review" });
+    const prUrl = b?.pr_url?.trim() || null;
+    if (kind === "review" && (!prUrl || !PR_URL_RE.test(prUrl))) {
+      return json(res, 400, { error: "review tasks need a GitHub PR or GitLab MR URL" });
+    }
+    if (kind === "code" && !b?.title?.trim() && !b?.prompt?.trim()) return json(res, 400, { error: "title or prompt required" });
     const now = Date.now();
     const task: Task = {
       id: randomUUID(),
       // Empty title = adopt omnigent's session title once dispatched.
-      title: b.title?.trim() ?? "",
+      title: b.title?.trim() || (kind === "review" ? `Review ${prUrl}` : ""),
       prompt: b.prompt ?? "",
+      kind,
       repo_path: b.repo_path ?? "",
       target: b.target ?? "",
       target_state: "suggested",
@@ -272,7 +279,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       jira_key: b.jira_key ?? null,
       jira_url: b.jira_url ?? null,
       jira_parent_key: b.jira_parent_key ?? null,
-      pr_url: null,
+      pr_url: kind === "review" ? prUrl : null,
       pr_meta: null,
       status: "open",
       terminal_address: null,
@@ -291,6 +298,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!task) return json(res, 404, { error: "task not found" });
     const patch = body as Partial<Task>;
     delete patch.id;
+    delete patch.kind; // fixed at creation: dispatch and the PR loop depend on it
     state.db.updateTask(task.id, patch);
     state.hub.broadcast("task.updated", state.db.getTask(task.id));
     json(res, 200, state.db.getTask(task.id));
@@ -327,6 +335,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     };
     const target = b.target ?? task.target;
     if (!target) return json(res, 400, { error: "target required (claude|codex|opencode)" });
+    if (task.kind === "review" && target !== "claude") return json(res, 400, { error: "review tasks run on the claude harness only" });
     if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — assign one before dispatching" });
     try {
       const result = await dispatchTask(state.db, state.cfg, state.backend, task, target, {
@@ -363,6 +372,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/tasks/:id/check-pr", async (req, res, { params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
+    if (task.kind === "review") return json(res, 400, { error: "review tasks have no PR of their own" });
     if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
     try {
       const pr = await syncTaskPr(state.db, state.hub, task, { backend: state.backend, cfg: state.cfg });

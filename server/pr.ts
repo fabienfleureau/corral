@@ -466,6 +466,9 @@ export interface SyncOptions {
  *  - the item resolves on close; a merge completes the task and archives its items.
  */
 export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOptions = {}): Promise<PrInfo | null> {
+  // A review task's pr_url is someone else's MR: its threads are not work for
+  // the agent, and its merge does not complete the review.
+  if (staleTask.kind === "review") return null;
   const finder = opts.finder ?? findPr;
   const item = db.listItems({ kind: "pr" }).find((i) => i.task_id === staleTask.id && i.status !== "archived");
   const reportedUrl = item?.body.match(/https?:\/\/[^\s<>]+(?:\/pull\/|\/-\/merge_requests\/)\d+/)?.[0];
@@ -651,5 +654,5 @@ export function startSyncAllPrs(
 export function prCandidateTasks(db: Db): Task[] {
   return db
     .listTasks()
-    .filter((t) => (t.status === "dispatched" || t.status === "done") && t.branch && t.repo_path);
+    .filter((t) => t.kind !== "review" && (t.status === "dispatched" || t.status === "done") && t.branch && t.repo_path);
 }

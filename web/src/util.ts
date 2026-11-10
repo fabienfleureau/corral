@@ -48,3 +48,11 @@ export function prLabel(url: string): string {
   const gh = url.match(/\/pull\/(\d+)/);
   return gh ? `PR #${gh[1]}` : "PR";
 }
+
+/** GitHub pull request or GitLab merge request URL (mirrors the server check). */
+export function isPrUrl(url: string): boolean {
+  return /^https?:\/\/[^\s/]+\/[^\s]+?(?:\/pull\/|\/-\/merge_requests\/)\d+\/?$/.test(url.trim());
+}
+
+/** Review tasks run on Claude only for now (they use a Claude skill). */
+export const REVIEW_HARNESS = "claude";
