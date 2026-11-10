@@ -225,3 +225,14 @@ export function benchmarkColumns(rows: { picks: Record<string, unknown> }[]): st
   for (const row of rows) for (const name of Object.keys(row.picks)) counts.set(name, (counts.get(name) ?? 0) + 1);
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name]) => name);
 }
+
+/** Rank within one benchmark; scores from different benchmarks are not comparable. */
+export function sortBenchmarkRows<T extends BenchmarkResultInput>(rows: BenchmarkRow<T>[], benchmark: string): BenchmarkRow<T>[] {
+  return [...rows].sort((a, b) => {
+    const aScore = a.picks[benchmark]?.result.score;
+    const bScore = b.picks[benchmark]?.result.score;
+    if (aScore === undefined && bScore !== undefined) return 1;
+    if (bScore === undefined && aScore !== undefined) return -1;
+    return (bScore ?? 0) - (aScore ?? 0) || a.label.localeCompare(b.label);
+  });
+}
