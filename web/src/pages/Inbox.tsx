@@ -159,6 +159,36 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
     }
   };
 
+  const archiveTask = async (task: Task) => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      const updated = await api.patchTask(task.id, { status: "archived" });
+      setTasks((prev) => prev.map((entry) => entry.id === updated.id ? updated : entry));
+      setSelectedTaskId(null);
+      refresh();
+    } catch (err) {
+      setActionError(errText(err));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const openTaskSession = async (address: string) => {
+    if (openBusy) return;
+    setOpenBusy(true);
+    setActionError(null);
+    try {
+      const result = await api.openSession(address);
+      if (result.url) window.open(result.url, "_blank", "noopener");
+    } catch (err) {
+      setActionError(errText(err));
+    } finally {
+      setOpenBusy(false);
+    }
+  };
+
   const onReplyKeyDown = (ev: KeyboardEvent<HTMLTextAreaElement>) => {
     if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
       ev.preventDefault();
@@ -300,7 +330,20 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
               <div className="detail-meta"><span className="chip chip-static status-dispatched">in progress</span></div>
             </div>
             <div className="detail-body"><Markdown text={selectedTask.prompt} className="body-text" /></div>
-            <div className="detail-actions"><a className="btn" href="#/tasks">View tasks</a></div>
+            <div className="detail-actions">
+              <div className="action-row">
+                {selectedTask.terminal_address ? (
+                  <button className="btn btn-primary" disabled={openBusy} onClick={() => void openTaskSession(selectedTask.terminal_address!)}>
+                    {openBusy ? "Opening…" : "View task"}
+                  </button>
+                ) : <span className="muted">No session available.</span>}
+                <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask)} title="Archive this task; its session keeps running">
+                  Archive task
+                </button>
+              </div>
+              <div className="muted">Archiving does not stop the session.</div>
+              {actionError ? <div className="inline-error">{actionError}</div> : null}
+            </div>
           </>
         ) : !selected ? (
           <div className="pane-note">Select an item to review it.</div>
