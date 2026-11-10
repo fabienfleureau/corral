@@ -183,6 +183,7 @@ export const api = {
     get<Task[]>(`/api/tasks${query({ status })}`),
   createTask: (input: NewTaskInput): Promise<Task> => post<Task>("/api/tasks", input),
   patchTask: (id: string, input: Partial<Task>): Promise<Task> => patch<Task>(`/api/tasks/${id}`, input),
+  archiveTaskSession: (id: string): Promise<Task> => post<Task>(`/api/tasks/${id}/archive-session`),
   dispatchTask: (
     id: string,
     input: { target?: string; use_worktree?: boolean; agent?: string | null; model?: string | null; reasoning?: string | null },

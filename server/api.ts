@@ -304,6 +304,22 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, state.db.getTask(task.id));
   });
 
+  on("POST", "/api/tasks/:id/archive-session", async (_req, res, { params }) => {
+    const task = state.db.getTask(params.id);
+    if (!task) return json(res, 404, { error: "task not found" });
+    if (task.status !== "dispatched" || !task.terminal_address) return json(res, 400, { error: "task has no active session" });
+    if (!state.backend.archive) return json(res, 501, { error: "this backend cannot archive sessions" });
+    try {
+      await state.backend.archive(task.terminal_address);
+      state.db.updateTask(task.id, { status: "archived" });
+      const updated = state.db.getTask(task.id);
+      state.hub.broadcast("task.updated", updated);
+      json(res, 200, updated);
+    } catch (err) {
+      json(res, 500, { error: String(err) });
+    }
+  });
+
   on("POST", "/api/tasks/:id/dispatch", async (req, res, { body, params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
