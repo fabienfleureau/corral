@@ -212,7 +212,7 @@ export function App() {
             will fail until the connection is back.
           </div>
         ) : null}
-        {tab === "inbox" ? <InboxPage eventVersion={eventVersion} refresh={refresh} onSeen={markInboxSeen} /> : null}
+        <InboxPage active={tab === "inbox"} eventVersion={eventVersion} refresh={refresh} onSeen={markInboxSeen} />
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
