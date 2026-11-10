@@ -3,16 +3,26 @@
 // Strategy per resource class:
 //   navigations   network-first (3s), fallback to the cached shell
 //   static assets cache-first (hash-named = immutable)
-//   API GETs      network-first (3s), fallback to the last cached response
+//   API GETs      network-first, fallback to the last cached response
 //   /api/events   pass-through (SSE — never cache a stream)
 //   mutations     pass-through (network-only)
+//
+// An API GET is never abandoned early: a slow endpoint is a slow answer, not an
+// outage. Cutting every API read off at 3s fabricated `503 {"error":"offline"}`
+// for healthy servers whenever a request took a bit long (usage quota, session
+// list, tasks with per-session lookups). Only a real network failure falls back
+// to the cache, and with no cached copy the request fails like any other
+// offline request instead of inventing a response.
 //
 // Bump CACHE when the caching semantics change (not on every deploy — hashed
 // assets and network-first navigations pick up new deploys automatically).
 
-const CACHE = "corral-v3";
+const CACHE = "corral-v4";
 const SHELL = ["/"];
-const TIMEOUT_MS = 3000;
+/** Navigations: past this, showing the cached shell beats a white screen. */
+const NAV_TIMEOUT_MS = 3000;
+/** API reads: backstop against a socket that never settles, nothing more. */
+const API_TIMEOUT_MS = 60_000;
 
 /** Hashed JS/CSS the shell references: precached so the first offline
  *  reload works (on first visit they load before this worker controls the page). */
@@ -50,20 +60,16 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-function fetchWithTimeout(request, ms) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), ms);
-    fetch(request).then(
-      (response) => {
-        clearTimeout(timer);
-        resolve(response);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
+/** fetch() bounded by a real abort: a request we stop waiting for must also
+ *  stop consuming a socket and server work. */
+async function fetchTimed(request, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(request, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Best effort: a full or failing cache must never discard a good response. */
@@ -78,28 +84,29 @@ function cachePut(request, response) {
   return Promise.resolve();
 }
 
-/** Network-first with timeout; fall back to cache (and optionally the shell). */
-async function networkFirst(request, fallbackToShell) {
+/** A cached response, marked so the UI can say "offline — cached data". */
+function staleCopy(hit) {
+  const headers = new Headers(hit.headers);
+  headers.set("X-Corral-Cache", "hit");
+  return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers });
+}
+
+/** Network-first with a bounded wait; fall back to cache (and optionally the
+ *  shell). Returns a network error — never a made-up 503 — when nothing is
+ *  cached and the network is really down. */
+async function networkFirst(request, { timeoutMs, shell }) {
   try {
-    const response = await fetchWithTimeout(request, TIMEOUT_MS);
+    const response = await fetchTimed(request, timeoutMs);
     await cachePut(request, response);
     return response;
   } catch {
     const hit = await caches.match(request);
-    if (hit) {
-      // Mark the stale response so the UI can say "offline — cached data".
-      const headers = new Headers(hit.headers);
-      headers.set("X-Corral-Cache", "hit");
-      return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers });
+    if (hit) return staleCopy(hit);
+    if (shell) {
+      const cachedShell = await caches.match("/");
+      if (cachedShell) return cachedShell;
     }
-    if (fallbackToShell) {
-      const shell = await caches.match("/");
-      if (shell) return shell;
-    }
-    return new Response(JSON.stringify({ error: "offline" }), {
-      status: 503,
-      headers: { "Content-Type": "application/json", "X-Corral-Cache": "miss" },
-    });
+    return Response.error();
   }
 }
 
@@ -112,7 +119,7 @@ async function cacheFirst(request) {
     await cachePut(request, response);
     return response;
   } catch {
-    return new Response("", { status: 503, statusText: "offline" });
+    return Response.error();
   }
 }
 
@@ -151,11 +158,11 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname === "/api/events") return; // SSE stream: never cache
 
   if (url.pathname.startsWith("/api/")) {
-    event.respondWith(networkFirst(request, false));
+    event.respondWith(networkFirst(request, { timeoutMs: API_TIMEOUT_MS, shell: false }));
     return;
   }
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request, true));
+    event.respondWith(networkFirst(request, { timeoutMs: NAV_TIMEOUT_MS, shell: true }));
     return;
   }
   event.respondWith(cacheFirst(request));

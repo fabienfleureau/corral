@@ -19,9 +19,11 @@ import { startSyncAllPrs, syncTaskPr } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Item, Task } from "./types.ts";
 import { taskLabel } from "./types.ts";
-import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, opencodeGoQuota, type UsageRange } from "./usage.ts";
+import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type UsageRange } from "./usage.ts";
 import { getBenchmarks, syncBenchmarks } from "./benchmarks.ts";
 import { PrAdditionsCache } from "./usage-pr.ts";
+import { withDeadline } from "./deadline.ts";
+import { cacheControlFor, etagFor, isFresh } from "./static-cache.ts";
 
 export interface AppState {
   db: Db;
@@ -32,6 +34,8 @@ export interface AppState {
   hub: Hub & { clients: Set<ServerResponse> };
   /** Agent usage scanner (Claude/Codex logs); created on first use when absent. */
   usage?: UsageScanner;
+  /** Cached OpenCode Go quota snapshot (external HTTPS call, polled by the UI). */
+  goQuota?: GoQuotaCache;
   prAdditions?: PrAdditionsCache;
 }
 
@@ -126,6 +130,12 @@ export function permissionVerdict(e: ItemElicitation, choice: string): { action:
   }
   return null;
 }
+
+/** Reads a page load depends on (sessions, tasks, harnesses) get a bounded
+ *  wait: an unreachable worker backend must not hang the request. */
+const BACKEND_READ_MS = 3000;
+const BACKEND_LIST_MS = 4000;
+const BACKEND_HARNESSES_MS = 6000;
 
 export function createHttpServer(state: AppState): ReturnType<typeof createServer> {
   const routes: { method: string; pattern: RegExp; keys: string[]; handler: Handler }[] = [];
@@ -236,7 +246,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const tasks = state.db.listTasks(status as never);
     const sessions = await Promise.all(tasks.map(async (task) => {
       if (!task.terminal_address) return null;
-      try { return await state.backend.get(task.terminal_address); } catch { return null; }
+      try { return await withDeadline(state.backend.get(task.terminal_address), BACKEND_READ_MS, null); } catch { return null; }
     }));
     json(res, 200, tasks.map((task, i) => ({ ...task, session_model: sessions[i]?.model ?? null, session_reasoning: sessions[i]?.reasoning ?? null })));
   });
@@ -396,7 +406,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const tasks = new Map(state.db.listTasks().map((t) => [t.id, t]));
     let sessions: Awaited<ReturnType<WorkerBackend["list"]>> = [];
     try {
-      sessions = await state.backend.list();
+      sessions = await withDeadline(state.backend.list(), BACKEND_LIST_MS, []);
     } catch {
       /* backend unreachable: report from the db alone */
     }
@@ -435,10 +445,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/harnesses", async (_req, res) => {
     try {
       const harnesses = state.backend.harnesses
-        ? await state.backend.harnesses()
+        ? await withDeadline(state.backend.harnesses(), BACKEND_HARNESSES_MS, null)
         : Object.keys(state.cfg.agents).map((harness) => ({ harness, agents: [] }));
+      if (!harnesses) return json(res, 504, { error: "the worker backend did not answer — try again in a moment" });
       const agents = state.backend.registryAgents
-        ? await state.backend.registryAgents()
+        ? await withDeadline(state.backend.registryAgents(), BACKEND_HARNESSES_MS, harnesses.flatMap((h) => h.agents))
         : harnesses.flatMap((h) => h.agents);
       json(res, 200, { harnesses, agents });
     } catch (err) {
@@ -628,7 +639,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         tasks,
         prices: { ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
         range: raw as UsageRange,
-        quota: [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), await opencodeGoQuota()],
+        quota: [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), await (state.goQuota ??= new GoQuotaCache()).get()],
         scanning: !scanner.ready,
       }), pr_additions: prAdditions },
     );
@@ -757,7 +768,18 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
           ".png": "image/png",
           ".ico": "image/x-icon",
         };
-        res.writeHead(200, { "Content-Type": types[ext] ?? "application/octet-stream" });
+        const stat = statSync(file);
+        const etag = etagFor(stat.size, stat.mtimeMs);
+        const cacheControl = cacheControlFor(path);
+        const head = { "Content-Type": types[ext] ?? "application/octet-stream", "Cache-Control": cacheControl, ETag: etag };
+        // Revalidation is cheap and keeps a cached shell honest: 304 when the
+        // file did not change, a full body when a deploy replaced it.
+        if (isFresh(req.headers["if-none-match"], etag)) {
+          res.writeHead(304, { "Cache-Control": cacheControl, ETag: etag });
+          res.end();
+          return;
+        }
+        res.writeHead(200, head);
         if (req.method === "HEAD") res.end();
         else res.end(readFileSync(file));
         return;

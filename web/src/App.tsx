@@ -94,16 +94,30 @@ export function App() {
 
   // Live updates: one SSE connection feeds every page + desktop notifications.
   // PR items start unready and flip via item.updated once the gate passes.
+  // Bursts of events (an agent working emits several) are coalesced into one
+  // refresh: every page and the sidebar counts refetch on the version bump, so
+  // one bump per event turned agent activity into a request storm.
   useEffect(() => {
     const trackNotification = createNotificationTracker();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const bumpSoon = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        setEventVersion((v) => v + 1);
+      }, 250);
+    };
     const close = subscribeEvents((event) => {
       const item = trackNotification(event);
       if (item) {
         sendDesktopNotification(item.title, item.summary || item.body.slice(0, 120));
       }
-      setEventVersion((v) => v + 1);
+      bumpSoon();
     });
-    return close;
+    return () => {
+      if (timer) clearTimeout(timer);
+      close();
+    };
   }, []);
 
   // Sidebar open counts.

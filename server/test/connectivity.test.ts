@@ -33,3 +33,43 @@ test('a failed health check warns and a fresh response clears it', async () => {
     assert.deepEqual(states, [true, false]);
   } finally { globalThis.fetch = original; setCacheStateHandler(null); }
 });
+
+test('a transient network failure on a read is retried once', async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) throw new TypeError('network down');
+    return new Response('[]');
+  };
+  try {
+    assert.deepEqual(await api.listTasks(), []);
+    assert.equal(calls, 2);
+  } finally { globalThis.fetch = original; }
+});
+
+test('a read that keeps failing surfaces the network error', async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw new TypeError('network down');
+  };
+  try {
+    await assert.rejects(() => api.listTasks(), /network error/);
+    assert.equal(calls, 2);
+  } finally { globalThis.fetch = original; }
+});
+
+test('writes are never retried: they are not idempotent', async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(JSON.stringify({ error: 'gateway' }), { status: 503 });
+  };
+  try {
+    await assert.rejects(() => api.syncPrs(), /gateway/);
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = original; }
+});
