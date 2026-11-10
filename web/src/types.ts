@@ -4,6 +4,8 @@ export type Task = {
   id: string;
   title: string;
   prompt: string;
+  /** "review": review the existing PR/MR in pr_url; no branch, no PR. */
+  kind?: "code" | "review";
   repo_path: string;
   target: string; // "", "claude", "codex", "opencode"
   target_state: "suggested" | "confirmed";

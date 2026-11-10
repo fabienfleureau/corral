@@ -239,8 +239,10 @@ export class CaptureEngine {
     options?: string[];
   }): Promise<Item> {
     const isDone = opts.kind === "done" || opts.kind === "pr";
-    const itemKind: Item["kind"] = isDone ? "pr" : "question";
     const taskId = opts.taskId ?? null;
+    // A finished review has no PR of its own to gate: report it as information.
+    const review = taskId ? this.db.getTask(taskId)?.kind === "review" : false;
+    const itemKind: Item["kind"] = isDone ? (review ? "digest" : "pr") : "question";
     const address =
       opts.terminal ??
       (taskId ? this.db.getTask(taskId)?.terminal_address ?? null : null);

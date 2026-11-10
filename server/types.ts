@@ -5,11 +5,19 @@ export type AgentTarget = "claude" | "codex" | "opencode" | string;
 
 export type TaskStatus = "open" | "dispatched" | "done" | "archived";
 export type TargetState = "suggested" | "confirmed";
+/** code: the agent changes code and opens a PR. review: the agent reviews an
+ *  existing PR/MR (pr_url) and posts comments only after the human approves. */
+export type TaskKind = "code" | "review";
+
+/** Matches a GitHub pull request or GitLab merge request URL. */
+export const PR_URL_RE = /^https?:\/\/[^\s/]+\/[^\s]+?(?:\/pull\/|\/-\/merge_requests\/)\d+\/?$/;
 
 export interface Task {
   id: string;
   title: string;
   prompt: string;
+  /** Absent on rows written before the column existed: treat as "code". */
+  kind?: TaskKind;
   repo_path: string;
   target: AgentTarget;
   target_state: TargetState;
