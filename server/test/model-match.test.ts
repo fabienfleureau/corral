@@ -86,3 +86,13 @@ test('harness models without a published result stay listed, published strangers
   ]);
   assert.deepEqual(benchmarkColumns(rows), ['SWE-bench Verified']);
 });
+
+test('benchmark ranking orders scores descending and leaves missing results last', async () => {
+  const { sortBenchmarkRows } = await import('../../web/src/model-match.ts');
+  const rows = buildBenchmarkRows(
+    [{ harness: 'x', id: 'gemini-3-flash', label: 'Gemini 3 Flash' }],
+    [result('Claude Opus 5.5', 'A', 50), result('GPT-6.1 Sol', 'A', 90), result('Gemini 3 Flash', 'B', 99)],
+  );
+  assert.deepEqual(sortBenchmarkRows(rows, 'A').map(row => row.label), ['GPT-6.1 Sol', 'Claude Opus 5.5', 'Gemini 3 Flash']);
+  assert.deepEqual(sortBenchmarkRows(rows, 'B').map(row => row.label), ['Gemini 3 Flash', 'Claude Opus 5.5', 'GPT-6.1 Sol']);
+});

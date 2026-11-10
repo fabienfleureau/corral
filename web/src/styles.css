@@ -1667,6 +1667,8 @@ select:focus {
 .bench-table table { width: 100%; border-collapse: collapse; text-align: left; }
 .bench-table th, .bench-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .bench-table th { white-space: nowrap; font-size: 12px; color: var(--muted); font-weight: 600; }
+.bench-sort { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.bench-sort:hover { color: var(--accent-ink); }
 .bench-model-col { position: sticky; left: 0; z-index: 1; background: var(--bg); min-width: 190px; }
 .bench-model { font-weight: 600; }
 .bench-harness { display: inline-block; margin: 0 4px 4px 0; padding: 1px 7px; border-radius: 999px; background: var(--chip-bg); color: var(--muted); font-size: 11px; }
