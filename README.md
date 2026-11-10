@@ -36,8 +36,9 @@ idea → Jira (clarify outside Corral) → task backlog → dispatch (worktree +
   from day one (`/api/metrics/summary`), feeding the future daily analysis.
 - **Offline mode** — a service worker caches the app shell and the last-known
   API responses: the inbox opens on a flaky connection showing cached data
-  (network-first with a 3s timeout; stale beats nothing), static assets are
-  cache-first, streams and mutations pass through. An offline banner shows when
+  (network-first; a real network failure falls back to the cache, a slow
+  endpoint is simply awaited), static assets are cache-first, streams and
+  mutations pass through. An offline banner shows when
   you are disconnected.
 
 ## Quickstart

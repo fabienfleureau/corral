@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Task } from "./types.ts";
+import { withDeadline } from "./deadline.ts";
 
 export type UsageAgent = "claude" | "codex" | "opencode-go";
 
@@ -376,9 +377,53 @@ export interface AgentQuota {
   note: string | null;
 }
 
+/** Quota placeholder for "the upstream could not be asked" — never an error,
+ *  the page just shows the note. */
+export function emptyGoQuota(note: string): AgentQuota {
+  return { agent: "opencode-go", source: "OpenCode Go", as_of_ms: null, stale: true, plan: null, windows: [], note };
+}
+
+/** How long a good snapshot stays fresh, how long a failure is remembered
+ *  (enough to stop a poll loop from hammering, short enough to recover), and
+ *  how long a request may wait on the upstream before the page gets a note. */
+const GO_QUOTA_TTL_MS = 60_000;
+const GO_QUOTA_ERROR_TTL_MS = 10_000;
+const GO_QUOTA_TIMEOUT_MS = 2500;
+
+/** OpenCode Go quota is behind an external HTTPS call. The Usage page polls
+ *  while it scans, so the snapshot is cached and one call is shared: polls
+ *  never fan out upstream, and a slow upstream never delays the report. */
+export class GoQuotaCache {
+  private cache: { at: number; ttl: number; value: AgentQuota } | null = null;
+  private inflight: Promise<AgentQuota> | null = null;
+  private fetchQuota: () => Promise<AgentQuota>;
+  private clock: () => number;
+
+  constructor(options: { fetchQuota?: () => Promise<AgentQuota>; clock?: () => number } = {}) {
+    this.fetchQuota = options.fetchQuota ?? (() => opencodeGoQuota());
+    this.clock = options.clock ?? Date.now;
+  }
+
+  async get(): Promise<AgentQuota> {
+    const now = this.clock();
+    if (this.cache && now - this.cache.at < this.cache.ttl) return this.cache.value;
+    this.inflight ??= this.fetchQuota()
+      .catch(() => emptyGoQuota("Could not reach OpenCode Go quota service."))
+      .then((value) => {
+        const ok = value.as_of_ms !== null;
+        this.cache = { at: this.clock(), ttl: ok ? GO_QUOTA_TTL_MS : GO_QUOTA_ERROR_TTL_MS, value };
+        return value;
+      })
+      .finally(() => {
+        this.inflight = null;
+      });
+    return withDeadline(this.inflight, GO_QUOTA_TIMEOUT_MS, emptyGoQuota("OpenCode Go quota is slow — retrying shortly."));
+  }
+}
+
 /** Account-wide Go quota, using the credential registered with OpenCode. */
 export async function opencodeGoQuota(dir = process.env.OPENCODE_DATA_DIR || join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "opencode"), fetcher: typeof fetch = fetch, now = Date.now()): Promise<AgentQuota> {
-  const empty = (note: string): AgentQuota => ({ agent: "opencode-go", source: "OpenCode Go", as_of_ms: null, stale: true, plan: null, windows: [], note });
+  const empty = emptyGoQuota;
   let key: unknown;
   try { key = JSON.parse(readFileSync(join(dir, "auth.json"), "utf8"))["opencode-go"]?.key; } catch { return empty("Connect OpenCode Go in OpenCode to see quota."); }
   if (typeof key !== "string" || !key) return empty("Connect OpenCode Go in OpenCode to see quota.");

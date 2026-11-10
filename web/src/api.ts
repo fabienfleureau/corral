@@ -34,6 +34,32 @@ export function setCacheStateHandler(handler: CacheStateHandler | null): void {
   cacheStateHandler = handler;
 }
 
+// Reads are idempotent: one retry turns a transient blip (network hiccup,
+// gateway error, server still starting) into a slightly slower page instead of
+// an error the human has to re-trigger by hand.
+const RETRY_DELAY_MS = 250;
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(path: string, init: RequestInit): Promise<Response> {
+  const retry = init.method === "GET";
+  try {
+    const res = await fetch(path, init);
+    if (retry && RETRYABLE_STATUS.has(res.status)) {
+      await delay(RETRY_DELAY_MS);
+      return await fetch(path, init);
+    }
+    return res;
+  } catch (err) {
+    if (!retry) throw err;
+    await delay(RETRY_DELAY_MS);
+    return await fetch(path, init);
+  }
+}
+
 async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
@@ -46,7 +72,7 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
       method === "GET" && mutationVersion > 0
         ? `${path}${path.includes("?") ? "&" : "?"}_mv=${mutationVersion}`
         : path;
-    res = await fetch(requestPath, init);
+    res = await fetchWithRetry(requestPath, init);
     if (method === "GET") {
       const version = ++connectivityVersion;
       if (res.headers.has("X-Corral-Cache")) {

@@ -7,14 +7,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_PRICES,
+  GoQuotaCache,
   UsageScanner,
   buildReport,
   claudeQuota,
   codexQuota,
+  opencodeGoQuota,
   parseClaudeLine,
   parseCodexLines,
   priceFor,
   recordCost,
+  type AgentQuota,
   type UsageRecord,
 } from "../usage.ts";
 import type { Task } from "../types.ts";
@@ -240,4 +243,57 @@ test("PR additions group unique links by project, configured model and task", as
   ]);
   assert.equal(result.by_task.length, 3);
   assert.equal(result.by_task[1].additions, 10);
+});
+
+const quotaSnapshot: AgentQuota = { agent: "opencode-go", source: "OpenCode Go", as_of_ms: 1, stale: false, plan: null, windows: [], note: null };
+
+test("GoQuotaCache answers a burst of polls with one upstream call", async () => {
+  let calls = 0;
+  let now = 0;
+  const cache = new GoQuotaCache({ clock: () => now, fetchQuota: async () => { calls++; return quotaSnapshot; } });
+  const burst = await Promise.all([cache.get(), cache.get(), cache.get()]);
+  assert.equal(calls, 1);
+  assert.deepEqual(burst.map((q) => q.as_of_ms), [1, 1, 1]);
+  // Still fresh: served from the cache.
+  await cache.get();
+  assert.equal(calls, 1);
+  // Past the TTL: refreshed.
+  now += 61_000;
+  await cache.get();
+  assert.equal(calls, 2);
+});
+
+test("GoQuotaCache retries a failed upstream after a short pause", async () => {
+  let calls = 0;
+  let now = 0;
+  const cache = new GoQuotaCache({ clock: () => now, fetchQuota: async () => { calls++; throw new Error("upstream down"); } });
+  const first = await cache.get();
+  assert.match(first.note ?? "", /Could not reach/);
+  await cache.get();
+  assert.equal(calls, 1, "the failure is remembered briefly instead of hammering");
+  now += 11_000;
+  await cache.get();
+  assert.equal(calls, 2);
+});
+
+test("GoQuotaCache hands back a note instead of waiting on a slow upstream", async () => {
+  const cache = new GoQuotaCache({ clock: () => 0, fetchQuota: () => new Promise<AgentQuota>(() => undefined) });
+  const value = await cache.get();
+  assert.match(value.note ?? "", /slow/);
+});
+
+test("opencodeGoQuota skips a malformed response instead of throwing", async () => {
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "corral-quota-"));
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "auth.json"), JSON.stringify({ "opencode-go": { key: "k" } }));
+    const quota = await opencodeGoQuota(dir, async () => new Response(JSON.stringify({ usage: {} }), { status: 200 }));
+    assert.equal(quota.windows.length, 0);
+    assert.match(quota.note ?? "", /invalid/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

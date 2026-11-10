@@ -8,6 +8,15 @@ On 401 the UI shows a token-entry screen (send the token as `?token=` once).
 Live updates: `GET /api/events` (SSE). Events: `event: item.created|item.updated|task.updated|session.updated|pulls.updated`
 with the entity JSON as `data`. Use `item.created` for desktop notifications.
 
+Page-load endpoints never wait on a third party indefinitely: per-session lookups give up
+after 3s (`/api/tasks`), the session list after 4s, the harness registry after 6s, and the
+OpenCode Go quota after 2.5s. The response then carries last-known data or a note, so a
+stalled dependency degrades the page instead of hanging it.
+
+Static hosting: `/assets/*` (Vite content-hashed) is `Cache-Control: public, max-age=31536000,
+immutable`; the shell, `sw.js` and the other root files are `no-cache` with an `ETag`, so a
+reload is a 304 unless a deploy replaced them.
+
 ## Entities
 
 ```ts
@@ -51,7 +60,7 @@ type Item = {
 - `POST /api/prs/sync` → `{ok, ran}` — starts a background re-check of every dispatched/done task with a known PR (throttled to once per 30s; `ran: false` when skipped). A merged PR completes the task and archives all its items; a closed one resolves the PR item. Updates are broadcast as PRs are re-checked.
 
 ### Tasks
-- `GET /api/harnesses` → `{harnesses, agents}` — available harness groups, their model catalogs (when supported by the worker), and the full worker agent registry.
+- `GET /api/harnesses` → `{harnesses, agents}` — available harness groups, their model catalogs (when supported by the worker), and the full worker agent registry. 504 when the worker backend does not answer within 6s (retry shortly).
 - `GET /api/tasks?status=open|dispatched|done|archived` → `(Task & {session_model: string | null, session_reasoning: string | null})[]` — linked session settings reported by the worker, or null when unavailable
 - `POST /api/tasks` `{title?, prompt?, repo_path?, target?, model?, reasoning?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch
 - `PATCH /api/tasks/:id` partial task → `Task`
@@ -72,7 +81,7 @@ type Item = {
   estimate; models without a price count tokens only (`unpriced_calls`). Shared prices are in
   `DEFAULT_PRICES` in `server/usage.ts`, with optional overrides via `usage.prices` in config.json (`{"gpt-6*": {input, output, cacheRead?, cacheWrite5m?, cacheWrite1h?}}`, USD/MTok). Models without a reliable published price remain unpriced.
   PR additions include all-time current diff totals and `by_project`, `by_model` (configured task model; empty means unpinned), and `by_task` groups. Each group deduplicates linked PR URLs; shared PRs can appear in multiple groups. Availability counts identify incomplete data.
-  Claude quota comes from ccstatusline's cache, Codex quota from its latest `rate_limits` event, and OpenCode Go quota from its account usage endpoint using OpenCode's locally registered credential.
+  Claude quota comes from ccstatusline's cache, Codex quota from its latest `rate_limits` event, and OpenCode Go quota from its account usage endpoint using OpenCode's locally registered credential. The Go snapshot is cached for 60s (shared across concurrent polls) and a slow unreachable upstream yields an `AgentQuota` note instead of delaying the report.
   `scanning: true` while the first log scan runs (poll). Spend is attributed to a task when the session
   cwd is inside its `worktree_path`; `efficiency` = done tasks per $ and $ per done task.
 
