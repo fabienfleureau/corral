@@ -51,6 +51,19 @@ scripts/capture-screenshot.sh "$shot_dir/base" "$shot_dir/before.png" /tasks
 scripts/capture-screenshot.sh "$PWD" "$shot_dir/after.png" /tasks
 ```
 
+The benchmarks page reads the harness model catalog, which the fixture's
+unreachable backend cannot serve: set `CORRAL_FIXTURE_HARNESSES=1` to start a
+synthetic catalog stub (`scripts/omnigent-stub.ts`) so the capture shows real
+model matching instead of the "no harness models" fallback:
+
+```sh
+CORRAL_FIXTURE_HARNESSES=1 scripts/capture-screenshot.sh "$shot_dir/base" "$shot_dir/before.png" /benchmarks
+CORRAL_FIXTURE_HARNESSES=1 scripts/capture-screenshot.sh "$PWD" "$shot_dir/after.png" /benchmarks
+```
+
+Captures go through `scripts/screenshot-page.ts` (Chrome DevTools Protocol), which
+waits for the page to settle instead of firing at load.
+
 Replace `origin/main` with the PR base and `/tasks` with the same hash route for
 both captures. Set `CHROME` to the Chrome/Chromium executable if it is not at
 its default macOS location. The capture uses 1440×1000 pixels, a fresh profile,
