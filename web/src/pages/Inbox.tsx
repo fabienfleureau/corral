@@ -21,7 +21,7 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "in-progress", label: "In progress" },
 ];
 
-export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: number; refresh: () => void; onSeen: (items: Item[]) => void }) {
+export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: boolean; eventVersion: number; refresh: () => void; onSeen: (items: Item[]) => void }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
   const [allItems, setAllItems] = useState<Item[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -44,6 +44,7 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     setLoading(true);
     Promise.all([api.listItems(), api.listTasks(), api.listSessions().catch(() => [] as SessionInfo[])])
@@ -64,16 +65,17 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
     return () => {
       cancelled = true;
     };
-  }, [eventVersion, statusFilter]);
+  }, [active, eventVersion, statusFilter]);
 
   // Opening the inbox re-checks PRs: merged ones get resolved (server
   // broadcasts the changes, which bumps eventVersion and reloads the list).
   useEffect(() => {
+    if (!active) return;
     const sync = () => { if (document.visibilityState === "visible") void api.syncPrs().catch(() => undefined); };
     sync();
     document.addEventListener("visibilitychange", sync);
     return () => document.removeEventListener("visibilitychange", sync);
-  }, []);
+  }, [active]);
 
   const visibleItems = useVisibleInboxItems(allItems);
   const snoozedItems = useVisibleInboxItems(allItems, "snoozed");
@@ -83,12 +85,12 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
   const items = statusFilter === "snoozed" ? snoozedItems : statusFilter === "in-progress" ? inProgressItems : openItems;
   useEffect(() => {
     const acknowledge = () => {
-      if (!loading && !error && statusFilter === "open" && document.visibilityState === "visible") onSeen(items);
+      if (active && !loading && !error && statusFilter === "open" && document.visibilityState === "visible") onSeen(items);
     };
     acknowledge();
     document.addEventListener("visibilitychange", acknowledge);
     return () => document.removeEventListener("visibilitychange", acknowledge);
-  }, [items, loading, error, statusFilter, onSeen]);
+  }, [active, items, loading, error, statusFilter, onSeen]);
 
   const counts: Record<StatusFilter, number> = { open: openItems.length, snoozed: snoozedItems.length, "in-progress": inProgressItems.length + inProgressTasks.length };
 
@@ -222,7 +224,7 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
   const now = Date.now();
 
   return (
-    <div className="page inbox-page">
+    <div className="page inbox-page" style={active ? undefined : { display: "none" }}>
       <div className="list-pane">
         <div className="list-toolbar">
           <div className="chip-row">
@@ -237,6 +239,7 @@ export function InboxPage({ eventVersion, refresh, onSeen }: { eventVersion: num
               </button>
             ))}
           </div>
+          {loading && (items.length > 0 || (statusFilter === "in-progress" && inProgressTasks.length > 0)) ? <Spinner label="Loading…" /> : null}
         </div>
         {error ? <div className="inline-error">{error}</div> : null}
         <div className="item-list">
