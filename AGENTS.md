@@ -93,6 +93,10 @@ never commit screenshots or generated fixture data.
   `ALTER TABLE` migrations in `Db.migrate()`.
 - Agent-facing prompt text lives in `skills/` and is injected at dispatch —
   keep it short and imperative.
+- Web UI work (`web/`) uses the `modern-web-guidance` skill, installed in
+  `.agents/skills/` (Codex, OpenCode) and linked from `.claude/skills/` for
+  Claude Code. Baseline target: Baseline Widely available. Refresh with
+  `npx skills update`.
 
 ## Layout
 
