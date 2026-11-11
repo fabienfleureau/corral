@@ -215,6 +215,7 @@ export function SettingsPage() {
 
             {section === "general" ? (
               <>
+            <ImprovementSection />
             <section className="panel-form">
               <h2 className="panel-title">Theme</h2>
               <p className="muted">Light is the default. Dark follows your OS only when set to "system".</p>
@@ -440,5 +441,39 @@ function FavoritesSection({ initial }: { initial: Favorite[] }) {
     <div className="field-row"><ModelSettings models={catalog.find((h) => h.harness === harness)?.models ?? []} model={draft.model} reasoning={draft.reasoning} setModel={(model) => update({ model })} setReasoning={(reasoning) => update({ reasoning })} fieldClass="field" /></div>
     {error ? <div className="inline-error">{error}</div> : null}
     <div className="form-foot"><button className="btn btn-primary" disabled={busy || !draft.name.trim() || !harness || (!!draft.agent && !matchingAgents.some((a) => a.id === draft.agent))} onClick={() => { const next = [...favorites]; const favorite = { ...draft, name: draft.name.trim(), harness }; if (editing === null) next.push(favorite); else next[editing] = favorite; void save(next); }}>{editing === null ? "Add favorite" : "Save favorite"}</button>{editing !== null ? <button className="btn" onClick={() => { setEditing(null); setDraft({ name: "", harness: "", agent: "", model: "", reasoning: "" }); }}>Cancel</button> : null}</div>
+  </section>;
+}
+
+function ImprovementSection() {
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof api.improvementStatus>> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const refresh = () => api.improvementStatus().then(setStatus).catch((e: unknown) => setError(errText(e)));
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const schedule = async (days: number) => {
+    setBusy(true); setError(""); setMessage("");
+    try { setStatus(await api.setImprovementSchedule(days)); }
+    catch (e) { setError(errText(e)); } finally { setBusy(false); }
+  };
+  const run = async () => {
+    setBusy(true); setError(""); setMessage("");
+    try { await api.runImprovement(); setStatus(await api.improvementStatus()); setMessage("Analysis is in your inbox."); }
+    catch (e) { setError(errText(e)); } finally { setBusy(false); }
+  };
+  return <section className="panel-form">
+    <h2 className="panel-title">Engineering improvement analysis</h2>
+    <p className="muted">Review recent task and PR activity for delays, rework and improvement proposals. The configured assistant receives task titles, PR links, inbox item metadata and event metadata. Reports appear in your inbox; no tasks are dispatched.</p>
+    <label className="field"><span>Run automatically</span><select value={status?.intervalDays ?? 0} disabled={!status || busy} onChange={(e) => void schedule(Number(e.target.value))}>
+      <option value={0}>Off</option><option value={1}>Daily</option><option value={7}>Weekly</option><option value={30}>Every 30 days</option>
+    </select></label>
+    <p className="muted">Runs while Corral is open. Missed runs start after restart. {status?.lastSuccessMs ? `Last completed: ${new Date(status.lastSuccessMs).toLocaleString()}.` : "No analysis completed yet."}</p>
+    {status?.error ? <div className="inline-error">Last run failed: {status.error}</div> : null}
+    {error ? <div className="inline-error">{error}</div> : null}{message ? <div className="inline-ok">{message} <a href="#/inbox">Open inbox</a></div> : null}
+    <div className="form-foot"><button className="btn btn-primary" disabled={busy || !status || status.running} onClick={() => void run()}>{busy ? "Running…" : status?.running ? "Analysis running…" : "Run analysis now"}</button></div>
   </section>;
 }

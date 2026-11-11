@@ -88,6 +88,11 @@ type Item = {
   `scanning: true` while the first log scan runs (poll). Spend is attributed to a task when the session
   cwd is inside its `worktree_path`; `efficiency` = done tasks per $ and $ per done task.
 
+### Improvement analysis
+- `GET /api/improvement` → schedule, last attempt/success, error and running state.
+- `PUT /api/improvement` `{intervalDays: 0|1|7|30}` → updated state; 0 disables automatic runs.
+- `POST /api/improvement/run` → inbox digest after the configured assistant finishes. Concurrent requests share one run. The analysis sends up to 50 recent task snapshots, 200 inbox item metadata records, and 500 lifecycle events to the configured assistant; it does not dispatch work. Scheduled runs catch up after restart and failed runs retry after one hour.
+
 ### Misc
 - `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`. A `done` report on a review task creates a `digest` item (no PR gate); review tasks are never PR-synced
 - `GET /api/metrics/summary` → `{by_name: [{name, count, last_ms}], recent: [{id, ts, name, ref, data}]}`

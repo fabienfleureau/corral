@@ -1,3 +1,4 @@
+type ImprovementStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
 import type { BenchmarkSnapshot } from "./types";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
@@ -236,6 +237,9 @@ export const api = {
 
   getBenchmarks: (): Promise<BenchmarkSnapshot> => get<BenchmarkSnapshot>("/api/benchmarks"),
   syncBenchmarks: (): Promise<BenchmarkSnapshot> => post<BenchmarkSnapshot>("/api/benchmarks/sync"),
+  improvementStatus: (): Promise<ImprovementStatus> => get<ImprovementStatus>("/api/improvement"),
+  setImprovementSchedule: (intervalDays: number): Promise<ImprovementStatus> => put<ImprovementStatus>("/api/improvement", { intervalDays }),
+  runImprovement: (): Promise<Item> => post<Item>("/api/improvement/run"),
   getConfig: (): Promise<Config> => get<Config>("/api/config"),
   putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[] }): Promise<{ ok: boolean }> =>
     put<{ ok: boolean }>("/api/config", input),

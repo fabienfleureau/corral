@@ -12,7 +12,8 @@ import type { Db } from "./db.ts";
 import type { WorkerBackend, WorkerQuestion } from "./worker.ts";
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
-import { summarizeText } from "./llm.ts";
+import { summarizeText, llmComplete } from "./llm.ts";
+import { ImprovementAnalysis } from "./improvement.ts";
 import { dispatchTask } from "./dispatch.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import { startSyncAllPrs, syncTaskPr } from "./pr.ts";
@@ -33,6 +34,7 @@ export interface AppState {
   jira: JiraClient;
   hub: Hub & { clients: Set<ServerResponse> };
   /** Agent usage scanner (Claude/Codex logs); created on first use when absent. */
+  improvement?: ImprovementAnalysis;
   usage?: UsageScanner;
   /** Cached OpenCode Go quota snapshot (external HTTPS call, polled by the UI). */
   goQuota?: GoQuotaCache;
@@ -152,6 +154,19 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     );
     routes.push({ method, pattern, keys, handler });
   };
+
+  const improvement = state.improvement ??= new ImprovementAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt));
+  on("GET", "/api/improvement", (_req, res) => json(res, 200, improvement.status()));
+  on("PUT", "/api/improvement", (_req, res, { body }) => {
+    const days = (body as { intervalDays?: unknown } | null)?.intervalDays;
+    if (typeof days !== "number" || ![0, 1, 7, 30].includes(days)) return json(res, 400, { error: "Invalid interval" });
+    improvement.setIntervalDays(days);
+    json(res, 200, improvement.status());
+  });
+  on("POST", "/api/improvement/run", async (_req, res) => {
+    try { json(res, 200, await improvement.run()); }
+    catch (err) { json(res, 500, { error: err instanceof Error ? err.message : String(err) }); }
+  });
 
   // ---- health (unauthenticated) ----
   on("GET", "/api/health", (_req, res) => json(res, 200, { ok: true, name: "corral" }));

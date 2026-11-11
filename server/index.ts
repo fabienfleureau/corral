@@ -11,6 +11,8 @@ import { refreshPulls } from "./pulls.ts";
 import { createHttpServer, type AppState } from "./api.ts";
 import type { ServerResponse } from "node:http";
 import { UsageScanner, defaultSources } from "./usage.ts";
+import { ImprovementAnalysis } from "./improvement.ts";
+import { llmComplete } from "./llm.ts";
 
 const cfg = loadConfig();
 const db = new Db(join(cfg.dataDir, "corral.db"));
@@ -34,7 +36,10 @@ const hub = {
 
 const capture = new CaptureEngine(db, backend, hub, cfg);
 const usage = new UsageScanner(defaultSources());
-const state: AppState = { db, cfg, backend, capture, jira, hub, usage };
+const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt));
+const state: AppState = { db, cfg, backend, capture, jira, hub, usage, improvement };
+setTimeout(() => void improvement.runIfDue().catch(() => undefined), 10_000);
+setInterval(() => void improvement.runIfDue().catch(() => undefined), 60_000);
 // Usage page: warm the log scan so the first visit is fast.
 setTimeout(() => void usage.refresh().catch(() => undefined), 5_000);
 
