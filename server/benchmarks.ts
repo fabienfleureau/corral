@@ -1,4 +1,5 @@
 import type { Db } from './db.ts';
+import { reportedResults } from './benchmarks-reported.ts';
 
 export interface BenchmarkResult {
   id: string; benchmark: string; agent: string; model: string; reasoning: string | null;
@@ -59,5 +60,5 @@ export function deleteManualBenchmark(db: Db, model: string, benchmark: string):
 export function getBenchmarks(db: Db): { fetched_ms: number | null; results: BenchmarkResult[]; manual: ManualBenchmark[] } {
   const row = db.raw.prepare('SELECT fetched_ms, results FROM benchmark_snapshot WHERE id=1').get() as { fetched_ms: number; results: string } | undefined;
   const manual = db.raw.prepare('SELECT model, benchmark, score FROM benchmark_manual').all() as unknown as ManualBenchmark[];
-  return { fetched_ms: row?.fetched_ms ?? null, results: row ? JSON.parse(row.results) : [], manual };
+  return { fetched_ms: row?.fetched_ms ?? null, results: [...(row ? JSON.parse(row.results) as BenchmarkResult[] : []), ...reportedResults], manual };
 }
