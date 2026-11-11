@@ -21,6 +21,9 @@ export function BenchmarksPage() {
   const [query, setQuery] = useState('');
   const [onlyMine, setOnlyMine] = useState(true);
   const [sortBy, setSortBy] = useState('');
+  const [model, setModel] = useState('');
+  const [benchmark, setBenchmark] = useState('');
+  const [score, setScore] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -41,7 +44,15 @@ export function BenchmarksPage() {
     return () => { cancelled = true; };
   }, []);
 
-  const rows = useMemo(() => buildBenchmarkRows(harnessModels ?? [], snapshot?.results ?? []), [harnessModels, snapshot]);
+  const rows = useMemo(() => {
+    const manual = (snapshot?.manual ?? []).map(value => ({ ...value, id: `manual/${value.model}/${value.benchmark}`, agent: 'Manual', reasoning: null, date: null, source: '' }));
+    const built = buildBenchmarkRows(harnessModels ?? [], [...(snapshot?.results ?? []), ...manual]);
+    for (const row of built) for (const value of manual) {
+      const manualRow = buildBenchmarkRows([], [value])[0];
+      if (manualRow?.key === row.key) row.picks[value.benchmark] = { result: value, alternatives: 0 };
+    }
+    return built;
+  }, [harnessModels, snapshot]);
   const mine = useMemo(() => rows.filter((row) => row.availability.length > 0), [rows]);
   // Without a harness catalog (offline backend, fixture) every published model stays visible.
   const catalogReady = harnessModels !== null && mine.length > 0;
@@ -64,6 +75,18 @@ export function BenchmarksPage() {
     try { setSnapshot(await api.syncBenchmarks()); } catch (err) { setError(errText(err)); } finally { setBusy(false); }
   }
 
+  async function saveManual(e: React.FormEvent) {
+    e.preventDefault(); setBusy(true); setError('');
+    try { setSnapshot(await api.saveManualBenchmark({ model, benchmark, score: Number(score) })); setScore(''); }
+    catch (err) { setError(errText(err)); } finally { setBusy(false); }
+  }
+
+  async function removeManual(model: string, benchmark: string) {
+    setBusy(true); setError('');
+    try { setSnapshot(await api.deleteManualBenchmark(model, benchmark)); }
+    catch (err) { setError(errText(err)); } finally { setBusy(false); }
+  }
+
   const catalogNote = catalogError
     ? `Harness models are unavailable (${catalogError}). Showing every published model.`
     : harnessModels === null
@@ -73,13 +96,22 @@ export function BenchmarksPage() {
         : 'No harness models were reported. Showing every published model.';
 
   return <div className="page"><section className="page-scroll">
-    <div className="bench-head"><div><h1>Benchmarks</h1><p className="muted">Published results for coding agents, models and reasoning settings.</p></div><button className="btn btn-primary" disabled={busy} onClick={sync}>{busy ? 'Syncing…' : 'Sync results'}</button></div>
+    <div className="bench-head"><div><h1>Benchmarks</h1><p className="muted">Scores for coding agents, models and reasoning settings.</p></div><button className="btn btn-primary" disabled={busy} onClick={sync}>{busy ? 'Syncing…' : 'Sync results'}</button></div>
     <p className="muted">{snapshot?.fetched_ms ? `Last synced ${new Date(snapshot.fetched_ms).toLocaleString()}` : 'No results synced yet.'} Results stay unchanged until the next sync.</p>
     <p className="muted">Results are measured by their publishers. A missing configuration or reasoning level is not an estimate. Scores from different benchmarks are not directly comparable.</p>
-    <p className="muted">{catalogNote} One column per benchmark; each cell is the best published result for that model and opens its source.</p>
+    <p className="muted">{catalogNote} One column per benchmark; each cell shows your manual score or the best published result, which opens its source.</p>
     <p className="muted">Rows come from your harness catalogs. Published names are matched by family, variant and version; a version-less alias (<code>Sonnet</code>) follows the newest published version of that model.</p>
+    <form className="bench-manual" onSubmit={saveManual}>
+      <label>Model <input list="benchmark-models" value={model} onChange={e => setModel(e.target.value)} required /></label>
+      <datalist id="benchmark-models">{rows.map(row => <option key={row.key} value={row.label} />)}</datalist>
+      <label>Benchmark <input list="benchmark-names" value={benchmark} onChange={e => setBenchmark(e.target.value)} required /></label>
+      <datalist id="benchmark-names">{columns.map(name => <option key={name} value={name} />)}</datalist>
+      <label>Score (%) <input type="number" min="0" max="100" step="any" value={score} onChange={e => setScore(e.target.value)} required /></label>
+      <button className="btn" disabled={busy}>Save score</button>
+    </form>
+    <p className="muted">Manual scores override published scores for the same model and benchmark and survive syncs.</p>
     {error && <p className="inline-error">{error}</p>}
-    {snapshot?.results.length ? <>
+    {rows.length > 0 && columns.length > 0 ? <>
       <div className="bench-filters"><label>Search <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Model, harness or agent" /></label>{catalogReady ? <label className="bench-toggle"><input type="checkbox" checked={onlyMine} onChange={e => setOnlyMine(e.target.checked)} />Only models in my harnesses</label> : null}</div>
       <div className="bench-table"><table>
         <thead><tr><th className="bench-model-col">Model</th><th>Harnesses</th>{columns.map(name => <th key={name} aria-sort={name === selectedBenchmark ? 'descending' : undefined}><button className="bench-sort" onClick={() => setSortBy(name)} title={`Rank by ${name}`}>{name}{name === selectedBenchmark ? ' ↓' : ''}</button></th>)}</tr></thead>
@@ -89,6 +121,7 @@ export function BenchmarksPage() {
           {columns.map(name => {
             const pick = row.picks[name];
             if (!pick) return <td key={name}><span className="muted">—</span></td>;
+            if (!pick.result.source) return <td key={name}><div className="bench-score"><strong>{pick.result.score.toFixed(1)}%</strong><span className="bench-sub">Manual</span><button type="button" className="bench-sort" disabled={busy} onClick={() => removeManual(pick.result.model, name)}>Remove</button></div></td>;
             const detail = `${pick.result.model} · ${pick.result.agent}${pick.result.reasoning ? ` · ${pick.result.reasoning}` : ''}${pick.result.date ? ` · ${pick.result.date}` : ''}`;
             return <td key={name}><a className="bench-score" href={pick.result.source} target="_blank" rel="noreferrer" title={`${detail}${pick.alternatives ? ` · best of ${pick.alternatives + 1} published results` : ''}`}>
               <strong>{pick.result.score.toFixed(1)}%</strong>

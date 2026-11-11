@@ -101,5 +101,6 @@ type Item = {
 
 ### Benchmarks
 
-- `GET /api/benchmarks` returns the last persisted snapshot as `{ fetched_ms, results }`, or an empty snapshot before the first sync.
+- `GET /api/benchmarks` returns the last persisted snapshot as `{ fetched_ms, results, manual }`, or an empty snapshot before the first sync.
+- `POST /api/benchmarks/manual` saves `{ model, benchmark, score }` (score 0–100); `POST /api/benchmarks/manual/delete` removes it using `{ model, benchmark }`. Manual scores persist across syncs.
 - `POST /api/benchmarks/sync` fetches published SWE-bench and Terminal-Bench 4.0 results and replaces the snapshot only after both sources succeed. Results identify their source and report the publisher's agent, model, reasoning level (when disclosed), score and date.

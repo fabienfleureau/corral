@@ -92,6 +92,7 @@ export class Db {
   /** Migrate databases created by older versions. */
   private migrate(): void {
     this.raw.exec("CREATE TABLE IF NOT EXISTS benchmark_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), fetched_ms INTEGER NOT NULL, results TEXT NOT NULL)");
+    this.raw.exec("CREATE TABLE IF NOT EXISTS benchmark_manual (model TEXT NOT NULL, benchmark TEXT NOT NULL, score REAL NOT NULL, PRIMARY KEY (model, benchmark))");
     // Ideas were removed; discard the legacy data and index.
     this.raw.exec("DROP TABLE IF EXISTS ideas");
     const cols = this.raw.prepare("PRAGMA table_info(items)").all() as { name: string }[];

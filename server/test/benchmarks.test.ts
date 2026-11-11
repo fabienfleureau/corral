@@ -11,3 +11,19 @@ test('published results preserve configuration and scores', () => {
   assert.equal(terminal?.score, 45);
   assert.equal(parseTerminal({}, 'bad.json'), null);
 });
+
+test('manual results persist independently of published snapshots and can be removed', async () => {
+  const { Db } = await import('../db.ts');
+  const { getBenchmarks, saveManualBenchmark, deleteManualBenchmark } = await import('../benchmarks.ts');
+  const db = new Db(':memory:');
+  saveManualBenchmark(db, { model: 'GPT-6', benchmark: 'SWE-bench Verified', score: 42 });
+  db.raw.prepare('INSERT INTO benchmark_snapshot VALUES (1, ?, ?)').run(123, '[]');
+  assert.equal(getBenchmarks(db).manual[0].score, 42);
+  saveManualBenchmark(db, { model: 'GPT-6', benchmark: 'SWE-bench Verified', score: 0 });
+  assert.equal(getBenchmarks(db).manual.length, 1);
+  assert.equal(getBenchmarks(db).manual[0].score, 0);
+  assert.throws(() => saveManualBenchmark(db, { model: 'GPT-6', benchmark: 'SWE-bench Verified', score: 101 }));
+  deleteManualBenchmark(db, 'GPT-6', 'SWE-bench Verified');
+  assert.equal(getBenchmarks(db).manual.length, 0);
+  db.close();
+});

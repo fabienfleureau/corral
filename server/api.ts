@@ -20,7 +20,7 @@ import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Item, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type UsageRange } from "./usage.ts";
-import { getBenchmarks, syncBenchmarks } from "./benchmarks.ts";
+import { getBenchmarks, syncBenchmarks, saveManualBenchmark, deleteManualBenchmark } from "./benchmarks.ts";
 import { PrAdditionsCache } from "./usage-pr.ts";
 import { withDeadline } from "./deadline.ts";
 import { cacheControlFor, etagFor, isFresh } from "./static-cache.ts";
@@ -642,6 +642,17 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/terminals", (_req, res) => json(res, 200, state.db.listTerminals()));
 
   on("GET", "/api/benchmarks", (_req, res) => json(res, 200, getBenchmarks(state.db)));
+  on("POST", "/api/benchmarks/manual", (_req, res, { body }) => {
+    try { saveManualBenchmark(state.db, body as Parameters<typeof saveManualBenchmark>[1]); }
+    catch (err) { return json(res, 400, { error: String(err) }); }
+    json(res, 200, getBenchmarks(state.db));
+  });
+  on("POST", "/api/benchmarks/manual/delete", (_req, res, { body }) => {
+    const value = body as { model?: unknown; benchmark?: unknown };
+    if (typeof value?.model !== 'string' || typeof value.benchmark !== 'string') return json(res, 400, { error: 'model and benchmark required' });
+    deleteManualBenchmark(state.db, value.model, value.benchmark);
+    json(res, 200, getBenchmarks(state.db));
+  });
   on("POST", "/api/benchmarks/sync", async (_req, res) => {
     await syncBenchmarks(state.db);
     json(res, 200, getBenchmarks(state.db));
