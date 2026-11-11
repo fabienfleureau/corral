@@ -17,6 +17,10 @@ Static hosting: `/assets/*` (Vite content-hashed) is `Cache-Control: public, max
 immutable`; the shell, `sw.js` and the other root files are `no-cache` with an `ETag`, so a
 reload is a 304 unless a deploy replaced them.
 
+Unknown `/api/*` paths answer `404 {"error":"unknown endpoint: <METHOD> <path>"}`. The SPA
+shell is never served under `/api/*`, so a server older than the page reports a missing
+endpoint instead of returning HTML the client would fail to parse.
+
 ## Entities
 
 ```ts

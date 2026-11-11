@@ -106,7 +106,18 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
     throw new ApiError(res.status, message);
   }
   if (method !== "GET") mutationVersion++;
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch {
+    // A 2xx that is not JSON did not come from the API: an older server
+    // process serving the SPA shell for an unimplemented route, or a body cut
+    // short. Say that, instead of leaking the browser's JSON.parse message.
+    const type = res.headers.get("content-type") ?? "no content type";
+    throw new ApiError(
+      res.status,
+      `${method} ${path} returned ${type} instead of JSON (HTTP ${res.status}). The server may be older than this page — restart it and reload.`,
+    );
+  }
 }
 
 function get<T>(path: string): Promise<T> {

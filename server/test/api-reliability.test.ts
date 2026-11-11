@@ -43,3 +43,49 @@ test('a client revalidating an unchanged file gets a match', () => {
   assert.equal(isFresh('W/"different"', etag), false);
   assert.equal(isFresh(undefined, etag), false);
 });
+
+test('an unknown API path answers JSON 404 instead of the SPA shell', async () => {
+  const { createHttpServer } = await import('../../server/api.ts');
+  const { Db } = await import('../../server/db.ts');
+  const db = new Db(':memory:');
+  const server = createHttpServer({ db, cfg: { token: 'test' }, hub: { broadcast() {}, clients: new Set() } } as never);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = (server.address() as { port: number }).port;
+    const response = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`, { headers: { Authorization: 'Bearer test' } });
+    assert.equal(response.status, 404);
+    assert.match(response.headers.get('content-type') ?? '', /application\/json/);
+    const body = (await response.json()) as { error?: string };
+    assert.match(body.error ?? '', /unknown endpoint.*\/api\/does-not-exist/);
+    const put = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`, { method: 'PUT', headers: { Authorization: 'Bearer test' }, body: '{}' });
+    assert.equal(put.status, 404);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
+});
+
+test('a page path still falls back to the SPA shell', async (t) => {
+  const { existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  if (!existsSync(join(process.cwd(), 'web', 'dist', 'index.html'))) {
+    t.skip('web/dist not built');
+    return;
+  }
+  const { createHttpServer } = await import('../../server/api.ts');
+  const { Db } = await import('../../server/db.ts');
+  const db = new Db(':memory:');
+  const server = createHttpServer({ db, cfg: { token: 'test' }, hub: { broadcast() {}, clients: new Set() } } as never);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = (server.address() as { port: number }).port;
+    const response = await fetch(`http://127.0.0.1:${port}/tasks`, { headers: { Authorization: 'Bearer test' } });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') ?? '', /text\/html/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
+});
