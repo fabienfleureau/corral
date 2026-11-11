@@ -1711,3 +1711,7 @@ select:focus {
   background: var(--ok-soft);
   color: var(--ok-ink);
 }
+
+.bench-manual { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-top: 20px; }
+.bench-manual label { display: flex; flex-direction: column; gap: 4px; }
+.bench-manual input[type="number"] { width: 100px; }

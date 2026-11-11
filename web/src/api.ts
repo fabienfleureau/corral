@@ -235,6 +235,8 @@ export const api = {
     get<UsageReport>(`/api/usage?range=${range}${refresh ? "&refresh=1" : ""}`),
 
   getBenchmarks: (): Promise<BenchmarkSnapshot> => get<BenchmarkSnapshot>("/api/benchmarks"),
+  saveManualBenchmark: (value: { model: string; benchmark: string; score: number }): Promise<BenchmarkSnapshot> => post<BenchmarkSnapshot>("/api/benchmarks/manual", value),
+  deleteManualBenchmark: (model: string, benchmark: string): Promise<BenchmarkSnapshot> => post<BenchmarkSnapshot>("/api/benchmarks/manual/delete", { model, benchmark }),
   syncBenchmarks: (): Promise<BenchmarkSnapshot> => post<BenchmarkSnapshot>("/api/benchmarks/sync"),
   getConfig: (): Promise<Config> => get<Config>("/api/config"),
   putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[] }): Promise<{ ok: boolean }> =>

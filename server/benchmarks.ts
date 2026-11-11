@@ -45,7 +45,19 @@ export async function syncBenchmarks(db: Db): Promise<void> {
   db.raw.prepare('INSERT INTO benchmark_snapshot (id, fetched_ms, results) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET fetched_ms=excluded.fetched_ms, results=excluded.results').run(Date.now(), JSON.stringify([...swe, ...terminal]));
 }
 
-export function getBenchmarks(db: Db): { fetched_ms: number | null; results: BenchmarkResult[] } {
+export interface ManualBenchmark { model: string; benchmark: string; score: number }
+
+export function saveManualBenchmark(db: Db, value: ManualBenchmark): void {
+  if (typeof value?.model !== 'string' || !value.model.trim() || typeof value.benchmark !== 'string' || !value.benchmark.trim() || typeof value.score !== 'number' || !Number.isFinite(value.score) || value.score < 0 || value.score > 100) throw new Error('Model, benchmark and a score between 0 and 100 are required');
+  db.raw.prepare('INSERT INTO benchmark_manual (model, benchmark, score) VALUES (?, ?, ?) ON CONFLICT(model, benchmark) DO UPDATE SET score=excluded.score').run(value.model.trim(), value.benchmark.trim(), value.score);
+}
+
+export function deleteManualBenchmark(db: Db, model: string, benchmark: string): void {
+  db.raw.prepare('DELETE FROM benchmark_manual WHERE model=? AND benchmark=?').run(model, benchmark);
+}
+
+export function getBenchmarks(db: Db): { fetched_ms: number | null; results: BenchmarkResult[]; manual: ManualBenchmark[] } {
   const row = db.raw.prepare('SELECT fetched_ms, results FROM benchmark_snapshot WHERE id=1').get() as { fetched_ms: number; results: string } | undefined;
-  return row ? { fetched_ms: row.fetched_ms, results: JSON.parse(row.results) } : { fetched_ms: null, results: [] };
+  const manual = db.raw.prepare('SELECT model, benchmark, score FROM benchmark_manual').all() as unknown as ManualBenchmark[];
+  return { fetched_ms: row?.fetched_ms ?? null, results: row ? JSON.parse(row.results) : [], manual };
 }

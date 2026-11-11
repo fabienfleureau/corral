@@ -182,4 +182,5 @@ export type UsageReport = {
 export interface PrAdditionsGroup { key: string; additions: number; available: number; total: number }
 
 export interface BenchmarkResult { id: string; benchmark: string; agent: string; model: string; reasoning: string | null; score: number; date: string | null; source: string }
-export interface BenchmarkSnapshot { fetched_ms: number | null; results: BenchmarkResult[] }
+export interface ManualBenchmark { model: string; benchmark: string; score: number }
+export interface BenchmarkSnapshot { fetched_ms: number | null; results: BenchmarkResult[]; manual: ManualBenchmark[] }
