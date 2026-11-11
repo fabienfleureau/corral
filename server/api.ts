@@ -796,6 +796,14 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       return;
     }
 
+    // An unmatched API path is a missing endpoint, never a page: answering it
+    // with the SPA shell (200 text/html) makes a stale server look like a
+    // broken UI and surfaces as a raw "JSON.parse: unexpected character".
+    if (path === "/api" || path.startsWith("/api/")) {
+      json(res, 404, { error: `unknown endpoint: ${req.method} ${path}` });
+      return;
+    }
+
     // Static files
     if (req.method === "GET" || req.method === "HEAD") {
       if (path === "/" && url.searchParams.get("token")) {
