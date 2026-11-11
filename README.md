@@ -112,3 +112,6 @@ Storage: `~/.local/share/corral/corral.db` (SQLite). The data model carries
 npm test          # unit: slugify, db, worktrees, capture lifecycle
 npm run typecheck # server + web
 ```
+
+For an OpenCode Go workaround using Pi and LiteLLM, see
+[OpenCode Go with Pi and LiteLLM](docs/opencode-go-pi.md).
