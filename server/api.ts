@@ -1,4 +1,4 @@
-import { parseFavorites } from "./favorites.ts";
+import { isContext, parseFavorites } from "./favorites.ts";
 import { errors } from "./errors.ts";
 // HTTP API + static hosting. Token auth middleware (token-ready for LAN/team),
 // SSE hub for live inbox updates.
@@ -18,7 +18,7 @@ import { dispatchTask } from "./dispatch.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import { startSyncAllPrs, syncTaskPr } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
-import type { Item, Task } from "./types.ts";
+import type { Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type UsageRange } from "./usage.ts";
 import { getBenchmarks, syncBenchmarks, saveManualBenchmark, deleteManualBenchmark } from "./benchmarks.ts";
@@ -534,7 +534,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("PATCH", "/api/repos/:id", (req, res, { body, params }) => {
     const repo = state.db.getRepo(params.id);
     if (!repo) return json(res, 404, { error: "repo not found" });
-    const patch = body as Partial<{ name: string; jira_prefix: string | null }>;
+    const b = (body ?? {}) as Record<string, unknown>;
+    if (b.context !== undefined && b.context !== null && !isContext(b.context)) return json(res, 400, { error: "context must be professional, personal or null" });
+    const patch: Partial<Repo> = {};
+    if (typeof b.name === "string") patch.name = b.name;
+    if (typeof b.jira_prefix === "string" || b.jira_prefix === null) patch.jira_prefix = b.jira_prefix;
+    if (b.context !== undefined) patch.context = b.context as Repo["context"];
     state.db.updateRepo(repo.id, patch);
     json(res, 200, state.db.getRepo(repo.id));
   });
@@ -700,7 +705,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/config", (_req, res) => {
     const cfg = state.cfg;
     json(res, 200, {
-      favorites: cfg.favorites ?? [],
+      // Favorites saved before contexts existed read as professional.
+      favorites: (cfg.favorites ?? []).map((f) => ({ ...f, context: isContext(f.context) ? f.context : "professional" })),
       port: cfg.port,
       host: cfg.host,
       agents: Object.keys(cfg.agents),

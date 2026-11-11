@@ -44,7 +44,7 @@ if [ "${CORRAL_FIXTURE_HARNESSES:-}" = "1" ]; then
   omnigent_url="http://127.0.0.1:$stub_port"
 fi
 printf '{"omnigent":{"baseUrl":"%s"},"workspaceRoots":[]}\n' "$omnigent_url" > "$scratch/home/.config/corral/config.json"
-node "$fixture_root/scripts/screenshot-fixture.ts" "$scratch/data/corral.db"
+node "$fixture_root/scripts/screenshot-fixture.ts" "$scratch/data/corral.db" "$scratch/home/.config/corral/config.json"
 port=$(node -e 'const s=require("node:net").createServer(); s.listen(0,"127.0.0.1",()=>{console.log(s.address().port); s.close()})')
 cd "$checkout"
 env -i HOME="$scratch/home" PATH="$scratch/bin:/usr/bin:/bin:/usr/sbin:/sbin:$(dirname "$(command -v node)")" \

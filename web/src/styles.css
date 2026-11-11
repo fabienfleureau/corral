@@ -1094,6 +1094,7 @@ select:focus {
 
 .repo-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -1104,6 +1105,8 @@ select:focus {
 
 .repo-info {
   display: flex;
+  flex: 1 1 220px;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -1115,9 +1118,10 @@ select:focus {
 
 .repo-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  flex-shrink: 0;
+  min-width: 0;
 }
 
 .prefix-input {

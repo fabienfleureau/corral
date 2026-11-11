@@ -1,6 +1,15 @@
 import { Db } from "../server/db.ts";
+import type { Favorite } from "../server/favorites.ts";
 import type { Task } from "../server/types.ts";
+import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+
+/** One favorite per context, plus one more professional, to show the task form filter. */
+export const screenshotFavorites: Favorite[] = [
+  { name: "Careful review", harness: "claude", agent: "", model: "", reasoning: "high", context: "professional" },
+  { name: "Quick fix", harness: "codex", agent: "", model: "gpt-5.4", reasoning: "low", context: "professional" },
+  { name: "Side project", harness: "opencode", agent: "", model: "", reasoning: "", context: "personal" },
+];
 
 export function seedScreenshotData(db: Db): void {
   const rows: Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning">[] = [
@@ -15,6 +24,8 @@ export function seedScreenshotData(db: Db): void {
     jira_url: null, jira_parent_key: null, pr_url: null, pr_meta: null, terminal_address: null,
     exit_code: null, created_ms: now - index * 60000, updated_ms: now - index * 60000,
   }));
+  db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
+  db.insertRepo({ id: "sample-home", name: "side-project", path: "/sample/side-project", jira_prefix: null, context: "personal", source: "manual", created_ms: now });
   seedBenchmarks(db);
 }
 
@@ -49,7 +60,12 @@ export function seedBenchmarks(db: Db): void {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (!process.argv[2]) throw new Error("Pass a new fixture database path");
-  const db = new Db(process.argv[2]);
+  const [dbPath, configPath] = process.argv.slice(2);
+  if (!dbPath) throw new Error("Pass a new fixture database path");
+  const db = new Db(dbPath);
   try { seedScreenshotData(db); } finally { db.close(); }
+  if (configPath) {
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(configPath, JSON.stringify({ ...config, favorites: screenshotFavorites }, null, 2) + "\n");
+  }
 }

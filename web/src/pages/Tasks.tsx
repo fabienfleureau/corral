@@ -5,7 +5,8 @@ import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, 
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
-import type { AgentQuota, Favorite, JiraSearchResult, Repo, Task } from "../types";
+import type { AgentQuota, Context, Favorite, JiraSearchResult, Repo, Task } from "../types";
+import { favoritesFor, repoContext } from "../favorite-context";
 import { errText, formatTs, isPrUrl, prLabel, REVIEW_HARNESS, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 import { batchImportItems } from "../jira-import";
@@ -473,6 +474,10 @@ function TaskRow({
   );
 }
 
+function FavoritesTitle({ context }: { context: Context | null }) {
+  return <span>Favorites{context ? <> <span className="badge badge-mute">{context}</span></> : null}</span>;
+}
+
 // ---- new task form ----
 
 function firstLine(text: string): string {
@@ -505,6 +510,8 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
   };
 
   const selectedRepo = repoTouched ? repoChoice : (repos[0]?.path ?? "");
+  const formContext = repoContext(repos, selectedRepo);
+  const shownFavorites = favoritesFor(favorites, formContext);
   const review = kind === "review";
   const formTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
   const selectedTarget = formTargets.includes(target) ? target : formTargets[0] ?? "";
@@ -598,7 +605,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
           </label>
         )}
       </div>
-      {favorites.length > 0 ? <div className="field"><span>Favorites</span><div className="chip-row">{favorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!formTargets.includes(f.harness)} title={!formTargets.includes(f.harness) ? "Harness unavailable" : [f.harness, f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")} onClick={() => { setTarget(f.harness); setAgent(f.agent); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}>{f.name}</button>)}</div></div> : null}
+      {favorites.length > 0 ? <div className="field"><FavoritesTitle context={formContext} /><div className="chip-row">{shownFavorites.length === 0 ? <span className="muted">No {formContext} favorites</span> : null}{shownFavorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!formTargets.includes(f.harness)} title={!formTargets.includes(f.harness) ? "Harness unavailable" : [f.harness, f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")} onClick={() => { setTarget(f.harness); setAgent(f.agent); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}>{f.name}</button>)}</div></div> : null}
       <div className="field-row">
         <label className="field"><span>Harness</span><select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setAgent(""); }}>
           {formTargets.length === 0 ? <option value="">{review ? "Claude harness unavailable" : "No configured harnesses"}</option> : null}
@@ -644,6 +651,8 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported,
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [values, setSettings] = useState<ImportSettings>({ repo_path: "", base_branch: "", target: "", agent: "", model: "", reasoning: "" });
   const update = (patch: Partial<ImportSettings>) => setSettings((prev) => ({ ...prev, ...patch }));
+  const importContext = repoContext(repos, values.repo_path);
+  const shownFavorites = favoritesFor(favorites, importContext);
 
   const selected = useMemo(
     () => (results ?? []).filter((r) => selectedKeys.has(r.jira_key)),
@@ -781,7 +790,7 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported,
                   </select></label>
                   <label className="field"><span>Base branch (optional)</span><input value={values.base_branch} onChange={(e) => update({ base_branch: e.target.value })} placeholder="main" /></label>
                 </div>
-                {favorites.length > 0 ? <div className="field"><span>Favorites</span><div className="chip-row">{favorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!targets.includes(f.harness)} onClick={() => update({ target: f.harness, agent: f.agent, model: f.model, reasoning: f.reasoning })}>{f.name}</button>)}</div></div> : null}
+                {favorites.length > 0 ? <div className="field"><FavoritesTitle context={importContext} /><div className="chip-row">{shownFavorites.length === 0 ? <span className="muted">No {importContext} favorites</span> : null}{shownFavorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!targets.includes(f.harness)} onClick={() => update({ target: f.harness, agent: f.agent, model: f.model, reasoning: f.reasoning })}>{f.name}</button>)}</div></div> : null}
                 <div className="field-row">
                   <label className="field"><span>Harness</span><select value={values.target} onChange={(e) => update({ target: e.target.value, agent: "", model: "", reasoning: "" })}><option value="">Choose at dispatch</option>{targets.map((t) => <option key={t} value={t}>{harnessLabel(t, quotas)}</option>)}</select></label>
                   <label className="field"><span>Agent</span><select value={values.agent} onChange={(e) => update({ agent: e.target.value })} disabled={!values.target}><option value="">— none (bare harness) —</option>{values.agent && !(agentOptions[values.target] ?? []).some((a) => a.id === values.agent) ? <option value={values.agent}>{values.agent} (unavailable)</option> : null}{(agentOptions[values.target] ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>

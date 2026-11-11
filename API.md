@@ -98,7 +98,9 @@ type Item = {
 - `GET /api/metrics/summary` → `{by_name: [{name, count, last_ms}], recent: [{id, ts, name, ref, data}]}`
 - `GET /api/terminals` → tracked terminals `[{address, task_id, name, agent, last_status, last_turn, updated_ms}]`
 - `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, favorites: Favorite[], token /* masked */}`
-- `Favorite` is `{name, harness, agent, model, reasoning}`; all fields are strings, with empty agent/model/reasoning meaning defaults.
+- `Favorite` is `{name, harness, agent, model, reasoning, context}`; empty agent/model/reasoning mean defaults. `context` is `"professional"` or `"personal"`; a favorite saved without one reads as `"professional"`, any other value is rejected (400). The task form shows only the favorites matching the repo's context.
+- `GET /api/repos` → `Repo[]`, where `Repo` is `{id, name, path, jira_prefix, context, source, created_ms}`; `context` is `"professional" | "personal" | null`, and null reads as professional.
+- `PATCH /api/repos/:id` `{name?, jira_prefix?, context?}` → `Repo` — other fields are ignored; a `context` other than the two values or `null` is a 400.
 - `PUT /api/config` `{jira?: {baseUrl, email, token, jql}, assistant?: string[], agents?: {...}, favorites?: Favorite[]}` → `{ok}`
 - `GET /api/health` → `{ok: true}` (no auth)
 

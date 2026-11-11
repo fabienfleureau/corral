@@ -110,6 +110,8 @@ export class Db {
     if (!taskNames.has("agent")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN agent TEXT`);
     if (!taskNames.has("handoff")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN handoff TEXT`);
     if (!taskNames.has("kind")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'code'`);
+    const repoCols = this.raw.prepare("PRAGMA table_info(repos)").all() as { name: string }[];
+    if (!repoCols.some((c) => c.name === "context")) this.raw.exec(`ALTER TABLE repos ADD COLUMN context TEXT`);
   }
 
   close(): void {
@@ -218,8 +220,8 @@ export class Db {
 
   insertRepo(r: Repo): void {
     this.raw
-      .prepare(`INSERT OR IGNORE INTO repos (id, name, path, jira_prefix, source, created_ms) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(r.id, r.name, r.path, r.jira_prefix, r.source, r.created_ms);
+      .prepare(`INSERT OR IGNORE INTO repos (id, name, path, jira_prefix, context, source, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(r.id, r.name, r.path, r.jira_prefix, r.context ?? null, r.source, r.created_ms);
   }
 
   updateRepo(id: string, patch: Partial<Repo>): void {

@@ -20,6 +20,7 @@ export function addRepo(db: Db, path: string, opts: { name?: string; jiraPrefix?
     name: opts.name ?? basename(path),
     path,
     jira_prefix: opts.jiraPrefix ?? null,
+    context: null,
     source: opts.source ?? "manual",
     created_ms: Date.now(),
   };
