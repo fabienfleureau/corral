@@ -35,7 +35,8 @@ backed by `server/omnigent.ts`.
 Use the fixture in this checkout, never the live app. It starts a server with a
 fresh temporary home, config, database, and browser profile; GitHub refresh is
 disabled and the agent backend points to an unavailable local address. It seeds
-synthetic open, dispatched, and done tasks with pinned and default model settings.
+synthetic open, dispatched, and done tasks with pinned and default model settings,
+plus a professional and a personal repo and favorites in both contexts.
 The script cleans up its server and temporary data on exit. Do not dispatch tasks
 or connect the fixture to real services.
 
