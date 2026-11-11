@@ -1,6 +1,6 @@
 // Settings — read-only server config, Jira form, notification permission.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { Config, Context, Favorite, Repo } from "../types";
 import { CONTEXTS } from "../favorite-context";
@@ -211,7 +211,7 @@ export function SettingsPage() {
             </section>
             ) : null}
 
-            {section === "favorites" ? <FavoritesSection initial={config.favorites ?? []} /> : null}
+            {section === "favorites" ? <FavoritesSection /> : null}
             {section === "repos" ? <ReposSection /> : null}
 
             {section === "general" ? (
@@ -429,27 +429,44 @@ function ContextSelect({ value, onChange, disabled }: { value: Context; onChange
   return <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as Context)}>{CONTEXTS.map((c) => <option key={c} value={c}>{c}</option>)}</select>;
 }
 
-function FavoritesSection({ initial }: { initial: Favorite[] }) {
-  const [favorites, setFavorites] = useState(initial);
+function FavoritesSection() {
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [catalog, setCatalog] = useState<{ harness: string; agents: { id: string; name: string }[]; models?: ModelOption[] }[]>([]);
   const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
   const [draft, setDraft] = useState<Favorite>(EMPTY_FAVORITE);
   const [editing, setEditing] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api.listHarnesses().then((r) => { setCatalog(r.harnesses); setAgents(r.agents); }).catch((e: unknown) => setError(errText(e))); }, []);
+  // The server is the source of truth: this section is remounted on every tab
+  // switch, so seeding it from a snapshot taken when Settings loaded brought
+  // old contexts back (and the next save wrote them over the saved ones).
+  const loadFavorites = useCallback(async () => {
+    const cfg = await api.getConfig();
+    setFavorites(cfg.favorites ?? []);
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    api.listHarnesses().then((r) => { if (!cancelled) { setCatalog(r.harnesses); setAgents(r.agents); } }).catch((e: unknown) => { if (!cancelled) setError(errText(e)); });
+    loadFavorites().catch((e: unknown) => { if (!cancelled) setError(errText(e)); }).finally(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [loadFavorites]);
   const harness = draft.harness || catalog[0]?.harness || "";
   const matchingAgents = catalog.find((h) => h.harness === harness)?.agents ?? [];
   const update = (patch: Partial<Favorite>) => setDraft((d) => ({ ...d, ...patch }));
   const save = async (next: Favorite[]) => {
     setBusy(true); setError("");
-    try { await api.putConfig({ favorites: next }); setFavorites(next); setEditing(null); setDraft(EMPTY_FAVORITE); }
+    try {
+      await api.putConfig({ favorites: next });
+      setFavorites(next); setEditing(null); setDraft(EMPTY_FAVORITE);
+      await loadFavorites().catch(() => undefined);
+    }
     catch (e) { setError(errText(e)); } finally { setBusy(false); }
   };
   return <section className="panel-form">
     <h2 className="panel-title">Task favorites</h2>
     <p className="muted">Save combinations for one-click selection when creating a task.</p>
-    <ul className="repo-list">{favorites.map((f, i) => <li className="repo-row" key={i}><div className="repo-info"><strong>{f.name}</strong><span className="muted">{[f.context, f.harness, agents.find((a) => a.id === f.agent)?.name || f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")}</span></div><div className="repo-actions"><button className="btn" disabled={busy} onClick={() => { setDraft(f); setEditing(i); }}>Edit</button><button className="btn" disabled={busy} onClick={() => void save(favorites.filter((_, n) => n !== i))}>Remove</button></div></li>)}</ul>
+    {!loaded ? <p className="muted"><Spinner /> Loading favorites…</p> : favorites.length === 0 ? <p className="muted">{error ? "Could not load favorites." : "No favorites yet — add one below."}</p> : <ul className="repo-list">{favorites.map((f, i) => <li className="repo-row" key={i}><div className="repo-info"><strong>{f.name}</strong><span className="muted">{[f.context, f.harness, agents.find((a) => a.id === f.agent)?.name || f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")}</span></div><div className="repo-actions"><button className="btn" disabled={busy} onClick={() => { setDraft(f); setEditing(i); }}>Edit</button><button className="btn" disabled={busy} onClick={() => void save(favorites.filter((_, n) => n !== i))}>Remove</button></div></li>)}</ul>}
     <div className="field-row"><label className="field"><span>Name</span><input value={draft.name} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. Code review" /></label>
     <label className="field"><span>Context</span><ContextSelect value={draft.context} onChange={(context) => update({ context })} /></label></div>
     <div className="field-row"><label className="field"><span>Harness</span><select value={harness} onChange={(e) => update({ harness: e.target.value, agent: "", model: "", reasoning: "" })}>{catalog.length === 0 ? <option value="">No configured harnesses</option> : null}{draft.harness && !catalog.some((h) => h.harness === draft.harness) ? <option value={draft.harness}>{draft.harness} (unavailable)</option> : null}{catalog.map((h) => <option key={h.harness} value={h.harness}>{h.harness}</option>)}</select></label>
