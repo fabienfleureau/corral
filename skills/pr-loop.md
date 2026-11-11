@@ -19,6 +19,10 @@ either version.
 Use the repeatable fixture and capture commands in `AGENTS.md` under
 “Repeatable UI screenshots”.
 
+On macOS in the Codex sandbox, request permission to run the capture outside
+the sandbox before starting Chrome; launching it inside can trigger a macOS
+crash dialog even in headless mode.
+
 On GitHub, `gh pr create` and `gh pr edit` support `--attach` (gh 2.99 or
 later). For example, add `--attach './before.png#Before'` and
 `--attach './after.png#After'` to the command. GitHub hosts the images and appends them to

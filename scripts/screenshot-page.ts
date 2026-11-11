@@ -14,6 +14,11 @@ if (!chrome || !url || !output) {
   process.exit(2);
 }
 
+if (process.env.CODEX_SANDBOX === "seatbelt") {
+  console.error("Run the screenshot capture outside the macOS Codex sandbox to prevent Chrome from crashing.");
+  process.exit(1);
+}
+
 const profile = mkdtempSync(join(tmpdir(), "corral-cdp-"));
 const child = spawn(chrome, [
   "--headless", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=1",
