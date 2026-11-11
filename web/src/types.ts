@@ -112,11 +112,14 @@ export type Repo = {
   name: string;
   path: string;
   jira_prefix: string | null;
+  /** null reads as professional. */
+  context: Context | null;
   source: "manual" | "scan";
   created_ms: number;
 };
 
-export type Favorite = { name: string; harness: string; agent: string; model: string; reasoning: string };
+export type Context = "professional" | "personal";
+export type Favorite = { name: string; harness: string; agent: string; model: string; reasoning: string; context: Context };
 
 export type Config = {
   favorites: Favorite[];

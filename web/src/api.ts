@@ -222,7 +222,7 @@ export const api = {
   listRepos: (): Promise<Repo[]> => get<Repo[]>("/api/repos"),
   addRepo: (input: { path: string; name?: string; jira_prefix?: string }): Promise<Repo> =>
     post<Repo>("/api/repos", input),
-  patchRepo: (id: string, input: { name?: string; jira_prefix?: string | null }): Promise<Repo> =>
+  patchRepo: (id: string, input: { name?: string; jira_prefix?: string | null; context?: Repo["context"] }): Promise<Repo> =>
     patch<Repo>(`/api/repos/${id}`, input),
   deleteRepo: (id: string): Promise<{ ok: boolean }> => request<{ ok: boolean }>(`/api/repos/${id}`, "DELETE"),
   scanRepos: (): Promise<{ added: Repo[]; total: number; roots: string[] }> =>

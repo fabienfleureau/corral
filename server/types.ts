@@ -92,6 +92,8 @@ export interface Repo {
   name: string;
   path: string;
   jira_prefix: string | null;
+  /** null reads as professional. */
+  context: "professional" | "personal" | null;
   source: "manual" | "scan";
   created_ms: number;
 }

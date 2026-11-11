@@ -12,5 +12,6 @@ test("screenshot fixture includes representative synthetic task settings", () =>
     assert.ok(tasks.some(t => t.model && t.reasoning));
     assert.ok(tasks.some(t => t.model === null && t.reasoning === null));
     assert.ok(tasks.every(t => t.repo_path.startsWith("/sample/")));
+    assert.deepEqual(db.listRepos().map(r => [r.name, r.context]), [["example-project", null], ["side-project", "personal"]]);
   } finally { db.close(); }
 });
