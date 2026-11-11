@@ -411,7 +411,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               )}
               {selected.context ? (
                 <details className="context-drawer">
-                  <summary>Recent agent output</summary>
+                  <summary>{selected.kind === "digest" && !selected.task_id ? "Analysis evidence" : "Recent agent output"}</summary>
                   <pre className="body-text body-raw">{selected.context}</pre>
                 </details>
               ) : null}
