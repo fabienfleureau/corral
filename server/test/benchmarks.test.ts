@@ -27,3 +27,10 @@ test('manual results persist independently of published snapshots and can be rem
   assert.equal(getBenchmarks(db).manual.length, 0);
   db.close();
 });
+
+test('reported results are valid percentages with unique ids', async () => {
+  const { reportedResults } = await import('../benchmarks-reported.ts');
+  assert.equal(new Set(reportedResults.map((r) => r.id)).size, reportedResults.length);
+  assert.ok(reportedResults.every((r) => r.score >= 0 && r.score <= 100));
+  assert.equal(reportedResults.find((r) => r.benchmark === 'HLE (text-only)' && r.model === 'DeepSeek V4.1 Flash')?.score, 39.1);
+});
