@@ -1,6 +1,6 @@
 // Tasks — dispatch queue grouped by repository.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, modelChoices, reasoningChoices } from "../task-page";
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
@@ -13,6 +13,7 @@ import { errText, formatTs, isPrUrl, prLabel, REVIEW_HARNESS, timeAgo } from "..
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 import { batchImportItems } from "../jira-import";
 import type { ImportSettings } from "../jira-import";
+import { promptFromHash } from "../selection-task";
 
 export function TasksPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -33,6 +34,26 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [modelFacts, setModelFacts] = useState<ModelCatalog>({});
   const [providerModels, setProviderModels] = useState<Record<string, ModelAvailability>>({});
   const [reviewers, setReviewers] = useState<Reviewer[]>([]);
+  /** Text selected elsewhere (the inbox) and handed over as a prompt prefill. */
+  const [prefill, setPrefill] = useState<{ text: string } | null>(() => {
+    const text = promptFromHash(window.location.hash);
+    return text ? { text } : null;
+  });
+  const clearPrefill = useMemo(() => () => setPrefill(null), []);
+
+  // A selection deep link (#/tasks?prompt=…) becomes form state, then leaves the
+  // URL so a reload or a shared link does not resurrect a stale prompt.
+  useEffect(() => {
+    const read = () => {
+      const text = promptFromHash(window.location.hash);
+      if (!text) return;
+      setPrefill({ text });
+      history.replaceState(null, "", "#/tasks");
+    };
+    read();
+    window.addEventListener("hashchange", read);
+    return () => window.removeEventListener("hashchange", read);
+  }, []);
 
   useEffect(() => {
     api
@@ -151,7 +172,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         </div>
 
         {showImport ? <JiraImport repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} onDone={refresh} />
+        <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} prefill={prefill} onPrefillHandled={clearPrefill} onDone={refresh} />
 
         <div className="task-list-controls">
             <label className="check-inline">
@@ -611,12 +632,12 @@ function copyWithExecCommand(text: string): boolean {
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
-function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, reviewers, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; reviewers: Reviewer[]; onDone: () => void }) {
+function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, reviewers, prefill, onPrefillHandled, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; reviewers: Reviewer[]; prefill: { text: string } | null; onPrefillHandled: () => void; onDone: () => void }) {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   useEffect(() => { api.getConfig().then((cfg) => setFavorites(cfg.favorites ?? [])).catch(() => undefined); }, []);
   const [kind, setKind] = useState<"code" | "review">("code");
   const [prUrl, setPrUrl] = useState("");
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(prefill?.text ?? "");
   const [repoChoice, setRepoChoice] = useState("");
   const [target, setTarget] = useState("");
   const [agent, setAgent] = useState("");
@@ -627,6 +648,22 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const [reviewName, setReviewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [prefilled, setPrefilled] = useState(prefill !== null);
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // A passage selected elsewhere becomes the prompt, focused and ready to edit.
+  useEffect(() => {
+    if (!prefill) return;
+    setKind("code");
+    setPrompt(prefill.text);
+    setPrefilled(true);
+    onPrefillHandled();
+    const frame = requestAnimationFrame(() => {
+      promptRef.current?.scrollIntoView({ block: "center" });
+      promptRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [prefill, onPrefillHandled]);
 
   const clear = () => {
     setPrompt("");
@@ -634,6 +671,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
     setRepoPath("");
     setBaseBranch("");
     setError(null);
+    setPrefilled(false);
   };
 
   const selectedRepo = repoTouched ? repoChoice : (repos[0]?.path ?? "");
@@ -683,6 +721,11 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   return (
     <div className="panel-form">
       <h2 className="panel-title">New task</h2>
+      {prefilled ? (
+        <p className="inline-ok" role="status">
+          Prompt prefilled from your selection — edit it, then create or dispatch.
+        </p>
+      ) : null}
       <div className="seg" role="radiogroup" aria-label="Task type">
         <button type="button" role="radio" aria-checked={!review} className={`seg-btn${review ? "" : " active"}`} onClick={() => setKind("code")}>Code change</button>
         <button type="button" role="radio" aria-checked={review} className={`seg-btn${review ? " active" : ""}`} onClick={() => setKind("review")}>Review a PR/MR</button>
@@ -700,6 +743,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
       <label className="field">
         <span>{review ? "Focus (optional)" : "Prompt"}</span>
         <textarea
+          ref={promptRef}
           rows={review ? 3 : 6}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}

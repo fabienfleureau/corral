@@ -1394,6 +1394,37 @@ select:focus {
   color: #2e9e5b;
 }
 
+/* selection → task: a floating action next to the selected text */
+.selection-task {
+  position: fixed;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 13px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(16, 20, 26, 0.22);
+}
+
+.selection-task:hover {
+  filter: brightness(1.08);
+}
+
+.selection-task:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* offline mode */
 .offline-banner {
   position: fixed;

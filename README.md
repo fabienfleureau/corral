@@ -30,6 +30,8 @@ idea → Jira (clarify outside Corral) → task backlog → dispatch (worktree +
      (your configured assistant model, headless).
 - **Answer from the inbox** — reply box sends the answer straight into the agent's
   terminal (`hc send`), plus an "open in terminal" escape hatch.
+- **Select → new task** — select a passage anywhere (an inbox report, typically)
+  and a *New task* action hands it to the Tasks page as the prefilled prompt.
 - **Auto-resolving lifecycle** — questions close when the agent leaves `blocked`;
   a merged PR completes its task and archives every inbox item tied to it (see the
   **Archived** tab);
