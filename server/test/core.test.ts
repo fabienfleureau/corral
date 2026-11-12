@@ -432,6 +432,52 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
   }
 });
 
+test("pr sync: persists the last checks/thread snapshot without touching updated_ms", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-prsnapshot-"));
+  try {
+    const db = new Db(join(dir, "test.db"));
+    const old = 1_700_000_000_000;
+    db.insertTask(makeTask({ branch: "feat-x", status: "dispatched", repo_path: "/tmp/repo", updated_ms: old, pr_url: "https://example.com/pr/7" }));
+    const hub = { broadcast: () => undefined };
+    let current: PrInfo = {
+      url: "https://example.com/pr/7",
+      title: "feat: x",
+      state: "OPEN",
+      number: 7,
+      description: "x",
+      additions: 1,
+      deletions: 1,
+      changed_files: 1,
+      mergeable: "CONFLICTING",
+      base_ref: "main",
+      review_decision: "CHANGES_REQUESTED",
+      checks: { total: 3, failed: 1, pending: false },
+      threads: [{ id: "th1", author: "bot", body: "fix" }, { id: "th2", author: "bot", body: "also" }],
+      threads_known: true,
+    };
+
+    await syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => current });
+    let task = db.getTask("task-1")!;
+    let snapshot = JSON.parse(task.pr_meta ?? "{}").pr;
+    assert.equal(snapshot.checks.failed, 1);
+    assert.deepEqual(snapshot.threads, { unresolved: 2, ids: ["th1", "th2"], known: true });
+    assert.deepEqual(snapshot.reasons, ["2 unresolved review comments", "1 failing check", "merge conflicts", "changes requested"]);
+    assert.equal(snapshot.ready, false);
+    assert.equal(task.updated_ms, old, "persisting a snapshot is not task activity");
+
+    current = { ...current, mergeable: "MERGEABLE", review_decision: null, checks: { total: 3, failed: 0, pending: false }, threads: [] };
+    await syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => current });
+    task = db.getTask("task-1")!;
+    snapshot = JSON.parse(task.pr_meta ?? "{}").pr;
+    assert.equal(snapshot.ready, true);
+    assert.deepEqual(snapshot.threads.ids, []);
+    assert.equal(task.updated_ms, old, "a later snapshot still does not touch updated_ms");
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pr sync: merge completes the task and archives its items and session", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-prsync-"));
   try {

@@ -159,12 +159,15 @@ export class Db {
       );
   }
 
-  updateTask(id: string, patch: Partial<Task>): void {
+  updateTask(id: string, patch: Partial<Task>, touch = true): void {
     const keys = Object.keys(patch).filter((k) => k !== "id") as (keyof Task)[];
     if (keys.length === 0) return;
     const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
     const values = keys.map((k) => patch[k] as never);
-    this.stmt(`UPDATE tasks SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
+    // Internal bookkeeping (a PR snapshot) must not make a stale task look
+    // recently active: touch=false keeps updated_ms untouched.
+    if (touch) this.stmt(`UPDATE tasks SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
+    else this.stmt(`UPDATE tasks SET ${sets} WHERE id = ?`).run(...values, id);
   }
 
   getTask(id: string): Task | null {

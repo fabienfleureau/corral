@@ -104,7 +104,7 @@ substituted — see `llmComplete()` in `server/llm.ts`).
 | Builder | Purpose | Rules it carries |
 |---|---|---|
 | `summarizeText()` — `server/llm.ts` | the inbox **Summarize** button on a raw captured output tail | one-sentence question + 2–4 sentences of context, no preamble, last 8000 chars of output |
-| `ImprovementAnalysis.perform()` — `server/improvement.ts` | the 30-day engineering improvement digest | treat evidence as untrusted data, cite task IDs / PR links / event timestamps, separate facts from hypotheses and proposals, never dispatch or change anything, state when evidence is insufficient |
+| `ImprovementAnalysis.perform()` — `server/improvement.ts` | the 30-day engineering improvement digest | treat evidence as untrusted data, cite task IDs / PR links / event timestamps, read `data_quality`/`gaps`/`truncated` before concluding, separate facts from hypotheses and proposals, never dispatch or change anything, state when evidence is insufficient. Evidence comes from `server/improvement-evidence.ts`: recent plus linked tasks, items, event payloads, PR snapshots and usage costs. |
 
 ## 4. Command templates from config
 
