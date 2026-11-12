@@ -1,6 +1,7 @@
 // Jira status sync: a task imported from Jira mirrors its lifecycle onto the
-// ticket — dispatch is "In Progress", an open PR/MR "Code Review", a PR past
-// the readiness gate "Ready to merge", a merge "Done".
+// ticket — dispatch is "In Progress", an open PR/MR "Code Review", a PR Corral
+// shows as "ready to merge" (gate passed and a human approved) "Ready to
+// merge", a merge "Done".
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -231,20 +232,32 @@ test("pr sync drives Code Review -> Ready to merge -> Done on the ticket", withD
   const base: PrInfo = {
     url: "https://example.com/pr/7", title: "feat: x", state: "OPEN", number: 7, description: "x",
     additions: 1, deletions: 1, changed_files: 1, mergeable: "MERGEABLE", base_ref: "main",
-    review_decision: null, checks: { total: 1, failed: 0, pending: false },
+    review_decision: null, human_approvals: [], checks: { total: 1, failed: 0, pending: false },
     threads: [{ id: "t1", author: "reviewer", body: "please fix" }],
   };
   let current: PrInfo = base;
   const opts = { finder: () => current, jira: jira.gateway };
 
+  // Open PR, gate not passed yet.
   await syncTaskPr(db, hub, db.getTask("task-1")!, opts);
   await until(() => jira.current() === "Code Review", "code review");
 
+  // Gate passed but nobody approved: Corral shows "ready for review", so the
+  // ticket stays at the review status instead of claiming merge readiness.
   current = { ...base, threads: [] };
   await syncTaskPr(db, hub, db.getTask("task-1")!, opts);
-  await until(() => jira.current() === "Ready to merge", "ready to merge");
+  const item = db.listItems({ kind: "pr" })[0];
+  assert.equal(item.summary, "ready for review");
+  assert.equal(jira.current(), "Code Review", "a ready-for-review PR does not move the ticket to Ready to merge");
+  assert.deepEqual(jira.applied, ["In Progress", "Code Review"]);
 
-  current = { ...base, threads: [], state: "MERGED" };
+  // A human approval is what makes it "ready to merge" on both sides.
+  current = { ...base, threads: [], human_approvals: ["alice"] };
+  await syncTaskPr(db, hub, db.getTask("task-1")!, opts);
+  await until(() => jira.current() === "Ready to merge", "ready to merge");
+  assert.equal(db.listItems({ kind: "pr" })[0].summary, "ready to merge");
+
+  current = { ...base, threads: [], human_approvals: ["alice"], state: "MERGED" };
   await syncTaskPr(db, hub, db.getTask("task-1")!, opts);
   await until(() => jira.current() === "Done", "done");
   assert.deepEqual(jira.applied, ["In Progress", "Code Review", "Ready to merge", "Done"]);

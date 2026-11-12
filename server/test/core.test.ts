@@ -11,7 +11,7 @@ import { Db } from "../db.ts";
 import { dispatchTask, slugify } from "../dispatch.ts";
 import type { Config } from "../config.ts";
 import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
-import { prReady, prItemBody, syncTaskPr, syncAllPrs, findPr, type PrInfo } from "../pr.ts";
+import { prReady, prItemBody, prReviewLabel, syncTaskPr, syncAllPrs, findPr, type PrInfo } from "../pr.ts";
 import { CaptureEngine } from "../capture.ts";
 import { createHttpServer, type AppState } from "../api.ts";
 import type {
@@ -350,6 +350,14 @@ test("pr gate: ready only when threads answered, checks green, mergeable", () =>
   assert.match(body, /Does a thing\./);
   assert.match(body, /\+10 \/ -2/);
   assert.match(body, /https:\/\/example\.com\/pr\/1/);
+
+  // Corral's own vocabulary for a ready PR: a human approval is what makes it
+  // "ready to merge"; before that (and when approvals are unknown) it is only
+  // "ready for review" — the label the inbox shows and Jira follows.
+  assert.equal(prReviewLabel(base), "ready for review");
+  assert.equal(prReviewLabel({ ...base, human_approvals: null }), "ready for review");
+  assert.equal(prReviewLabel({ ...base, human_approvals: [] }), "ready for review");
+  assert.equal(prReviewLabel({ ...base, human_approvals: ["alice"] }), "ready to merge");
 });
 
 test("capture: elicitation, fallback, auto-resolution, completion handoff", async () => {

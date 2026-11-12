@@ -87,7 +87,9 @@ type Item = {
 
 Jira status sync (one-way, forward-only): a task with `jira_key` moves its ticket as it
 progresses — dispatch → "In Progress", an open PR/MR found by the PR sync → "Code Review", a PR
-past the readiness gate → "Ready to merge", a merge → "Done". Only transitions the workflow
+Corral itself shows as "ready to merge" (readiness gate passed **and** a human approved it) →
+"Ready to merge", a merge → "Done". A PR that merely passed the gate stays at the review status
+until a human approval lands. Only transitions the workflow
 offers *now* are used; missing intermediate statuses are walked through in order. Status names
 are per-workflow (`jira.statuses` in the config file); a blank name disables that stage. The
 status last reached is stored on the task (`jira_status`) and is the dedupe, so a periodic PR
