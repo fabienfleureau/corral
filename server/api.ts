@@ -26,6 +26,8 @@ import { SHIPPED_CATALOG, mergeCatalog, parseCatalog } from "./model-catalog.ts"
 import { PrAdditionsCache } from "./usage-pr.ts";
 import { withDeadline } from "./deadline.ts";
 import { cacheControlFor, etagFor, isFresh } from "./static-cache.ts";
+import { SessionFacts } from "./session-facts.ts";
+import type { SessionFact } from "./session-facts.ts";
 
 export interface AppState {
   db: Db;
@@ -39,6 +41,8 @@ export interface AppState {
   usage?: UsageScanner;
   /** Cached OpenCode Go quota snapshot (external HTTPS call, polled by the UI). */
   goQuota?: GoQuotaCache;
+  /** Model/reasoning per task session: finished sessions are read once. */
+  sessionFacts?: SessionFacts;
   prAdditions?: PrAdditionsCache;
 }
 
@@ -47,6 +51,19 @@ function jiraImportCandidate(state: AppState, issue: JiraIssue) {
   const f = state.jira.issueToTaskFields(issue);
   const preview = importPreview(state.db, f.jira_key);
   return { ...f, ...preview, fingerprint: importFingerprint({ ...f, repo_path: preview.repo_path }) };
+}
+
+/** Model/reasoning of the tasks' sessions. Read once per finished session and
+ *  once per request for the dispatched ones (see session-facts.ts) — the
+ *  enricher is lazily created so a state built without a worker backend keeps
+ *  answering. */
+async function taskSessionFacts(state: AppState, tasks: Task[]): Promise<Map<string, SessionFact>> {
+  if (!tasks.some((task) => task.terminal_address) || typeof state.backend?.get !== "function") return new Map();
+  try {
+    return await (state.sessionFacts ??= new SessionFacts(state.backend)).forTasks(tasks);
+  } catch {
+    return new Map();
+  }
 }
 
 type Handler = (req: IncomingMessage, res: ServerResponse, ctx: { body: unknown; params: Record<string, string>; url: URL }) => void | Promise<void>;
@@ -136,7 +153,6 @@ export function permissionVerdict(e: ItemElicitation, choice: string): { action:
 
 /** Reads a page load depends on (sessions, tasks, harnesses) get a bounded
  *  wait: an unreachable worker backend must not hang the request. */
-const BACKEND_READ_MS = 3000;
 const BACKEND_LIST_MS = 4000;
 const BACKEND_HARNESSES_MS = 6000;
 
@@ -260,11 +276,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/tasks", async (_req, res, { url }) => {
     const status = url.searchParams.get("status") ?? undefined;
     const tasks = state.db.listTasks(status as never);
-    const sessions = await Promise.all(tasks.map(async (task) => {
-      if (!task.terminal_address) return null;
-      try { return await withDeadline(state.backend.get(task.terminal_address), BACKEND_READ_MS, null); } catch { return null; }
+    const facts = await taskSessionFacts(state, tasks);
+    json(res, 200, tasks.map((task) => {
+      const fact = task.terminal_address ? facts.get(task.terminal_address) : undefined;
+      return { ...task, session_model: fact?.model ?? null, session_reasoning: fact?.reasoning ?? null };
     }));
-    json(res, 200, tasks.map((task, i) => ({ ...task, session_model: sessions[i]?.model ?? null, session_reasoning: sessions[i]?.reasoning ?? null })));
   });
 
   on("POST", "/api/tasks", (req, res, { body }) => {

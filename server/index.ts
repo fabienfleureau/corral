@@ -9,6 +9,7 @@ import { JiraClient } from "./jira.ts";
 import { prCandidateTasks, syncAllPrs, syncTaskPr } from "./pr.ts";
 import { refreshPulls } from "./pulls.ts";
 import { createHttpServer, type AppState } from "./api.ts";
+import { SessionFacts } from "./session-facts.ts";
 import type { ServerResponse } from "node:http";
 import { UsageScanner, defaultSources } from "./usage.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
@@ -37,9 +38,13 @@ const hub = {
 const capture = new CaptureEngine(db, backend, hub, cfg);
 const usage = new UsageScanner(defaultSources());
 const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt));
-const state: AppState = { db, cfg, backend, capture, jira, hub, usage, improvement };
+const sessionFacts = new SessionFacts(backend);
+const state: AppState = { db, cfg, backend, capture, jira, hub, usage, improvement, sessionFacts };
 setTimeout(() => void improvement.runIfDue().catch(() => undefined), 10_000);
 setInterval(() => void improvement.runIfDue().catch(() => undefined), 60_000);
+// Tasks page: the queue's session model/reasoning costs one backend round trip
+// per task. Read them once in the background so the first list load is warm.
+setTimeout(() => void sessionFacts.prime(db.listTasks()).catch(() => undefined), 1_000);
 // Usage page: warm the log scan so the first visit is fast.
 setTimeout(() => void usage.refresh().catch(() => undefined), 5_000);
 
