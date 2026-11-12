@@ -34,6 +34,7 @@ type Task = {
   base_branch: string | null; branch: string | null; worktree_path: string | null;
   assignee: string | null;
   jira_key: string | null; jira_url: string | null; jira_parent_key: string | null;
+  jira_status: string | null; // Jira status last reached by the status sync (cached; written by the sync)
   status: "open" | "dispatched" | "done" | "archived";
   terminal_address: string | null; exit_code: number | null;
   created_ms: number; updated_ms: number;
@@ -72,14 +73,23 @@ type Item = {
 - `POST /api/tasks` `{title?, prompt?, kind?, pr_url?, repo_path?, target?, model?, reasoning?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch. `kind: "review"` requires `pr_url` (GitHub pull or GitLab MR URL); the title defaults to `Review <pr_url>`
 - `PATCH /api/tasks/:id` partial task → `Task` — `kind` is fixed at creation and ignored
 - `POST /api/tasks/:id/archive-session` → `Task` — archives the session and then the dispatched task; leaves the task unchanged if session archiving fails
-- `POST /api/tasks/:id/dispatch` `{target?, use_worktree?, agent?, model?, reasoning?, review?}` → `{address, worktreePath, branch}` — uses saved model and reasoning when omitted; creates worktree + starts the agent (409 if already dispatched, 400 if no target). `review` is a reviewer name from `GET /api/config` `reviewers`; its command (with `{base_branch}` replaced by the task's base branch or the repo's default) is appended to the prompt and frozen on the task. A review task runs on `claude` only (400 otherwise), in `repo_path` with no worktree and no branch (`branch: ""`), with the `skills/review.md` convention: drafts first, publish after the human approves in the inbox
+- `POST /api/tasks/:id/dispatch` `{target?, use_worktree?, agent?, model?, reasoning?, review?}` → `{address, worktreePath, branch}` — uses saved model and reasoning when omitted; creates worktree + starts the agent (409 if already dispatched, 400 if no target). `review` is a reviewer name from `GET /api/config` `reviewers`; its command (with `{base_branch}` replaced by the task's base branch or the repo's default) is appended to the prompt and frozen on the task. A review task runs on `claude` only (400 otherwise), in `repo_path` with no worktree and no branch (`branch: ""`), with the `skills/review.md` convention: drafts first, publish after the human approves in the inbox. Best effort, never fails or delays the dispatch: a `code` task linked to a Jira ticket (`jira_key`) moves that ticket to "In Progress"
 - `POST /api/tasks/:id/cleanup` → `{ok}` — removes the task's worktree
 
 ### Jira
 - `GET /api/jira/search?q=<text or jql>` → `[{title, prompt, jira_key, jira_url, jira_parent_key, jira_status, repo_path, repo_name, existing_task_id, fingerprint}]` — `repo_*` is the repo the import would target (null when no prefix mapping), `existing_task_id` is set when the issue is already imported (import skips it), `fingerprint` hashes the fields the import would write
-- `POST /api/jira/import` `{items: [{key, fingerprint, repo_path?, base_branch?, target?, agent?, model?, reasoning?}]}` (or `{keys: string[]}`, no fingerprint check) → `{created: Task[], changed: SearchResult[], skipped: string[], failed: string[]}` — optional settings are saved on each imported task; omitted repo uses the Jira prefix mapping. An item whose fingerprint no longer matches the issue (content or repo mapping changed since search) lands in `changed` with its current preview and is not imported; keys with an existing task land in `skipped`.
+- `POST /api/jira/import` `{items: [{key, fingerprint, repo_path?, base_branch?, target?, agent?, model?, reasoning?}]}` (or `{keys: string[]}`, no fingerprint check) → `{created: Task[], changed: SearchResult[], skipped: string[], failed: string[]}` — optional settings are saved on each imported task; omitted repo uses the Jira prefix mapping. An item whose fingerprint no longer matches the issue (content or repo mapping changed since search) lands in `changed` with its current preview and is not imported; keys with an existing task land in `skipped`. The issue's current status is stored on the task (`jira_status`) as the starting point of the status sync.
 - `POST /api/jira/tasks/:id/done` `{transition_id?}` → `{ok, transition}` — auto-picks a done-like transition when omitted
 - `POST /api/jira/tasks/:id/comment` `{text}` → `{ok}`
+
+Jira status sync (one-way, forward-only): a task with `jira_key` moves its ticket as it
+progresses — dispatch → "In Progress", an open PR/MR found by the PR sync → "Code Review", a PR
+past the readiness gate → "Ready to merge", a merge → "Done". Only transitions the workflow
+offers *now* are used; missing intermediate statuses are walked through in order. Status names
+are per-workflow (`jira.statuses` in the config file); a blank name disables that stage. The
+status last reached is stored on the task (`jira_status`) and is the dedupe, so a periodic PR
+sync costs no Jira call. Failures are recorded as `jira.status_failed` metrics and never block
+a dispatch or a PR sync.
 
 ### Usage
 - `GET /api/usage?range=24h|7d|30d|all[&refresh=1]` → Claude Code, Codex and OpenCode Go usage from local session data

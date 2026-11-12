@@ -6,6 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Favorite } from "./favorites.ts";
+import type { JiraStage } from "./jira-status.ts";
 import type { Reviewer } from "./reviewers.ts";
 import type { ModelFacts } from "./model-catalog.ts";
 import type { ModelPrice } from "./usage.ts";
@@ -15,6 +16,10 @@ export interface JiraConfig {
   email: string;
   token: string;
   jql: string;
+  /** Corral lifecycle stage -> Jira status name (a project's workflow names
+   *  its statuses itself). Defaults: To Do, In Progress, Code Review,
+   *  Ready to merge, Done; a blank name disables that stage. */
+  statuses?: Partial<Record<JiraStage, string>>;
 }
 
 export interface OmnigentConfig {
@@ -74,7 +79,7 @@ function defaultConfig(): Config {
       opencode: ["opencode", "{prompt}"],
     },
     assistant: ["claude", "-p", "{prompt}"],
-    jira: { baseUrl: "", email: "", token: "", jql: "" },
+    jira: { baseUrl: "", email: "", token: "", jql: "", statuses: {} },
     omnigent: {
       baseUrl: "http://127.0.0.1:6767",
       token: "",

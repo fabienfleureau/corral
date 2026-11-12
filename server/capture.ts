@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
+import type { JiraTransitionGateway } from "./jira-status.ts";
 import type { WorkerBackend, WorkerElicitation, WorkerEvent } from "./worker.ts";
 import { syncTaskPr } from "./pr.ts";
 import type { Item } from "./types.ts";
@@ -26,13 +27,16 @@ export class CaptureEngine {
   private backend: WorkerBackend;
   private hub: Hub;
   private cfg: Config | null;
+  /** Jira status sync for PR-stage transitions (null = build one from cfg). */
+  private jira: JiraTransitionGateway | null;
   private retrying = new Set<string>();
 
-  constructor(db: Db, backend: WorkerBackend, hub: Hub, cfg: Config | null = null) {
+  constructor(db: Db, backend: WorkerBackend, hub: Hub, cfg: Config | null = null, jira: JiraTransitionGateway | null = null) {
     this.db = db;
     this.backend = backend;
     this.hub = hub;
     this.cfg = cfg;
+    this.jira = jira;
   }
 
   async handleEvent(e: WorkerEvent): Promise<void> {
@@ -221,7 +225,7 @@ export class CaptureEngine {
         this.hub.broadcast("task.updated", updated);
         if (updated) {
           // PR discovery is best effort.
-          void syncTaskPr(this.db, this.hub, updated, { backend: this.backend, cfg: this.cfg ?? undefined }).catch(() => undefined);
+          void syncTaskPr(this.db, this.hub, updated, { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira }).catch(() => undefined);
         }
       }
     }
@@ -346,6 +350,6 @@ export class CaptureEngine {
   private syncPrSoon(taskId: string): void {
     const task = this.db.getTask(taskId);
     if (!task?.branch) return;
-    void syncTaskPr(this.db, this.hub, task, { backend: this.backend, cfg: this.cfg ?? undefined }).catch(() => undefined);
+    void syncTaskPr(this.db, this.hub, task, { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira }).catch(() => undefined);
   }
 }

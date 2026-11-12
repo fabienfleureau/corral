@@ -33,6 +33,9 @@ export interface Task {
   jira_key: string | null;
   jira_url: string | null;
   jira_parent_key: string | null;
+  /** Jira status name last reached by the status sync (cached: it is both the
+   *  dedupe for later stages and what `GET /api/tasks` reports). */
+  jira_status?: string | null;
   pr_url: string | null;
   /** JSON state for the PR loop, e.g. {"pushed":"<thread ids>"} (dedupe). */
   pr_meta: string | null;
