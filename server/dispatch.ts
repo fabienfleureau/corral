@@ -44,7 +44,9 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
       read("pr-loop.md", ""),
     ];
   if (task.kind !== "review" && reviewCommand) {
-    parts.push(read("pre-pr-review.md", "").replaceAll("{review_command}", reviewCommand));
+    // A callback replacement, not a string: review commands legitimately contain
+    // `$` sequences ($$, $&, $') that replaceAll would otherwise expand.
+    parts.push(read("pre-pr-review.md", "").replaceAll("{review_command}", () => reviewCommand));
   }
   return parts.filter(Boolean).join("\n\n---\n\n")
     .replaceAll("{task_id}", task.id)
@@ -173,7 +175,7 @@ export async function dispatchTask(
     const reviewer = (cfg.reviewers ?? []).find((r) => r.name === opts.review);
     if (!reviewer) throw new Error(`unknown reviewer: ${opts.review}`);
     const baseBranch = task.base_branch?.trim() || await defaultBranchName(task.repo_path);
-    reviewCommand = reviewer.command.replaceAll("{base_branch}", baseBranch ?? "");
+    reviewCommand = reviewer.command.replaceAll("{base_branch}", () => baseBranch ?? "");
   }
 
   const fullPrompt = `${taskContext.join("\n\n")}\n\n---\n${questionConvention(cfg, task, reviewCommand)}`;

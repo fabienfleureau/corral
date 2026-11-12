@@ -82,6 +82,21 @@ test("dispatch: a reviewer appends the substituted review convention and freezes
   assert.equal(db.getTask(task.id)?.review, "cubic review --base main --json");
 }));
 
+test("dispatch: a review command's $ sequences survive substitution verbatim", withDb(async (db, dir) => {
+  execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+  // `$$`, `$&`, `$'` and `` $` `` are replacement patterns for String.replaceAll:
+  // they must reach the prompt and the stored task exactly as the user wrote them.
+  const command = "cubic review --base {base_branch} --id $$ --grep $& --label $'x' --tick $`y`";
+  const expected = "cubic review --base main --id $$ --grep $& --label $'x' --tick $`y`";
+  const task = makeTask({ repo_path: dir, base_branch: "main" });
+  db.insertTask(task);
+  const { backend, started } = fakeBackend();
+  const cfg = { ...cfgWith(dir), reviewers: [{ name: "odd", command }] } as Config;
+  await dispatchTask(db, cfg, backend, task, "codex", { useWorktree: false, review: "odd" });
+  assert.ok(started[0].prompt.includes(expected), "prompt must carry the command verbatim");
+  assert.equal(db.getTask(task.id)?.review, expected);
+}));
+
 test("dispatch: no reviewer leaves the prompt free of the pre-pr-review skill", withDb(async (db, dir) => {
   execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
   const task = makeTask({ repo_path: dir, base_branch: "main" });
