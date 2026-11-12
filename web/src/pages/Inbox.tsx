@@ -5,7 +5,7 @@ import type { KeyboardEvent } from "react";
 import { api } from "../api";
 import type { Item, SessionInfo, Task } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
-import { ExternalLinkIcon, KindIcon, Spinner } from "../ui";
+import { ExternalLinkIcon, JiraPill, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
 import { inProgressInboxItems, inProgressInboxTasks, selectedInboxItem } from "../inbox-selection";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
@@ -252,7 +252,10 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 <span className="item-row-title">{task.title || task.prompt.trim().split("\n")[0] || "Untitled task"}</span>
                 <span className="item-row-sub">Task · in progress</span>
               </span>
-              <span className="item-row-side"><span className="time" title={formatTs(task.created_ms)}>{timeAgo(task.created_ms)}</span></span>
+              <span className="item-row-side">
+                <JiraPill jiraKey={task.jira_key} jiraUrl={task.jira_url} />
+                <span className="time" title={formatTs(task.created_ms)}>{timeAgo(task.created_ms)}</span>
+              </span>
             </div>
           ))}
           {loading && items.length === 0 && (statusFilter !== "in-progress" || inProgressTasks.length === 0) ? (
@@ -265,7 +268,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             items.map((item) => {
               const needsYou = item.status === "open" && item.kind === "question";
               const snoozed = item.snooze_until_ms !== null && item.snooze_until_ms > Date.now();
-              const rowPr = itemPrUrl(item.body, item.task_id ? tasksById[item.task_id]?.pr_url : null);
+              const rowTask = item.task_id ? tasksById[item.task_id] : undefined;
+              const rowPr = itemPrUrl(item.body, rowTask?.pr_url);
               return (
                 <div
                   key={item.id}
@@ -304,6 +308,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     </span>
                     {needsYou ? <span className="badge badge-urgent">needs you</span> : null}
                     {snoozed ? <span className="badge badge-snoozed">snoozed</span> : null}
+                    <JiraPill jiraKey={rowTask?.jira_key} jiraUrl={rowTask?.jira_url} />
                     {rowPr ? (
                       <a
                         href={rowPr}
@@ -330,7 +335,10 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
           <>
             <div className="detail-head">
               <h2 className="detail-title">{selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"}</h2>
-              <div className="detail-meta"><span className="chip chip-static status-dispatched">in progress</span></div>
+              <div className="detail-meta">
+                <span className="chip chip-static status-dispatched">in progress</span>
+                <JiraPill jiraKey={selectedTask.jira_key} jiraUrl={selectedTask.jira_url} />
+              </div>
             </div>
             <div className="detail-body"><Markdown text={selectedTask.prompt} className="body-text" /></div>
             <div className="detail-actions">
@@ -381,11 +389,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 {linkedTask ? (
                   <span className="meta-task">
                     Task: <strong>{linkedTask.title || linkedTask.prompt.trim().split("\n")[0].slice(0, 120) || "Untitled task"}</strong>
-                    {linkedTask.jira_url ? (
-                      <a href={linkedTask.jira_url} target="_blank" rel="noreferrer" className="meta-link">
-                        {linkedTask.jira_key}
-                      </a>
-                    ) : null}
+                    <JiraPill jiraKey={linkedTask.jira_key} jiraUrl={linkedTask.jira_url} />
                   </span>
                 ) : null}
                 <span className="time muted" title={formatTs(selected.created_ms)}>

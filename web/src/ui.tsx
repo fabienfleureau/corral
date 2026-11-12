@@ -74,6 +74,26 @@ export function ExternalLinkIcon() {
   );
 }
 
+/** The Jira ticket a task was imported from. A null key/url (hand-created
+ *  task) renders nothing, so callers can mount it unconditionally. Rows are
+ *  clickable: the click on the link must not also select the row. */
+export function JiraPill({ jiraKey, jiraUrl }: { jiraKey: string | null | undefined; jiraUrl: string | null | undefined }) {
+  if (!jiraKey || !jiraUrl) return null;
+  return (
+    <a
+      href={jiraUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="jira-pill"
+      title={`Jira ticket ${jiraKey}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {jiraKey}
+      <ExternalLinkIcon />
+    </a>
+  );
+}
+
 export function Chevron({ open }: { open: boolean }) {
   return (
     <svg

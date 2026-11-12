@@ -14,16 +14,16 @@ export const screenshotFavorites: Favorite[] = [
 ];
 
 export function seedScreenshotData(db: Db): void {
-  const rows: Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning" | "review">[] = [
+  const rows: (Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning" | "review"> & Partial<Pick<Task, "jira_key" | "jira_url">>)[] = [
     { id: "sample-open", title: "Improve search results", status: "open", target: "codex", model: "gpt-5.4", reasoning: "high" },
-    { id: "sample-running", title: "Add keyboard navigation", status: "dispatched", target: "claude", model: null, reasoning: null, review: "cubic review --base main --json" },
+    { id: "sample-running", title: "Add keyboard navigation", status: "dispatched", target: "claude", model: null, reasoning: null, review: "cubic review --base main --json", jira_key: "EX-1234", jira_url: "https://jira.example.com/browse/EX-1234" },
     { id: "sample-done", title: "Update project documentation", status: "done", target: "codex", model: null, reasoning: null },
   ];
   const now = Date.UTC(2025, 0, 15, 12);
   rows.forEach((row, index) => db.insertTask({
     ...row, prompt: row.title, repo_path: "/sample/example-project", target_state: "confirmed",
-    base_branch: "main", branch: null, worktree_path: null, assignee: null, jira_key: null,
-    jira_url: null, jira_parent_key: null, pr_url: null, pr_meta: null, terminal_address: null,
+    base_branch: "main", branch: null, worktree_path: null, assignee: null, jira_key: row.jira_key ?? null,
+    jira_url: row.jira_url ?? null, jira_parent_key: null, pr_url: null, pr_meta: null, terminal_address: null,
     exit_code: null, created_ms: now - index * 60000, updated_ms: now - index * 60000,
   }));
   db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
@@ -32,7 +32,8 @@ export function seedScreenshotData(db: Db): void {
   seedBenchmarks(db);
 }
 
-/** Open inbox items: a ready PR, a PR still needing work, and a question. */
+/** Open inbox items: a ready PR, a PR still needing work, two questions — the
+ *  last one from the Jira-imported task, so rows show ticket provenance. */
 export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
   const pr = (overrides: Partial<PrInfo>): PrInfo => ({
     url: "https://github.com/example/project/pull/42",
@@ -113,6 +114,24 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
       structured: 1,
       created_ms: now - 26 * 60 * 60_000,
       updated_ms: now - 26 * 60 * 60_000,
+      resolved_ms: null,
+      snooze_until_ms: null,
+    },
+    {
+      id: "sample-jira-question",
+      kind: "question",
+      status: "open",
+      title: "Which keyboard shortcut should open the command palette?",
+      summary: "",
+      body: "Two shortcuts are already taken on this platform. Pick the one the new palette grabs.",
+      context: "",
+      options: JSON.stringify(["Cmd/Ctrl+K", "Cmd/Ctrl+Shift+P", "none"]),
+      ready: 0,
+      source_ref: null,
+      task_id: "sample-running",
+      structured: 1,
+      created_ms: now - 30_000,
+      updated_ms: now - 30_000,
       resolved_ms: null,
       snooze_until_ms: null,
     },
