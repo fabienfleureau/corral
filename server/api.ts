@@ -9,7 +9,7 @@ import { extname, join, normalize } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
-import type { WorkerBackend, WorkerQuestion } from "./worker.ts";
+import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.ts";
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
@@ -22,6 +22,7 @@ import type { Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type UsageRange } from "./usage.ts";
 import { getBenchmarks, syncBenchmarks, saveManualBenchmark, deleteManualBenchmark } from "./benchmarks.ts";
+import { SHIPPED_CATALOG, mergeCatalog, parseCatalog } from "./model-catalog.ts";
 import { PrAdditionsCache } from "./usage-pr.ts";
 import { withDeadline } from "./deadline.ts";
 import { cacheControlFor, etagFor, isFresh } from "./static-cache.ts";
@@ -500,6 +501,23 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   on("GET", "/api/errors", (_req, res) => json(res, 200, errors.list()));
 
+  // ---- model facts (quality, cost, quota, retention — data, never policy) ----
+  const modelCatalog = () => mergeCatalog(SHIPPED_CATALOG, state.cfg.models);
+  on("GET", "/api/models", (_req, res) => json(res, 200, { models: modelCatalog() }));
+  // Local model servers (GPU box): configured providers are probed per request,
+  // behind a 2 s probe + 30 s cache. Anything not answering in time is unknown.
+  on("GET", "/api/models/availability", async (_req, res) => {
+    const providers = Object.keys(state.cfg.omnigent.localProviders ?? {});
+    const entries = await Promise.all(providers.map(async (provider): Promise<[string, ModelAvailability]> => {
+      const unknown: ModelAvailability = { status: "unknown", models: [] };
+      const result = state.backend.providerModels
+        ? await withDeadline(state.backend.providerModels(provider).catch(() => unknown), 3000, unknown)
+        : unknown;
+      return [provider, result];
+    }));
+    json(res, 200, { providers: Object.fromEntries(entries) });
+  });
+
   // ---- pull requests (where the human is awaited) ----
   on("GET", "/api/pulls", (_req, res) => json(res, 200, cachedPulls()));
 
@@ -712,6 +730,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       agents: Object.keys(cfg.agents),
       assistant: cfg.assistant[0],
       backend: state.backend.name,
+      models: state.cfg.models ?? {},
       omnigentUrl: cfg.omnigent.baseUrl,
       jiraConfigured: state.jira.configured,
       jiraJql: cfg.jira.jql,
@@ -720,9 +739,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   on("PUT", "/api/config", (req, res, { body }) => {
-    const b = body as { jira?: Record<string, string>; assistant?: string[]; agents?: Record<string, string[]>; favorites?: unknown };
+    const b = body as { jira?: Record<string, string>; assistant?: string[]; agents?: Record<string, string[]>; favorites?: unknown; models?: unknown };
     if (b.favorites !== undefined) {
       try { b.favorites = parseFavorites(b.favorites); } catch { return json(res, 400, { error: "Invalid favorites" }); }
+    }
+    if (b.models !== undefined) {
+      try { b.models = parseCatalog(b.models); } catch (err) { return json(res, 400, { error: err instanceof Error ? err.message : String(err) }); }
     }
     if (b.jira) Object.assign(state.cfg.jira, b.jira);
     if (b.assistant) state.cfg.assistant = b.assistant;
@@ -735,8 +757,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       writeFileSync(path, JSON.stringify(merged, null, 2) + "\n");
     } catch {
       if (b.favorites !== undefined) return json(res, 500, { error: "Could not save favorites" });
+      if (b.models !== undefined) return json(res, 500, { error: "Could not save models" });
     }
     if (b.favorites !== undefined) state.cfg.favorites = b.favorites as import("./favorites.ts").Favorite[];
+    if (b.models !== undefined) state.cfg.models = b.models as import("./model-catalog.ts").ModelCatalog;
     json(res, 200, { ok: true });
   });
 

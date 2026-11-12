@@ -3,7 +3,7 @@ import type { BenchmarkSnapshot } from "./types";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
-import type { Config, Item, JiraImportResult, JiraSearchResult, Pull, Repo, SessionInfo, Task, UsageRange, UsageReport } from "./types";
+import type { Config, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, Pull, Repo, SessionInfo, Task, UsageRange, UsageReport } from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -215,6 +215,11 @@ export const api = {
   jiraComment: (taskId: string, text: string): Promise<{ ok: boolean }> =>
     post<{ ok: boolean }>(`/api/jira/tasks/${taskId}/comment`, { text }),
 
+  // ---- model facts ----
+  getModels: (): Promise<{ models: ModelCatalog }> => get<{ models: ModelCatalog }>("/api/models"),
+  getModelAvailability: (): Promise<{ providers: Record<string, ModelAvailability> }> =>
+    get<{ providers: Record<string, ModelAvailability> }>("/api/models/availability"),
+
   // ---- worker harnesses ----
   listHarnesses: (): Promise<{ harnesses: { harness: string; agents: { id: string; name: string }[]; models?: { id: string; label: string; reasoning: string[] }[] }[]; agents: { id: string; name: string }[] }> =>
     get<{ harnesses: { harness: string; agents: { id: string; name: string }[]; models?: { id: string; label: string; reasoning: string[] }[] }[]; agents: { id: string; name: string }[] }>("/api/harnesses"),
@@ -254,7 +259,7 @@ export const api = {
   setImprovementSchedule: (intervalDays: number): Promise<ImprovementStatus> => put<ImprovementStatus>("/api/improvement", { intervalDays }),
   runImprovement: (): Promise<Item> => post<Item>("/api/improvement/run"),
   getConfig: (): Promise<Config> => get<Config>("/api/config"),
-  putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[] }): Promise<{ ok: boolean }> =>
+  putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[]; models?: ModelCatalog }): Promise<{ ok: boolean }> =>
     put<{ ok: boolean }>("/api/config", input),
 };
 

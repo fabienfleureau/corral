@@ -441,6 +441,91 @@ button {
   color: var(--faint);
 }
 
+.badge-warn {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+
+/* Model facts: a compact line on a favorite chip and under the model picker.
+   Full detail lives in the tooltip; nothing here is interactive. */
+
+.chip-favorite {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip-name {
+  font-weight: 600;
+}
+
+.chip-facts {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.model-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* Inside a dispatch form the line is a row of its own, under the pickers. */
+.inline-form .model-facts {
+  flex-basis: 100%;
+}
+
+.model-facts-label {
+  color: var(--faint);
+}
+
+.model-facts-values {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.model-facts-asof {
+  color: var(--faint);
+}
+
+.retention-none {
+  background: var(--ok-soft);
+  color: var(--ok-ink);
+}
+
+.retention-30d,
+.retention-trains {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+
+.retention-unknown {
+  background: var(--chip-bg);
+  color: var(--faint);
+}
+
+.panel-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+/* The model catalog is a long list plus a form: give it the whole grid width. */
+.settings-grid > .models-panel {
+  grid-column: 1 / -1;
+}
+
+/* A growing catalog scrolls inside the panel so the editor stays in reach. */
+.models-panel .repo-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .status-open {
   background: var(--warn-soft);
   color: var(--warn-ink);

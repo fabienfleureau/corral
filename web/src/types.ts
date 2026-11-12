@@ -128,10 +128,47 @@ export type Config = {
   agents: string[];
   assistant: string;
   backend: string;
+  /** Model facts the user edited (merged over the shipped defaults). */
+  models: ModelCatalog;
   omnigentUrl: string;
   jiraConfigured: boolean;
   jiraJql: string;
   token: string; // masked
+};
+
+// ---- model facts (GET /api/models) ----
+
+export type Retention = "none" | "30d" | "trains" | "unknown";
+
+/** One reasoning level's measured facts. */
+export type EffortFacts = {
+  /** Artificial Analysis Intelligence Index. */
+  index?: number;
+  /** USD per task. */
+  costPerTask?: number;
+  /** Wall-clock minutes per task. */
+  minPerTask?: number;
+};
+
+export type ModelFacts = {
+  retention: Retention;
+  quota?: { monthlyUsd: number };
+  /** Key = the reasoning value the harness reports; "default" is the fallback. */
+  efforts?: Record<string, EffortFacts>;
+  bench?: Record<string, number>;
+  /** YYYY-MM-DD the numbers were collected. */
+  asOf: string;
+  source?: string;
+};
+
+/** Model id (exact, or "prefix*") -> facts. */
+export type ModelCatalog = Record<string, ModelFacts>;
+
+/** GET /api/models/availability: what a local model server answered. */
+export type ModelAvailability = {
+  /** "up": it listed its models. "down": it refused or errored. "unknown": no answer in time. */
+  status: "up" | "down" | "unknown";
+  models: string[];
 };
 
 // ---- usage page (GET /api/usage) ----

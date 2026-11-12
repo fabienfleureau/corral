@@ -8,6 +8,7 @@ import { gzipSync } from "node:zlib";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { OmnigentConfig } from "./config.ts";
+import { LocalModelProbe } from "./model-probe.ts";
 import type {
   WorkerBackend,
   WorkerElicitation,
@@ -17,6 +18,7 @@ import type {
   WorkerStart,
   WorkerModel,
   WorkerQuestion,
+  ModelAvailability,
 } from "./worker.ts";
 
 const POLL_MS = 4000;
@@ -169,9 +171,18 @@ export class OmnigentBackend implements WorkerBackend {
   private ticking = false; // one tick at a time: an overlapping tick's stale view would emit false "finished"
   private subs = new Set<(e: WorkerEvent) => void>();
   private taskIds = new Map<string, string | null>();
+  private localProbe = new LocalModelProbe();
 
   constructor(cfg: OmnigentConfig) {
     this.cfg = cfg;
+  }
+
+  /** Availability of a configured local model server (2 s timeout, 30 s cache).
+   *  An unconfigured provider is unknown, not down. */
+  async providerModels(provider: string): Promise<ModelAvailability> {
+    const baseUrl = this.cfg.localProviders?.[provider];
+    if (!baseUrl) return { status: "unknown", models: [] };
+    return this.localProbe.availability(baseUrl);
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
