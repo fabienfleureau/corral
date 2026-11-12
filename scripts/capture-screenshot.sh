@@ -27,8 +27,29 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$scratch/home/.config/corral" "$scratch/data" "$scratch/bin" "$scratch/gh"
 # Do not let the periodic pull refresh consult the user's GitHub account.
-printf '#!/bin/sh\nexit 1\n' > "$scratch/bin/gh"
+# The only answer the fixture serves is the Usage page's rate limit probe, with
+# synthetic numbers (resets stay in the future whenever the capture runs).
+cat > "$scratch/bin/gh" <<'SH'
+#!/bin/sh
+if [ "$1" = "api" ] && [ "$2" = "rate_limit" ]; then
+  now=$(date +%s)
+  printf '{"resources":{"core":{"limit":5000,"remaining":4979,"reset":%s},"search":{"limit":30,"remaining":18,"reset":%s},"graphql":{"limit":5000,"remaining":4300,"reset":%s}}}\n' \
+    $((now + 2400)) $((now + 900)) $((now + 2400))
+  exit 0
+fi
+exit 1
+SH
 chmod +x "$scratch/bin/gh"
+cat > "$scratch/bin/glab" <<'SH'
+#!/bin/sh
+if [ "$1" = "api" ] && [ "$2" = "-i" ] && [ "$3" = "user" ]; then
+  now=$(date +%s)
+  printf 'HTTP/2.0 200 OK\nContent-Type: application/json\nRateLimit-Limit: 2000\nRateLimit-Name: throttle_authenticated_api\nRateLimit-Remaining: 1740\nRateLimit-Reset: %s\n\n{"username":"screenshot-fixture"}\n' $((now + 1800))
+  exit 0
+fi
+exit 1
+SH
+chmod +x "$scratch/bin/glab"
 # Pages that read the harness catalog (benchmarks) can point at a synthetic
 # catalog instead of the unreachable backend: CORRAL_FIXTURE_HARNESSES=1.
 omnigent_url=http://127.0.0.1:1

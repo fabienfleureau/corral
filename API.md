@@ -108,6 +108,7 @@ a dispatch or a PR sync.
   Claude quota comes from ccstatusline's cache, Codex quota from its latest `rate_limits` event, and OpenCode Go quota from its account usage endpoint using OpenCode's locally registered credential. The Go snapshot is cached for 60s (shared across concurrent polls) and a slow unreachable upstream yields an `AgentQuota` note instead of delaying the report.
   `scanning: true` while the first log scan runs (poll). Spend is attributed to a task when the session
   cwd is inside its `worktree_path`; `efficiency` = done tasks per $ and $ per done task.
+- `GET /api/rate-limits[?refresh=1]` → `{limits: PlatformRateLimit[], fetched_ms}` — remaining GitHub and GitLab API quota for the PR loop, shown on the Usage page. `PlatformRateLimit` is `{host: "github"|"gitlab", windows: [{name, limit, remaining, reset_ms}], note, fetched_ms}`: GitHub contributes `core`, `search` and `graphql` (from `gh api rate_limit`, which spends no quota), GitLab the authenticated throttle (from the `RateLimit-*` headers of one `glab api user` call). A platform that fails to answer returns `windows: []` and a `note` instead of an error. The answer is cached for 60s, shared across concurrent polls; `refresh=1` (the page's Refresh button) bypasses the cache.
 
 ### Improvement analysis
 - `GET /api/improvement` → schedule, last attempt/success, error and running state.

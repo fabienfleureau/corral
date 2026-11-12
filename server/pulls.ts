@@ -276,6 +276,106 @@ async function listGitLab(): Promise<Pull[]> {
   return mapLimit([...seen.values()], CONCURRENCY, (mr) => gitlabPull(mr, login));
 }
 
+// ---- platform API rate limits ----
+// The PR loop spends API quota on both platforms, so the Usage page shows how
+// much is left. GitHub answers /rate_limit without spending quota; GitLab only
+// exposes its throttle in response headers, so it costs one cheap call.
+
+export interface RateLimitWindow {
+  /** "core", "search", "graphql", or the GitLab throttle name. */
+  name: string;
+  limit: number;
+  remaining: number;
+  /** Epoch ms; null when the platform sends no reset. */
+  reset_ms: number | null;
+}
+
+export interface PlatformRateLimit {
+  host: "github" | "gitlab";
+  /** Empty when the fetch failed — then `note` says why. */
+  windows: RateLimitWindow[];
+  note: string | null;
+  fetched_ms: number;
+}
+
+function window(name: string, raw: { limit?: unknown; remaining?: unknown; reset?: unknown } | undefined): RateLimitWindow | null {
+  const limit = Number(raw?.limit);
+  const remaining = Number(raw?.remaining);
+  if (!Number.isFinite(limit) || !Number.isFinite(remaining) || limit <= 0) return null;
+  const reset = Number(raw?.reset);
+  return { name, limit, remaining, reset_ms: Number.isFinite(reset) && reset > 0 ? reset * 1000 : null };
+}
+
+/** Windows the PR loop consumes, from `gh api rate_limit`. */
+export function parseGitHubRateLimit(json: string): RateLimitWindow[] {
+  const data = JSON.parse(json) as { resources?: Record<string, { limit?: unknown; remaining?: unknown; reset?: unknown }> };
+  const out: RateLimitWindow[] = [];
+  for (const name of ["core", "search", "graphql"]) {
+    const w = window(name, data.resources?.[name]);
+    if (w) out.push(w);
+  }
+  return out;
+}
+
+/** The authenticated throttle, from `glab api -i` headers. */
+export function parseGitLabRateHeaders(output: string): RateLimitWindow[] {
+  const [head = ""] = output.split(/\r?\n\r?\n/);
+  const headers = new Map<string, string>();
+  for (const line of head.split(/\r?\n/).slice(1)) {
+    const i = line.indexOf(":");
+    if (i > 0) headers.set(line.slice(0, i).trim().toLowerCase(), line.slice(i + 1).trim());
+  }
+  const limit = headers.get("ratelimit-limit");
+  const remaining = headers.get("ratelimit-remaining");
+  if (!limit || !remaining) return [];
+  const reset = Number(headers.get("ratelimit-reset"));
+  const name = (headers.get("ratelimit-name") || "api").replace(/^throttle_/, "").replace(/_/g, " ");
+  return [{
+    name,
+    limit: Number(limit),
+    remaining: Number(remaining),
+    reset_ms: Number.isFinite(reset) && reset > 0 ? reset * 1000 : null,
+  }].filter((w) => Number.isFinite(w.limit) && Number.isFinite(w.remaining) && w.limit > 0);
+}
+
+async function githubRateLimit(): Promise<PlatformRateLimit> {
+  try {
+    const windows = parseGitHubRateLimit(await run("gh", ["api", "rate_limit"]));
+    if (!windows.length) throw new Error("no rate limit resources in the answer");
+    return { host: "github", windows, note: null, fetched_ms: Date.now() };
+  } catch (err) {
+    return { host: "github", windows: [], note: err instanceof Error ? err.message : String(err), fetched_ms: Date.now() };
+  }
+}
+
+async function gitlabRateLimit(): Promise<PlatformRateLimit> {
+  try {
+    const windows = parseGitLabRateHeaders(await run("glab", ["api", "-i", "user"]));
+    if (!windows.length) throw new Error("no rate limit headers in the answer");
+    return { host: "gitlab", windows, note: null, fetched_ms: Date.now() };
+  } catch (err) {
+    return { host: "gitlab", windows: [], note: err instanceof Error ? err.message : String(err), fetched_ms: Date.now() };
+  }
+}
+
+/** One platform call per minute, shared by concurrent polls. */
+const RATE_LIMIT_TTL_MS = 60_000;
+let rateCache: { at: number; value: PlatformRateLimit[] } | null = null;
+let rateInflight: Promise<PlatformRateLimit[]> | null = null;
+
+export function platformRateLimits(force = false): Promise<PlatformRateLimit[]> {
+  if (!force && rateCache && Date.now() - rateCache.at < RATE_LIMIT_TTL_MS) return Promise.resolve(rateCache.value);
+  rateInflight ??= Promise.all([githubRateLimit(), gitlabRateLimit()])
+    .then((value) => {
+      rateCache = { at: Date.now(), value };
+      return value;
+    })
+    .finally(() => {
+      rateInflight = null;
+    });
+  return rateInflight;
+}
+
 // ---- cache ----
 
 let cache: Pull[] = [];

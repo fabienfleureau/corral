@@ -3,7 +3,7 @@ import type { BenchmarkSnapshot } from "./types";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
-import type { Config, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
+import type { Config, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -260,6 +260,9 @@ export const api = {
   // ---- misc ----
   getUsage: (range: UsageRange, refresh = false): Promise<UsageReport> =>
     get<UsageReport>(`/api/usage?range=${range}${refresh ? "&refresh=1" : ""}`),
+
+  getRateLimits: (refresh = false): Promise<{ limits: PlatformRateLimit[]; fetched_ms: number }> =>
+    get<{ limits: PlatformRateLimit[]; fetched_ms: number }>(`/api/rate-limits${refresh ? "?refresh=1" : ""}`),
 
   getBenchmarks: (): Promise<BenchmarkSnapshot> => get<BenchmarkSnapshot>("/api/benchmarks"),
   saveManualBenchmark: (value: { model: string; benchmark: string; score: number }): Promise<BenchmarkSnapshot> => post<BenchmarkSnapshot>("/api/benchmarks/manual", value),

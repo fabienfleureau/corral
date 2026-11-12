@@ -19,7 +19,7 @@ import { dispatchTask } from "./dispatch.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
-import { cachedPulls, refreshPulls } from "./pulls.ts";
+import { cachedPulls, platformRateLimits, refreshPulls } from "./pulls.ts";
 import type { Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type UsageRange } from "./usage.ts";
@@ -590,6 +590,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/pulls/refresh", async (_req, res) => {
     await refreshPulls(state.hub);
     json(res, 200, cachedPulls());
+  });
+
+  // Remaining GitHub/GitLab API quota, shown next to the agent quotas on Usage.
+  on("GET", "/api/rate-limits", async (_req, res, { url }) => {
+    json(res, 200, { limits: await platformRateLimits(url.searchParams.get("refresh") === "1"), fetched_ms: Date.now() });
   });
 
   // ---- repos ----
