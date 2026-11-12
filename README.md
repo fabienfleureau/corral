@@ -17,8 +17,9 @@ idea → Jira (clarify outside Corral) → task backlog → dispatch (worktree +
   Jira subtasks group under their parent; when all children resolve, the parent's
   **Mark done** CTA lights up (manual write CTAs only: mark done, add comment).
   A task imported from Jira also drives its ticket's **status**, forward only:
-  dispatch → `In Progress`, PR/MR opened → `Code Review`, PR past the readiness
-  gate → `Ready to merge`, merged → `Done` (names configurable per workflow).
+  dispatch → `In Progress`, PR/MR opened → `Code Review`, PR shown by Corral as
+  `ready to merge` (gate passed **and** a human approved it) → `Ready to merge`,
+  merged → `Done` (names configurable per workflow).
 - **Dispatch** — one click, with a suggested target (Claude/Codex/OpenCode).
   Each task gets a fresh **git worktree** (`~/.herdr/worktrees/<repo>/<branch>`)
   and an agent terminal managed by herdr-core. Opt out per task.

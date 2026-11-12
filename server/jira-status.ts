@@ -2,10 +2,11 @@
 //
 // Only tasks imported from Jira (task.jira_key) are touched, and only
 // forwards: dispatching the agent moves the ticket to "In Progress", an open
-// PR/MR to "Code Review", a PR that passed the readiness gate to "Ready to
-// merge", and a merge to "Done". Status names are workflow-specific, so they
-// are configurable (cfg.jira.statuses) with those names as defaults; a blank
-// name disables that stage.
+// PR/MR to "Code Review", a PR Corral itself shows as "ready to merge" (the
+// readiness gate passed *and* a human approved it) to "Ready to merge", and a
+// merge to "Done". Status names are workflow-specific, so they are
+// configurable (cfg.jira.statuses) with those names as defaults; a blank name
+// disables that stage.
 //
 // Jira can only move an issue through the transitions its workflow offers
 // *now*: when the direct transition is unavailable (e.g. Corral missed "Code

@@ -66,6 +66,15 @@ export function prReady(pr: PrInfo): PrReady {
   return { ready: reasons.length === 0, reasons };
 }
 
+/** Where a ready PR sits in Corral's own vocabulary: passing the gate makes it
+ *  "ready for review"; only a human approval makes it "ready to merge". The
+ *  inbox label and the Jira sync both read this, so the ticket never claims a
+ *  merge readiness Corral has not recorded. Unknown approvals (null) count as
+ *  none. */
+export function prReviewLabel(pr: PrInfo): "ready for review" | "ready to merge" {
+  return pr.human_approvals?.length ? "ready to merge" : "ready for review";
+}
+
 export function prItemBody(pr: PrInfo): string {
   const lines: string[] = [];
   const desc = pr.description.trim();
@@ -579,7 +588,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
     }
   }
 
-  const readyStatus = pr.human_approvals?.length ? "ready to merge" : "ready for review";
+  const readyStatus = prReviewLabel(pr);
   const title = shouldResolve
     ? `PR ${pr.state.toLowerCase()}: ${pr.title}`
     : ready
@@ -648,9 +657,10 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
 }
 
 /** Mirror the PR lifecycle onto the task's Jira ticket: an open PR/MR is
- *  "Code Review", a PR past the readiness gate is "Ready to merge", a merge
- *  is "Done". A closed (unmerged) PR moves nothing. Never awaited: the sync is
- *  serialized per ticket, so a slow Jira cannot delay the PR loop. */
+ *  "Code Review", and only a PR Corral itself shows as "ready to merge" (gate
+ *  passed *and* a human approved it) is "Ready to merge"; a merge is "Done".
+ *  A closed (unmerged) PR moves nothing. Never awaited: the sync is serialized
+ *  per ticket, so a slow Jira cannot delay the PR loop. */
 function syncJiraPrStage(
   db: Db,
   hub: Hub,
@@ -666,7 +676,7 @@ function syncJiraPrStage(
   const stage: JiraStage | null = merged
     ? "done"
     : pr.state === "OPEN"
-      ? ready
+      ? ready && prReviewLabel(pr) === "ready to merge"
         ? "ready_to_merge"
         : "code_review"
       : null;
