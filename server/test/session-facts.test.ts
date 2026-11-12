@@ -187,6 +187,37 @@ test("a long outage does not write the queue off as unknown", async () => {
   assert.equal(size, 3, "the queue recovers once the backend answers again");
 });
 
+test("a single missing session does not back off the healthy ones", async () => {
+  // A status-filtered page can hold one task whose session is gone. The backend
+  // answered ("no session here"), so that is not an outage: the next request for
+  // a healthy list must still be read.
+  const counts = fakeBackend((address) => (address === "gone" ? null : { model: "m", reasoning: null }));
+  const facts = new SessionFacts(counts.backend, { retryMs: 30_000 });
+
+  assert.equal((await facts.forTasks([done("gone")])).size, 0);
+  assert.equal((await facts.forTasks([done("healthy")])).get("healthy")?.model, "m");
+});
+
+test("joiners with different slices each get their own read", async () => {
+  const counts = fakeBackend(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return { model: "m", reasoning: null };
+  });
+  const facts = new SessionFacts(counts.backend, { concurrency: 1 });
+
+  // Three status-filtered lists arriving together: the first starts the pass,
+  // the other two must not be left waiting on it forever.
+  const [a, b, c] = await Promise.all([
+    facts.forTasks([done("a1"), done("a2")]),
+    facts.forTasks([done("b1")]),
+    facts.forTasks([done("c1")]),
+  ]);
+  assert.equal(a.size, 2);
+  assert.equal(b.size, 1);
+  assert.equal(c.size, 1);
+  assert.deepEqual(counts.addresses().sort(), ["a1", "a2", "b1", "c1"], "every slice is read once");
+});
+
 test("a request answers without waiting for the whole cold queue", async () => {
   const counts = fakeBackend(async () => {
     await new Promise((resolve) => setTimeout(resolve, 30));

@@ -14,12 +14,12 @@
 //   - a task being `done` is *not* evidence its session is over: capture.ts
 //     marks a task done when the agent reports, and that session can keep
 //     running (the PR loop, a fresh session continuing the work);
-//   - an address the backend did not answer is retried after a window that
+//   - an address the backend has no session for is retried after a window that
 //     doubles each time, so a gone session costs one read per window instead of
 //     a fan-out on every page load — and never loses its facts for good;
-//   - a pass that answers nothing at all is an outage, not N missing sessions:
-//     it backs off instead of counting every address out (which would lose the
-//     whole queue) or re-reading it on every request.
+//   - a pass where *no* address got an answer at all is an outage (timeouts or
+//     errors), not N missing sessions: it backs off as a whole, without
+//     counting any address out or blocking a single miss on a healthy backend.
 //
 // A request never waits longer than `requestBudgetMs`; the pass keeps going
 // behind it, so the next page load is warmer.
@@ -64,6 +64,16 @@ interface Outcome {
   finished: boolean;
 }
 
+/** What one point read produced. */
+type ReadResult =
+  | ({ kind: "fact" } & Outcome)
+  /** The backend answered, and has no session at that address. */
+  | { kind: "missing" }
+  /** No answer at all: a timeout, an error, or no backend to ask. */
+  | { kind: "silent" };
+
+const TIMEOUT = Symbol("timeout");
+
 export class SessionFacts {
   private readonly backend: WorkerBackend;
   private readonly concurrency: number;
@@ -77,7 +87,7 @@ export class SessionFacts {
   /** Addresses a pass got no answer for, with when and how often that happened. */
   private readonly unanswered = new Map<string, { attempts: number; at: number }>();
   /** Reads in flight, so a burst of page loads shares them instead of repeating them. */
-  private readonly reads = new Map<string, Promise<Outcome | null>>();
+  private readonly reads = new Map<string, Promise<ReadResult>>();
   /** The pass over the queue, shared by concurrent callers. */
   private pass: { addresses: Set<string>; done: Promise<void> } | null = null;
   /** Consecutive passes that answered nothing at all: the backend is down. */
@@ -116,24 +126,30 @@ export class SessionFacts {
   }
 
   /** Read every address that has no settled fact yet, once per burst of callers. */
-  private fill(addresses: string[], depth: number): Promise<void> {
-    const pending = addresses.filter((address) => !this.settled.has(address) && this.retryable(address));
-    if (pending.length === 0) return Promise.resolve();
+  private async fill(addresses: string[], depth: number): Promise<void> {
+    const pending = () =>
+      addresses.filter((address) => !this.settled.has(address) && this.retryable(address));
+    let todo = pending();
+    if (todo.length === 0) return;
     const running = this.pass;
     if (running) {
-      if (pending.every((address) => running.addresses.has(address))) return running.done;
-      // The pass in flight is reading a different slice of the queue (a
-      // status-filtered list): let it finish, then cover what it did not.
-      if (depth >= 1) return running.done;
-      return running.done.then(() =>
-        this.fill(pending.filter((address) => !this.settled.has(address)), depth + 1),
-      );
+      const covered = todo.every((address) => running.addresses.has(address));
+      // Wait for the pass in flight before deciding: it may settle these.
+      await running.done;
+      if (covered) return;
+      todo = pending();
+      if (todo.length === 0) return;
     }
-    if (!this.passAllowed()) return Promise.resolve();
-    const done = this.readAll(pending).finally(() => {
+    if (!this.passAllowed()) return;
+    // A pass already read a different slice of the queue (a status-filtered
+    // list). Read the remainder here rather than waiting on someone else's
+    // pass: a joiner that only awaited would leave its own addresses unread.
+    // At most one pass is tracked at a time, and the slices are bounded by the
+    // four status values, so this cannot fan out.
+    const done = this.readAll(todo).finally(() => {
       if (this.pass?.done === done) this.pass = null;
     });
-    this.pass = { addresses: new Set(pending), done };
+    this.pass = { addresses: new Set(todo), done };
     return done;
   }
 
@@ -155,40 +171,46 @@ export class SessionFacts {
   }
 
   private async readAll(addresses: string[]): Promise<void> {
-    const missed: string[] = [];
+    const retry: string[] = [];
     let answered = 0;
     await mapLimit(addresses, this.concurrency, async (address) => {
-      const outcome = await this.readOnce(address);
-      if (!outcome) {
-        missed.push(address);
+      const result = await this.readOnce(address);
+      if (result.kind === "silent") {
+        retry.push(address);
         return;
       }
+      // A fact or a "no session here" both mean the backend is up.
       answered++;
+      if (result.kind === "missing") {
+        retry.push(address);
+        return;
+      }
       this.unanswered.delete(address);
-      if (outcome.finished) {
-        this.settled.set(address, outcome.fact);
+      if (result.finished) {
+        this.settled.set(address, result.fact);
         this.live.delete(address);
       } else {
-        this.live.set(address, outcome.fact);
+        this.live.set(address, result.fact);
       }
     });
     if (answered === 0) {
-      // Nothing at all: that is an outage, not N missing sessions. Back off as a
-      // whole — counting each address out would make one transient outage
+      // Not one address got an answer: the backend is down (a timeout or an
+      // error), which is a different thing from a queue of gone sessions. Back
+      // off as a whole — counting each address out would make one outage
       // inflate every backoff, and resetting the counters (as an earlier draft
       // did) would re-read the whole queue on every window forever.
       this.outage = { passes: (this.outage?.passes ?? 0) + 1, at: Date.now() };
       return;
     }
     this.outage = null;
-    for (const address of missed) {
+    for (const address of retry) {
       const seen = this.unanswered.get(address);
       this.unanswered.set(address, { attempts: (seen?.attempts ?? 0) + 1, at: Date.now() });
     }
   }
 
   /** One read per address at a time, shared by every caller waiting on it. */
-  private readOnce(address: string): Promise<Outcome | null> {
+  private readOnce(address: string): Promise<ReadResult> {
     const running = this.reads.get(address);
     if (running) return running;
     const read = this.read(address).finally(() => this.reads.delete(address));
@@ -196,18 +218,23 @@ export class SessionFacts {
     return read;
   }
 
-  /** null = the backend did not answer for this address. */
-  private async read(address: string): Promise<Outcome | null> {
-    if (typeof this.backend.get !== "function") return null;
+  private async read(address: string): Promise<ReadResult> {
+    if (typeof this.backend.get !== "function") return { kind: "silent" };
     try {
-      const session = await withDeadline(this.backend.get(address), this.timeoutMs, null);
-      if (!session) return null;
+      const session = await withDeadline<Awaited<ReturnType<WorkerBackend["get"]>> | typeof TIMEOUT>(
+        this.backend.get(address),
+        this.timeoutMs,
+        TIMEOUT,
+      );
+      if (session === TIMEOUT) return { kind: "silent" };
+      if (!session) return { kind: "missing" };
       return {
+        kind: "fact",
         fact: { model: session.model ?? null, reasoning: session.reasoning ?? null },
         finished: session.state === "finished",
       };
     } catch {
-      return null;
+      return { kind: "silent" };
     }
   }
 }
