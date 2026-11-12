@@ -148,6 +148,15 @@ export type DispatchResult = {
   branch: string;
 };
 
+/** Work a PR check handed to the agent (a forced refresh reports it). */
+export type PrDelivery = { address: string; comments: boolean; conflict: boolean };
+
+export type CheckPrResult = {
+  pr: unknown;
+  task: Task;
+  delivered: PrDelivery | null;
+};
+
 export type NewTaskInput = {
   /** Omit to let omnigent title the session after dispatch. */
   title?: string;
@@ -202,8 +211,8 @@ export const api = {
   ): Promise<DispatchResult> =>
     post<DispatchResult>(`/api/tasks/${id}/dispatch`, input),
   cleanupTask: (id: string): Promise<{ ok: boolean }> => post<{ ok: boolean }>(`/api/tasks/${id}/cleanup`),
-  checkPr: (id: string): Promise<{ pr: unknown; task: Task }> =>
-    post<{ pr: unknown; task: Task }>(`/api/tasks/${id}/check-pr`),
+  checkPr: (id: string, opts: { force?: boolean } = {}): Promise<CheckPrResult> =>
+    post<CheckPrResult>(`/api/tasks/${id}/check-pr`, opts.force ? { force: true } : undefined),
 
   // ---- jira ----
   jiraSearch: (q: string): Promise<JiraSearchResult[]> =>

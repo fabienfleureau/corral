@@ -14,16 +14,19 @@ export const screenshotFavorites: Favorite[] = [
 ];
 
 export function seedScreenshotData(db: Db): void {
-  const rows: (Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning" | "review"> & Partial<Pick<Task, "jira_key" | "jira_url">>)[] = [
+  const rows: (Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning" | "review"> & Partial<Pick<Task, "jira_key" | "jira_url" | "branch" | "pr_url">>)[] = [
     { id: "sample-open", title: "Improve search results", status: "open", target: "codex", model: "gpt-5.4", reasoning: "high" },
     { id: "sample-running", title: "Add keyboard navigation", status: "dispatched", target: "claude", model: null, reasoning: null, review: "cubic review --base main --json", jira_key: "EX-1234", jira_url: "https://jira.example.com/browse/EX-1234" },
     { id: "sample-done", title: "Update project documentation", status: "done", target: "codex", model: null, reasoning: null },
+    // The task behind the "PR needs work" inbox item: the PR loop's escape
+    // hatch (force refresh) lives on that row's detail pane.
+    { id: "sample-pr-task", title: "fix(auth): refresh expired session tokens", status: "done", target: "claude", model: null, reasoning: null, branch: "fix/auth-refresh", pr_url: "https://gitlab.com/example/platform/-/merge_requests/29" },
   ];
   const now = Date.UTC(2025, 0, 15, 12);
   rows.forEach((row, index) => db.insertTask({
     ...row, prompt: row.title, repo_path: "/sample/example-project", target_state: "confirmed",
-    base_branch: "main", branch: null, worktree_path: null, assignee: null, jira_key: row.jira_key ?? null,
-    jira_url: row.jira_url ?? null, jira_parent_key: null, pr_url: null, pr_meta: null, terminal_address: null,
+    base_branch: "main", branch: row.branch ?? null, worktree_path: null, assignee: null, jira_key: row.jira_key ?? null,
+    jira_url: row.jira_url ?? null, jira_parent_key: null, pr_url: row.pr_url ?? null, pr_meta: null, terminal_address: null,
     exit_code: null, created_ms: now - index * 60000, updated_ms: now - index * 60000,
   }));
   db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
@@ -94,7 +97,7 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
       options: null,
       ready: 0,
       source_ref: null,
-      task_id: null,
+      task_id: "sample-pr-task",
       structured: 1,
       created_ms: now - 3 * 60 * 60_000,
       updated_ms: now - 3 * 60 * 60_000,

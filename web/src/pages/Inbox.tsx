@@ -21,6 +21,58 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "in-progress", label: "In progress" },
 ];
 
+/** Force refresh: re-check the task's PR/MR now and hand any unaddressed
+ *  review comments or merge conflicts to the agent — the manual escape hatch
+ *  of the PR loop when an automatic hand-off did not land. */
+function ForcePrRefresh({ task, onChecked }: { task: Task; onChecked: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    setNote(null);
+    setError(null);
+    try {
+      const res = await api.checkPr(task.id, { force: true });
+      const delivered = res.delivered;
+      if (!delivered) {
+        setNote(res.pr ? "Checked — nothing new to hand to the agent." : "No PR/MR found for this branch yet.");
+      } else if (!delivered.address) {
+        // The PR loop could not reach an agent: retryable, so say what failed.
+        setError("Could not hand the work to an agent. Check the session, then retry.");
+      } else {
+        const what = [delivered.comments ? "review comments" : "", delivered.conflict ? "merge conflicts" : ""]
+          .filter(Boolean)
+          .join(" and ");
+        setNote(`Sent ${what} to the agent.`);
+      }
+      onChecked();
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        className="btn"
+        onClick={() => void run()}
+        disabled={busy}
+        title="Check this PR/MR now and hand unaddressed review comments or merge conflicts to the agent"
+      >
+        {busy ? <Spinner /> : null}
+        {busy ? "Refreshing…" : "Force refresh"}
+      </button>
+      {note ? <span className="inline-ok">{note}</span> : null}
+      {error ? <span className="inline-error">{error}</span> : null}
+    </>
+  );
+}
+
 export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: boolean; eventVersion: number; refresh: () => void; onSeen: (items: Item[]) => void }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
   const [allItems, setAllItems] = useState<Item[]>([]);
@@ -352,6 +404,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     {openBusy ? "Opening…" : "View task"}
                   </button>
                 ) : <span className="muted">No session available.</span>}
+                {selectedTask.branch ? <ForcePrRefresh task={selectedTask} onChecked={refresh} /> : null}
                 <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask)} title="Archive this task; its session keeps running">
                   Archive task
                 </button>
@@ -447,6 +500,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     {openBusy ? "Opening…" : "Open conversation"}
                   </button>
                 ) : null}
+                {selected.kind === "pr" && linkedTask?.branch ? <ForcePrRefresh task={linkedTask} onChecked={refresh} /> : null}
                 <button
                   className="btn"
                   onClick={() => void runAction(() => api.resolveItem(selected.id))}
