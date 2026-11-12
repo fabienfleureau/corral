@@ -20,11 +20,12 @@ export function formatTs(ms: number): string {
 }
 
 /** Compute the snooze-until timestamp for a preset. */
-export function snoozeUntil(preset: "1h" | "tomorrow" | "nextweek"): number {
+export function snoozeUntil(preset: "1h" | "4h" | "tomorrow"): number {
   if (preset === "1h") return Date.now() + 3_600_000;
+  if (preset === "4h") return Date.now() + 4 * 3_600_000;
   const target = new Date();
   target.setHours(9, 0, 0, 0);
-  target.setDate(target.getDate() + (preset === "tomorrow" ? 1 : 7));
+  target.setDate(target.getDate() + 1);
   return target.getTime();
 }
 

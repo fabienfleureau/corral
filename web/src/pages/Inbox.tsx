@@ -525,17 +525,17 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 </button>
                 <button
                   className="btn"
+                  onClick={() => void runAction(() => api.snoozeItem(selected.id, snoozeUntil("4h")))}
+                  disabled={actionBusy}
+                >
+                  4h
+                </button>
+                <button
+                  className="btn"
                   onClick={() => void runAction(() => api.snoozeItem(selected.id, snoozeUntil("tomorrow")))}
                   disabled={actionBusy}
                 >
                   Tomorrow
-                </button>
-                <button
-                  className="btn"
-                  onClick={() => void runAction(() => api.snoozeItem(selected.id, snoozeUntil("nextweek")))}
-                  disabled={actionBusy}
-                >
-                  Next week
                 </button>
               </div>
               {actionError ? <div className="inline-error">{actionError}</div> : null}
