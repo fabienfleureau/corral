@@ -82,7 +82,8 @@ export class SessionFacts {
   private pass: { addresses: Set<string>; done: Promise<void> } | null = null;
   /** Consecutive passes that answered nothing at all: the backend is down. */
   private outage: { passes: number; at: number } | null = null;
-  private static readonly MAX_BACKOFF_MS = 10 * 60_000;
+  /** Backoff cap: a recovered backend is noticed within this window. */
+  private static readonly MAX_BACKOFF_MS = 2 * 60_000;
 
   constructor(backend: WorkerBackend, opts: SessionFactsOptions = {}) {
     this.backend = backend;
