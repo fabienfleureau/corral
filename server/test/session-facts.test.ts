@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 const { SessionFacts } = await import("../session-facts.ts");
 
-type Facts = { model: string | null; reasoning: string | null };
+type Facts = { model: string | null; reasoning: string | null; state?: string };
 
 /** Worker backend stub: counts point reads and records peak concurrency. */
 type Answer = Facts | null | Error | Promise<Facts | null | Error>;
@@ -22,7 +22,9 @@ function fakeBackend(answer: (address: string, call: number) => Answer) {
         const call = seen.filter((a) => a === address).length;
         const value = await answer(address, call);
         if (value instanceof Error) throw value;
-        return value ? { address, state: "finished", status: "done", ...value } : null;
+        // The backend reports whether the session is over; the default stub is a
+        // session that is over (the tasks queue is mostly history).
+        return value ? { address, state: value.state ?? "finished", status: "done", ...value } : null;
       } finally {
         inFlight--;
       }
@@ -38,6 +40,7 @@ function fakeBackend(answer: (address: string, call: number) => Answer) {
 
 const done = (address: string) => ({ terminal_address: address, status: "done" as const });
 const dispatched = (address: string) => ({ terminal_address: address, status: "dispatched" as const });
+const live = { state: "live" };
 
 test("a warm queue is read once and then answers from memory", async () => {
   const counts = fakeBackend(() => ({ model: "gpt-6.1-terra", reasoning: "high" }));
@@ -53,14 +56,36 @@ test("a warm queue is read once and then answers from memory", async () => {
   assert.deepEqual(second.get("c"), { model: "gpt-6.1-terra", reasoning: "high" });
 });
 
-test("a dispatched task is re-read so a model override shows up", async () => {
-  const counts = fakeBackend((_address, call) => ({ model: call === 1 ? "sonnet-5" : "opus-5-5", reasoning: null }));
+test("a live session is re-read so a model override shows up", async () => {
+  const counts = fakeBackend((_address, call) => ({ ...live, model: call === 1 ? "sonnet-5" : "opus-5-5", reasoning: null }));
   const facts = new SessionFacts(counts.backend);
   const tasks = [dispatched("live")];
 
   assert.equal((await facts.forTasks(tasks)).get("live")?.model, "sonnet-5");
   assert.equal((await facts.forTasks(tasks)).get("live")?.model, "opus-5-5");
   assert.equal(counts.reads(), 2);
+});
+
+test("a task marked done whose session is still live keeps showing a new override", async () => {
+  // capture.ts marks a task done when the agent reports, and the session can keep
+  // running (the PR loop, a fresh session continuing the work): a done task is
+  // not evidence its session is over.
+  const counts = fakeBackend((_address, call) => ({ ...live, model: call === 1 ? "sonnet-5" : "opus-5-5", reasoning: null }));
+  const facts = new SessionFacts(counts.backend);
+  const tasks = [done("continuing")];
+
+  assert.equal((await facts.forTasks(tasks)).get("continuing")?.model, "sonnet-5");
+  assert.equal((await facts.forTasks(tasks)).get("continuing")?.model, "opus-5-5");
+});
+
+test("a session the backend reports as finished is kept even for a dispatched task", async () => {
+  const counts = fakeBackend(() => ({ model: "m", reasoning: null }));
+  const facts = new SessionFacts(counts.backend);
+  const tasks = [dispatched("dead")];
+
+  assert.equal((await facts.forTasks(tasks)).get("dead")?.model, "m");
+  assert.equal((await facts.forTasks(tasks)).get("dead")?.model, "m");
+  assert.equal(counts.reads(), 1, "the backend says it is over: no reason to read it again");
 });
 
 test("concurrent page loads share one pass over the queue", async () => {
@@ -113,6 +138,55 @@ test("an address the backend missed on the first pass is retried, then kept", as
   assert.equal((await facts.forTasks(tasks)).get("flaky")?.model, "m");
 });
 
+test("an address that never answers is retried rarely, not on every request", async () => {
+  const counts = fakeBackend((address) => (address === "gone" ? null : { model: "m", reasoning: null }));
+  const facts = new SessionFacts(counts.backend, { retryMs: 20 });
+  const tasks = [done("gone"), done("stable")];
+
+  for (let i = 0; i < 40; i++) {
+    await facts.forTasks(tasks);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  // The window doubles (20, 40, 80, 160…): a few reads in 400ms, not 40.
+  const gone = counts.addresses().filter((a) => a === "gone").length;
+  assert.ok(gone >= 2, `an unanswered address is still retried (${gone} reads)`);
+  assert.ok(gone <= 8, `${gone} reads in 400ms: the retry window must grow`);
+  assert.equal((await facts.forTasks(tasks)).get("stable")?.model, "m", "and the rest stays answered");
+});
+
+test("a long outage backs off instead of re-reading the queue every window", async () => {
+  const counts = fakeBackend(() => new Error("down"));
+  const facts = new SessionFacts(counts.backend, { retryMs: 20 });
+  const tasks = [done("a"), done("b"), done("c")];
+
+  for (let i = 0; i < 40; i++) {
+    await facts.forTasks(tasks);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  // Windows 20, 40, 80, 160, 320… over ~400ms: a handful of passes, not 40.
+  assert.ok(counts.reads() >= 3, "an outage is still retried");
+  assert.ok(counts.reads() <= 18, `${counts.reads()} reads in 400ms: the outage must back off`);
+});
+
+test("a long outage does not write the queue off as unknown", async () => {
+  let down = true;
+  const counts = fakeBackend(() => (down ? new Error("down") : { model: "m", reasoning: null }));
+  const facts = new SessionFacts(counts.backend, { retryMs: 10 });
+  const tasks = [done("a"), done("b"), done("c")];
+
+  for (let i = 0; i < 6; i++) {
+    await facts.forTasks(tasks);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+  down = false;
+  let size = 0;
+  for (let i = 0; i < 100 && size < 3; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    size = (await facts.forTasks(tasks)).size;
+  }
+  assert.equal(size, 3, "the queue recovers once the backend answers again");
+});
+
 test("a request answers without waiting for the whole cold queue", async () => {
   const counts = fakeBackend(async () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -163,8 +237,8 @@ test("tasks without a session address are left out", async () => {
   const counts = fakeBackend(() => ({ model: "m", reasoning: null }));
   const facts = new SessionFacts(counts.backend);
   const out = await facts.forTasks([
-    { terminal_address: null, status: "open" },
-    { terminal_address: "", status: "open" },
+    { terminal_address: null },
+    { terminal_address: "" },
   ]);
   assert.equal(out.size, 0);
   assert.equal(counts.reads(), 0);
@@ -173,7 +247,8 @@ test("tasks without a session address are left out", async () => {
 test("the tasks endpoint enriches from memory on the second load", async () => {
   const { createHttpServer } = await import("../api.ts");
   const { Db } = await import("../db.ts");
-  const counts = fakeBackend((address) => ({ model: `model-${address}`, reasoning: "high" }));
+  // s2 is the dispatched task: its session is still live, so it is read again.
+  const counts = fakeBackend((address) => ({ model: `model-${address}`, reasoning: "high", ...(address === "s2" ? live : {}) }));
   const db = new Db(":memory:");
   for (const [i, status] of (["done", "done", "dispatched", "archived"] as const).entries()) {
     db.insertTask({
@@ -196,11 +271,11 @@ test("the tasks endpoint enriches from memory on the second load", async () => {
     assert.equal(first.find((t) => t.id === "t1")?.session_reasoning, "high");
     assert.equal(first.find((t) => t.id === "t2")?.session_model, "model-s2");
     const afterFirst = counts.reads();
-    assert.equal(afterFirst, 4, "one read per session, dispatched ones included");
+    assert.equal(afterFirst, 4, "one read per session, the live one included");
 
     const second = await get();
     assert.deepEqual(second.map((t) => t.session_model), first.map((t) => t.session_model));
-    // Only the dispatched task is read again.
+    // Only the live session is read again.
     assert.equal(counts.reads() - afterFirst, 1);
   } finally {
     server.close();

@@ -53,10 +53,10 @@ function jiraImportCandidate(state: AppState, issue: JiraIssue) {
   return { ...f, ...preview, fingerprint: importFingerprint({ ...f, repo_path: preview.repo_path }) };
 }
 
-/** Model/reasoning of the tasks' sessions. Read once per finished session and
- *  once per request for the dispatched ones (see session-facts.ts) — the
- *  enricher is lazily created so a state built without a worker backend keeps
- *  answering. */
+/** Model/reasoning of the tasks' sessions. The backend's `finished` sessions
+ *  are read once and kept, everything else through one shared pass per burst of
+ *  requests (see session-facts.ts) — the enricher is lazily created so a state
+ *  built without a worker backend keeps answering. */
 async function taskSessionFacts(state: AppState, tasks: Task[]): Promise<Map<string, SessionFact>> {
   if (!tasks.some((task) => task.terminal_address) || typeof state.backend?.get !== "function") return new Map();
   try {
