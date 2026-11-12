@@ -1,6 +1,7 @@
 // SQLite storage. One file at <dataDir>/corral.db.
 
 import { DatabaseSync } from "node:sqlite";
+import type { StatementSync } from "node:sqlite";
 import type { Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskStatus, TrackedTerminal } from "./types.ts";
 
 const SCHEMA = `
@@ -82,12 +83,28 @@ CREATE INDEX IF NOT EXISTS idx_metrics_name ON metrics_events(name, ts);
 
 export class Db {
   raw: DatabaseSync;
+  /** Compiled statements, keyed by SQL. Preparing re-compiles the SQL on every
+   *  call, and the list endpoints run the same handful of queries on each page
+   *  load and SSE-driven refresh. Dynamic WHERE/SET clauses produce a small,
+   *  bounded set of distinct statements, so the cache is capped rather than
+   *  keyed per shape. */
+  private readonly statements = new Map<string, StatementSync>();
+  private static readonly MAX_STATEMENTS = 256;
 
   constructor(path: string) {
     this.raw = new DatabaseSync(path);
     this.raw.exec("PRAGMA journal_mode = WAL;");
     this.raw.exec(SCHEMA);
     this.migrate();
+  }
+
+  private stmt(sql: string): StatementSync {
+    const cached = this.statements.get(sql);
+    if (cached) return cached;
+    const prepared = this.raw.prepare(sql);
+    if (this.statements.size >= Db.MAX_STATEMENTS) this.statements.clear();
+    this.statements.set(sql, prepared);
+    return prepared;
   }
 
   /** Migrate databases created by older versions. */
@@ -118,6 +135,7 @@ export class Db {
   }
 
   close(): void {
+    this.statements.clear();
     this.raw.close();
   }
 
@@ -144,23 +162,23 @@ export class Db {
     if (keys.length === 0) return;
     const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
     const values = keys.map((k) => patch[k] as never);
-    this.raw.prepare(`UPDATE tasks SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
+    this.stmt(`UPDATE tasks SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
   }
 
   getTask(id: string): Task | null {
-    const row = this.raw.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
+    const row = this.stmt(`SELECT * FROM tasks WHERE id = ?`).get(id);
     return (row as unknown as Task) ?? null;
   }
 
   getTaskByJiraKey(key: string): Task | null {
-    const row = this.raw.prepare(`SELECT * FROM tasks WHERE jira_key = ?`).get(key);
+    const row = this.stmt(`SELECT * FROM tasks WHERE jira_key = ?`).get(key);
     return (row as unknown as Task) ?? null;
   }
 
   listTasks(status?: TaskStatus): Task[] {
     const rows = status
-      ? this.raw.prepare(`SELECT * FROM tasks WHERE status = ? ORDER BY created_ms DESC`).all(status)
-      : this.raw.prepare(`SELECT * FROM tasks ORDER BY created_ms DESC`).all();
+      ? this.stmt(`SELECT * FROM tasks WHERE status = ? ORDER BY created_ms DESC`).all(status)
+      : this.stmt(`SELECT * FROM tasks ORDER BY created_ms DESC`).all();
     return rows as unknown as Task[];
   }
 
@@ -184,11 +202,11 @@ export class Db {
     if (keys.length === 0) return;
     const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
     const values = keys.map((k) => patch[k] as never);
-    this.raw.prepare(`UPDATE items SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
+    this.stmt(`UPDATE items SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
   }
 
   getItem(id: string): Item | null {
-    const row = this.raw.prepare(`SELECT * FROM items WHERE id = ?`).get(id);
+    const row = this.stmt(`SELECT * FROM items WHERE id = ?`).get(id);
     return (row as unknown as Item) ?? null;
   }
 
@@ -204,7 +222,7 @@ export class Db {
       args.push(opts.kind);
     }
     const sql = `SELECT * FROM items ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY created_ms DESC`;
-    return this.raw.prepare(sql).all(...args) as unknown as Item[];
+    return this.stmt(sql).all(...args) as unknown as Item[];
   }
 
   openQuestionItemForTerminal(address: string): Item | null {
@@ -215,7 +233,7 @@ export class Db {
   }
 
   questionItemForTerminal(address: string): Item | null {
-    const row = this.raw.prepare(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' AND status IN ('open', 'resolved') ORDER BY created_ms DESC LIMIT 1`).get(address);
+    const row = this.stmt(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' AND status IN ('open', 'resolved') ORDER BY created_ms DESC LIMIT 1`).get(address);
     return (row as unknown as Item) ?? null;
   }
 
@@ -232,20 +250,20 @@ export class Db {
     if (keys.length === 0) return;
     const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
     const values = keys.map((k) => patch[k] as never);
-    this.raw.prepare(`UPDATE repos SET ${sets} WHERE id = ?`).run(...values, id);
+    this.stmt(`UPDATE repos SET ${sets} WHERE id = ?`).run(...values, id);
   }
 
   deleteRepo(id: string): void {
-    this.raw.prepare(`DELETE FROM repos WHERE id = ?`).run(id);
+    this.stmt(`DELETE FROM repos WHERE id = ?`).run(id);
   }
 
   getRepo(id: string): Repo | null {
-    const row = this.raw.prepare(`SELECT * FROM repos WHERE id = ?`).get(id);
+    const row = this.stmt(`SELECT * FROM repos WHERE id = ?`).get(id);
     return (row as unknown as Repo) ?? null;
   }
 
   getRepoByPath(path: string): Repo | null {
-    const row = this.raw.prepare(`SELECT * FROM repos WHERE path = ?`).get(path);
+    const row = this.stmt(`SELECT * FROM repos WHERE path = ?`).get(path);
     return (row as unknown as Repo) ?? null;
   }
 
@@ -257,7 +275,7 @@ export class Db {
   }
 
   listRepos(): Repo[] {
-    return this.raw.prepare(`SELECT * FROM repos ORDER BY name`).all() as unknown as Repo[];
+    return this.stmt(`SELECT * FROM repos ORDER BY name`).all() as unknown as Repo[];
   }
 
   // ---- terminals ----
@@ -279,12 +297,12 @@ export class Db {
   }
 
   getTerminal(address: string): TrackedTerminal | null {
-    const row = this.raw.prepare(`SELECT * FROM terminals WHERE address = ?`).get(address);
+    const row = this.stmt(`SELECT * FROM terminals WHERE address = ?`).get(address);
     return (row as unknown as TrackedTerminal) ?? null;
   }
 
   listTerminals(): TrackedTerminal[] {
-    return this.raw.prepare(`SELECT * FROM terminals ORDER BY updated_ms DESC`).all() as unknown as TrackedTerminal[];
+    return this.stmt(`SELECT * FROM terminals ORDER BY updated_ms DESC`).all() as unknown as TrackedTerminal[];
   }
 
   // ---- metrics ----
