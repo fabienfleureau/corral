@@ -101,11 +101,14 @@ type Item = {
 - `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`. A `done` report on a review task creates a `digest` item (no PR gate); review tasks are never PR-synced
 - `GET /api/metrics/summary` → `{by_name: [{name, count, last_ms}], recent: [{id, ts, name, ref, data}]}`
 - `GET /api/terminals` → tracked terminals `[{address, task_id, name, agent, last_status, last_turn, updated_ms}]`
-- `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, favorites: Favorite[], token /* masked */}`
+- `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, favorites: Favorite[], models: {[modelId]: ModelFacts}, token /* masked */}` — `models` holds only the user's overrides, not the shipped defaults.
+- `ModelFacts` is `{retention: "none"|"30d"|"trains"|"unknown", quota?: {monthlyUsd}, efforts?: {[reasoning]: {index?, costPerTask?, minPerTask?}}, bench?: {[name]: score}, asOf: "YYYY-MM-DD", source?}`. `efforts.default` is the fallback when the harness's reasoning value has no entry.
+- `GET /api/models` → `{models: {[modelId]: ModelFacts}}` — the shipped defaults (`server/model-catalog.json`) merged with the config overrides, user entry winning per model key. Keys are the ids the harnesses report (`GET /api/harnesses`), or `prefix*` for ids a harness suffixes with a date or variant; matching is exact id first, then the longest prefix.
+- `GET /api/models/availability` → `{providers: {[provider]: {status: "up"|"down"|"unknown", models: string[]}}}` — probes the local model servers configured in `omnigent.localProviders` (`GET <baseUrl>/models`, 2 s timeout, cached 30 s). A probe that does not answer in time is `unknown`, never `down`; an unconfigured provider is `unknown`.
 - `Favorite` is `{name, harness, agent, model, reasoning, context}`; empty agent/model/reasoning mean defaults. `context` is `"professional"` or `"personal"`; a favorite saved without one reads as `"professional"`, any other value is rejected (400). The task form shows only the favorites matching the repo's context.
 - `GET /api/repos` → `Repo[]`, where `Repo` is `{id, name, path, jira_prefix, context, source, created_ms}`; `context` is `"professional" | "personal" | null`, and null reads as professional.
 - `PATCH /api/repos/:id` `{name?, jira_prefix?, context?}` → `Repo` — other fields are ignored; a `context` other than the two values or `null` is a 400.
-- `PUT /api/config` `{jira?: {baseUrl, email, token, jql}, assistant?: string[], agents?: {...}, favorites?: Favorite[]}` → `{ok}`
+- `PUT /api/config` `{jira?: {baseUrl, email, token, jql}, assistant?: string[], agents?: {...}, favorites?: Favorite[], models?: {[modelId]: ModelFacts}}` → `{ok}`. A retention outside the four values, a non-numeric cost/index/minutes/score/monthly limit, or an `asOf` that is not `YYYY-MM-DD` is a 400.
 - `GET /api/health` → `{ok: true}` (no auth)
 
 - `GET /api/errors` → current background synchronization errors (`source`, `message`, `updated_ms`); cleared when the operation succeeds.

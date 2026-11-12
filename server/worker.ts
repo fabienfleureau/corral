@@ -94,6 +94,14 @@ export interface WorkerEventSubscription {
 
 export interface WorkerModel { id: string; label: string; reasoning: string[] }
 
+/** Availability of a local model server (the GPU box), when one is configured. */
+export interface ModelAvailability {
+  /** "up": the server listed its models. "down": it refused or errored.
+   *  "unknown": it did not answer in time — never read as down. */
+  status: "up" | "down" | "unknown";
+  models: string[];
+}
+
 export interface WorkerBackend {
   name: string;
 
@@ -129,5 +137,7 @@ export interface WorkerBackend {
   /** Harness dimension of the backend's registry (for target pickers). */
   registryAgents?(): Promise<{ id: string; name: string }[]>;
   harnesses?(): Promise<{ harness: string; agents: { id: string; name: string }[]; models?: WorkerModel[] }[]>;
+  /** Probe a local model server (provider id -> base URL lives in config). */
+  providerModels?(provider: string): Promise<ModelAvailability>;
   onEvent(cb: (e: WorkerEvent) => void): WorkerEventSubscription;
 }

@@ -6,6 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Favorite } from "./favorites.ts";
+import type { ModelFacts } from "./model-catalog.ts";
 import type { ModelPrice } from "./usage.ts";
 
 export interface JiraConfig {
@@ -23,10 +24,16 @@ export interface OmnigentConfig {
   hostId: string;
   /** harness id -> omnigent agent registration + optional harness override. */
   agents: Record<string, { agentId?: string; harness?: string }>;
+  /** Local model servers to probe for availability: provider id -> base URL
+   *  (e.g. "ornith-local": "http://192.168.10.241:8080/v1"). */
+  localProviders?: Record<string, string>;
 }
 
 export interface Config {
   favorites?: Favorite[];
+  /** Model facts catalog overrides (exact id or "prefix*"), merged over the
+   *  shipped defaults per model key. */
+  models?: Record<string, ModelFacts>;
   port: number;
   host: string;
   token: string;
@@ -69,6 +76,7 @@ function defaultConfig(): Config {
       baseUrl: "http://127.0.0.1:6767",
       token: "",
       hostId: "",
+      localProviders: {},
       agents: {
         claude: { harness: "claude-native" },
         codex: { harness: "codex-native" },
@@ -76,6 +84,7 @@ function defaultConfig(): Config {
       },
     },
     usage: { prices: {} },
+    models: {},
   };
 }
 

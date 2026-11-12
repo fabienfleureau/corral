@@ -1,0 +1,147 @@
+{
+  "opus": {
+    "retention": "none",
+    "efforts": {
+      "low": { "index": 35, "costPerTask": 0.98, "minPerTask": 2.9 },
+      "medium": { "index": 48, "costPerTask": 2.45, "minPerTask": 7.1 },
+      "high": { "index": 52, "costPerTask": 3.46, "minPerTask": 9.5 },
+      "xhigh": { "index": 57, "costPerTask": 6.05, "minPerTask": 15.7 },
+      "max": { "index": 59, "costPerTask": 10.04, "minPerTask": 25.0 }
+    },
+    "bench": { "Terminal-Bench 4.0": 66.4 },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1; Terminal-Bench 4.0 reported by the vendor. Key is the alias the claude harness reports (it follows the newest Opus). Retention: none under the ZDR agreement on the professional subscription (user statement, not measured)."
+  },
+  "sonnet": {
+    "retention": "none",
+    "efforts": {
+      "low": { "index": 26, "costPerTask": 0.51, "minPerTask": 2.5 },
+      "medium": { "index": 31, "costPerTask": 0.78, "minPerTask": 3.7 },
+      "high": { "index": 42, "costPerTask": 1.64, "minPerTask": 6.9 },
+      "xhigh": { "index": 50, "costPerTask": 4.09, "minPerTask": 14.6 },
+      "max": { "index": 55, "costPerTask": 10.02, "minPerTask": 32.7 }
+    },
+    "bench": { "Terminal-Bench 4.0": 70.6 },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1; Terminal-Bench 4.0 reported by the vendor. Key is the alias the claude harness reports (it follows the newest Sonnet). Retention: none under the ZDR agreement on the professional subscription (user statement, not measured)."
+  },
+  "haiku": {
+    "retention": "none",
+    "efforts": {
+      "high": { "index": 30, "costPerTask": 0.16, "minPerTask": 6.4 }
+    },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1 (measured at high effort). Retention: none under the ZDR agreement on the professional subscription (user statement, not measured)."
+  },
+  "gpt-6.1-sol": {
+    "retention": "none",
+    "efforts": {
+      "low": { "index": 35, "costPerTask": 0.16, "minPerTask": 1.8 },
+      "medium": { "index": 46, "costPerTask": 0.36, "minPerTask": 3.9 },
+      "high": { "index": 50, "costPerTask": 0.59, "minPerTask": 6.7 },
+      "xhigh": { "index": 52, "costPerTask": 0.76, "minPerTask": 9.2 },
+      "max": { "index": 55, "costPerTask": 1.27, "minPerTask": 20.4 }
+    },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1. Retention: none under the ZDR agreement on the professional subscription (user statement, not measured)."
+  },
+  "gpt-6.1-terra": {
+    "retention": "none",
+    "efforts": {
+      "low": { "index": 29, "costPerTask": 0.07, "minPerTask": 1.1 },
+      "medium": { "index": 38, "costPerTask": 0.17, "minPerTask": 2.6 },
+      "high": { "index": 42, "costPerTask": 0.26, "minPerTask": 4.0 },
+      "xhigh": { "index": 45, "costPerTask": 0.4, "minPerTask": 6.1 },
+      "max": { "index": 51, "costPerTask": 0.96, "minPerTask": 13.5 }
+    },
+    "bench": { "Terminal-Bench 4.0": 50.3 },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1; Terminal-Bench 4.0 reported by the vendor. Retention: none under the ZDR agreement on the professional subscription (user statement, not measured)."
+  },
+  "gpt-6-luna": {
+    "retention": "none",
+    "efforts": {
+      "low": { "index": 10, "costPerTask": 0.01, "minPerTask": 0.6 },
+      "medium": { "index": 18, "costPerTask": 0.04, "minPerTask": 3.3 },
+      "high": { "index": 21, "costPerTask": 0.07, "minPerTask": 5.7 },
+      "xhigh": { "index": 23, "costPerTask": 0.1, "minPerTask": 7.1 },
+      "max": { "index": 28, "costPerTask": 0.15, "minPerTask": 11.5 }
+    },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1. Retention: none under the ZDR agreement on the professional subscription (user statement, not measured)."
+  },
+  "opencode-go/deepseek-v4.1-flash": {
+    "retention": "none",
+    "quota": { "monthlyUsd": 100 },
+    "efforts": {
+      "default": { "index": 33, "costPerTask": 0.6, "minPerTask": 16.3 }
+    },
+    "bench": { "Terminal-Bench 4.0": 42.3, "DeepSWE v1.1": 74.2 },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1 (measured at max reasoning); benchmark scores reported by the vendor. Retention: 0 days per the Go privacy table (https://opencode.ai/docs/console/go/), which rests on a ZDR agreement renewed monthly."
+  },
+  "opencode-go/kimi-k3.1-pro": {
+    "retention": "none",
+    "quota": { "monthlyUsd": 15 },
+    "efforts": {
+      "default": { "index": 46, "costPerTask": 3.68, "minPerTask": 37.3 }
+    },
+    "bench": { "Terminal-Bench 4.0": 65.7 },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1; Terminal-Bench 4.0 reported by the vendor. Retention: 0 days per the Go privacy table (https://opencode.ai/docs/console/go/)."
+  },
+  "opencode-go/hy4": {
+    "retention": "none",
+    "quota": { "monthlyUsd": 60 },
+    "efforts": {
+      "default": { "index": 35, "costPerTask": 1.03 }
+    },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1. Retention: 0 days per the Go privacy table (https://opencode.ai/docs/console/go/)."
+  },
+  "opencode-go/mimo-v2.6-pro": {
+    "retention": "none",
+    "quota": { "monthlyUsd": 15 },
+    "efforts": {
+      "default": { "index": 30, "costPerTask": 0.26, "minPerTask": 35.4 }
+    },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1. Retention: 0 days per the Go privacy table (https://opencode.ai/docs/console/go/)."
+  },
+  "opencode-go/minimax-m3.1-flash": {
+    "retention": "none",
+    "quota": { "monthlyUsd": 20 },
+    "efforts": {
+      "default": { "index": 29, "costPerTask": 0.49, "minPerTask": 14.2 }
+    },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1. Retention: 0 days per the Go privacy table (https://opencode.ai/docs/console/go/)."
+  },
+  "opencode-go/glm-5.3-flash": {
+    "retention": "none",
+    "quota": { "monthlyUsd": 60 },
+    "efforts": {
+      "default": { "index": 28, "costPerTask": 0.58, "minPerTask": 45.9 }
+    },
+    "bench": { "DeepSWE v1.1": 63.4 },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1; DeepSWE v1.1 reported by the vendor. Retention: 0 days per the Go privacy table (https://opencode.ai/docs/console/go/)."
+  },
+  "opencode-go/beam-free": {
+    "retention": "30d",
+    "efforts": {
+      "default": { "index": 18, "costPerTask": 0.28, "minPerTask": 2.0 }
+    },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1. Retention: 30 days per the Go privacy table (https://opencode.ai/docs/console/go/)."
+  },
+  "opencode-go/claude-haiku-5-5": {
+    "retention": "30d",
+    "quota": { "monthlyUsd": 15 },
+    "efforts": {
+      "high": { "index": 30, "costPerTask": 0.16, "minPerTask": 6.4 }
+    },
+    "asOf": "2026-11-11",
+    "source": "Artificial Analysis Intelligence Index v5.0.1. Retention: 30 days per the Go privacy table (https://opencode.ai/docs/console/go/)."
+  }
+}

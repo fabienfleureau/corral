@@ -29,6 +29,8 @@ const MODELS: Record<string, StubModel[]> = {
     { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", reasoning: REASONING },
   ],
   opencode: [
+    { id: "opencode-go/kimi-k3.1-pro", label: "opencode-go/kimi-k3.1-pro", reasoning: [] },
+    { id: "opencode-go/claude-haiku-5-5", label: "opencode-go/claude-haiku-5-5", reasoning: ["high"] },
     { id: "opencode/claude-sonnet-5-5", label: "opencode/claude-sonnet-5-5", reasoning: [] },
     { id: "opencode/glm-5.3", label: "opencode/glm-5.3", reasoning: [] },
     { id: "opencode/gemini-3.8-flash", label: "opencode/gemini-3.8-flash", reasoning: [] },

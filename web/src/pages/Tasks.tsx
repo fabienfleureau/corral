@@ -5,7 +5,9 @@ import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, 
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
-import type { AgentQuota, Context, Favorite, JiraSearchResult, Repo, Task } from "../types";
+import type { AgentQuota, Context, Favorite, JiraSearchResult, ModelAvailability, ModelCatalog, Repo, Task } from "../types";
+import { modelFactsReport, retentionLabel } from "../model-indicators";
+import type { HarnessModels, ModelFactsReport, ModelSelection } from "../model-indicators";
 import { favoritesFor, repoContext } from "../favorite-context";
 import { errText, formatTs, isPrUrl, prLabel, REVIEW_HARNESS, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
@@ -28,6 +30,8 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [targets, setTargets] = useState<string[]>([]);
   const [quotas, setQuotas] = useState<AgentQuota[]>([]);
   const [agentOptions, setAgentOptions] = useState<Record<string, { id: string; name: string }[]>>({});
+  const [modelFacts, setModelFacts] = useState<ModelCatalog>({});
+  const [providerModels, setProviderModels] = useState<Record<string, ModelAvailability>>({});
 
   useEffect(() => {
     api
@@ -39,6 +43,13 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         setAgentOptions(Object.fromEntries(res.harnesses.map((h) => [h.harness, h.agents])));
       })
       .catch(() => undefined);
+  }, []);
+
+  // Model facts and local-server availability: a page that cannot read them
+  // still renders, the choices just say "no data" / "unknown".
+  useEffect(() => {
+    api.getModels().then((res) => setModelFacts(res.models)).catch(() => undefined);
+    api.getModelAvailability().then((res) => setProviderModels(res.providers)).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -117,7 +128,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -137,8 +148,8 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
           </div>
         </div>
 
-        {showImport ? <JiraImport repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} onDone={refresh} />
+        {showImport ? <JiraImport repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} onImported={refresh} onClose={() => setShowImport(false)} /> : null}
+        <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} onDone={refresh} />
 
         <div className="task-list-controls">
             <label className="check-inline">
@@ -181,6 +192,8 @@ function TaskRow({
   quotas,
   agentOptions,
   catalog,
+  modelFacts,
+  providerModels,
   refresh,
 }: {
   task: Task;
@@ -189,6 +202,8 @@ function TaskRow({
   quotas: AgentQuota[];
   agentOptions: Record<string, { id: string; name: string }[]>;
   catalog: Record<string, ModelOption[]>;
+  modelFacts: ModelCatalog;
+  providerModels: Record<string, ModelAvailability>;
   refresh: () => void;
 }) {
   const [showDispatch, setShowDispatch] = useState(task.status === "open" || (task.status === "dispatched" && !task.terminal_address));
@@ -419,6 +434,14 @@ function TaskRow({
               </select>
             </label>
             <ModelSettings models={catalog[selectedTarget] ?? []} model={model} reasoning={reasoning} setModel={setModel} setReasoning={setReasoning} fieldClass="field-inline" />
+            <ModelFactsLine report={modelFactsReport({
+              selection: { harness: selectedTarget, model, reasoning },
+              catalog: modelFacts,
+              quota: quotas,
+              harnesses: harnessModels(catalog),
+              context: repoContext(repos, task.repo_path),
+              providers: providerModels,
+            })} />
             {review ? null : <>
             <label className="field-inline">
               <span>Base branch (optional)</span>
@@ -506,6 +529,48 @@ function FavoritesTitle({ context }: { context: Context | null }) {
   return <span>Favorites{context ? <> <span className="badge badge-mute">{context}</span></> : null}</span>;
 }
 
+/** Harness catalogs as the indicators expect them (empty models = not reported). */
+function harnessModels(catalog: Record<string, ModelOption[]>): HarnessModels[] {
+  return Object.entries(catalog).map(([harness, models]) => ({ harness, models }));
+}
+
+/** Every fact and warning for a choice, one line, full detail in the tooltip. */
+export function ModelFactsLine({ report }: { report: ModelFactsReport }) {
+  const asOf = report.indicators.find((row) => row.key === "asOf")?.value;
+  return (
+    <div className="model-facts" title={report.title}>
+      <span className="model-facts-label">Model facts</span>
+      <span className={`model-facts-values${report.hasFacts ? "" : " muted"}`}>{report.summary}</span>
+      {report.retention ?
+        <span className={`badge retention-${report.retention}`} title={`Data retention: ${retentionLabel(report.retention)}`}>retention {retentionLabel(report.retention)}</span> : null}
+      {report.warnings.map((warning) => (
+        <span key={warning.key} className="badge badge-warn" title={warning.message}>⚠ {warning.label}</span>
+      ))}
+      {asOf ? <span className="model-facts-asof">as of {asOf}</span> : null}
+    </div>
+  );
+}
+
+/** A saved combination with its facts: one click still picks exactly it. */
+function FavoriteChip({ favorite, disabled, report, onPick }: { favorite: Favorite; disabled: boolean; report: ModelFactsReport; onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="chip chip-favorite"
+      disabled={disabled}
+      title={disabled ? `Harness unavailable\n${report.title}` : report.title}
+      onClick={onPick}
+    >
+      <span className="chip-name">{favorite.name}</span>
+      <span className="chip-facts">{report.summary}</span>
+      {report.retention ? <span className={`badge retention-${report.retention}`} title={`Data retention: ${retentionLabel(report.retention)}`}>{retentionLabel(report.retention)}</span> : null}
+      {report.warnings.map((warning) => (
+        <span key={warning.key} className="badge badge-warn" title={warning.message}>⚠ {warning.label}</span>
+      ))}
+    </button>
+  );
+}
+
 // ---- new task form ----
 
 function firstLine(text: string): string {
@@ -531,7 +596,7 @@ function copyWithExecCommand(text: string): boolean {
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
-function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; onDone: () => void }) {
+function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; onDone: () => void }) {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   useEffect(() => { api.getConfig().then((cfg) => setFavorites(cfg.favorites ?? [])).catch(() => undefined); }, []);
   const [kind, setKind] = useState<"code" | "review">("code");
@@ -651,7 +716,15 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
           </label>
         )}
       </div>
-      {favorites.length > 0 ? <div className="field"><FavoritesTitle context={formContext} /><div className="chip-row">{shownFavorites.length === 0 ? <span className="muted">No {formContext} favorites</span> : null}{shownFavorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!formTargets.includes(f.harness)} title={!formTargets.includes(f.harness) ? "Harness unavailable" : [f.harness, f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")} onClick={() => { setTarget(f.harness); setAgent(f.agent); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}>{f.name}</button>)}</div></div> : null}
+      {favorites.length > 0 ? <div className="field"><FavoritesTitle context={formContext} /><div className="chip-row">{shownFavorites.length === 0 ? <span className="muted">No {formContext} favorites</span> : null}{shownFavorites.map((f, i) => (
+        <FavoriteChip
+          key={i}
+          favorite={f}
+          disabled={!formTargets.includes(f.harness)}
+          report={modelFactsReport({ selection: { harness: f.harness, model: f.model, reasoning: f.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: formContext, providers: providerModels })}
+          onPick={() => { setTarget(f.harness); setAgent(f.agent); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}
+        />
+      ))}</div></div> : null}
       <div className="field-row">
         <label className="field"><span>Harness</span><select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setAgent(""); }}>
           {formTargets.length === 0 ? <option value="">{review ? "Claude harness unavailable" : "No configured harnesses"}</option> : null}
@@ -666,6 +739,14 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
       <div className="field-row">
         <ModelSettings models={catalog[selectedTarget] ?? []} model={selectedSettings.model} reasoning={selectedSettings.reasoning} setModel={(value) => setSetting("model", value)} setReasoning={(value) => setSetting("reasoning", value)} fieldClass="field" />
       </div>
+      <ModelFactsLine report={modelFactsReport({
+        selection: { harness: selectedTarget, model: selectedSettings.model, reasoning: selectedSettings.reasoning },
+        catalog: modelFacts,
+        quota: quotas,
+        harnesses: harnessModels(catalog),
+        context: formContext,
+        providers: providerModels,
+      })} />
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
         <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !hasContent || !selectedTarget || (!!agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent)) || !(selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
@@ -685,7 +766,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, onD
 
 // ---- jira import ----
 
-function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported, onClose }: { repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; onImported: () => void; onClose: () => void }) {
+function JiraImport({ repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, onImported, onClose }: { repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; onImported: () => void; onClose: () => void }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<JiraSearchResult[] | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -836,12 +917,21 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, onImported,
                   </select></label>
                   <label className="field"><span>Base branch (optional)</span><input value={values.base_branch} onChange={(e) => update({ base_branch: e.target.value })} placeholder="main" /></label>
                 </div>
-                {favorites.length > 0 ? <div className="field"><FavoritesTitle context={importContext} /><div className="chip-row">{shownFavorites.length === 0 ? <span className="muted">No {importContext} favorites</span> : null}{shownFavorites.map((f, i) => <button type="button" className="chip" key={i} disabled={!targets.includes(f.harness)} onClick={() => update({ target: f.harness, agent: f.agent, model: f.model, reasoning: f.reasoning })}>{f.name}</button>)}</div></div> : null}
+                {favorites.length > 0 ? <div className="field"><FavoritesTitle context={importContext} /><div className="chip-row">{shownFavorites.length === 0 ? <span className="muted">No {importContext} favorites</span> : null}{shownFavorites.map((f, i) => (
+                  <FavoriteChip
+                    key={i}
+                    favorite={f}
+                    disabled={!targets.includes(f.harness)}
+                    report={modelFactsReport({ selection: { harness: f.harness, model: f.model, reasoning: f.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: importContext, providers: providerModels })}
+                    onPick={() => update({ target: f.harness, agent: f.agent, model: f.model, reasoning: f.reasoning })}
+                  />
+                ))}</div></div> : null}
                 <div className="field-row">
                   <label className="field"><span>Harness</span><select value={values.target} onChange={(e) => update({ target: e.target.value, agent: "", model: "", reasoning: "" })}><option value="">Choose at dispatch</option>{targets.map((t) => <option key={t} value={t}>{harnessLabel(t, quotas)}</option>)}</select></label>
                   <label className="field"><span>Agent</span><select value={values.agent} onChange={(e) => update({ agent: e.target.value })} disabled={!values.target}><option value="">— none (bare harness) —</option>{values.agent && !(agentOptions[values.target] ?? []).some((a) => a.id === values.agent) ? <option value={values.agent}>{values.agent} (unavailable)</option> : null}{(agentOptions[values.target] ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
                 </div>
                 {values.target ? <div className="field-row"><ModelSettings models={catalog[values.target] ?? []} model={values.model} reasoning={values.reasoning} setModel={(model) => update({ model })} setReasoning={(reasoning) => update({ reasoning })} fieldClass="field" /></div> : null}
+                {values.target ? <ModelFactsLine report={modelFactsReport({ selection: { harness: values.target, model: values.model, reasoning: values.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: importContext, providers: providerModels })} /> : null}
           </div>
           <div className="import-list">
             {selected.map((r) => (

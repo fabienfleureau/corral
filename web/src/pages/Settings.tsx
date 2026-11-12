@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import type { Config, Context, Favorite, Repo } from "../types";
+import type { Config, Context, EffortFacts, Favorite, ModelFacts, ModelCatalog, Repo, Retention } from "../types";
+import { RETENTIONS, retentionLabel } from "../model-indicators";
 import { CONTEXTS } from "../favorite-context";
 import { errText } from "../util";
 import { Spinner } from "../ui";
@@ -120,6 +121,7 @@ export function SettingsPage() {
           {[
             { key: "general", label: "General" },
             { key: "favorites", label: "Favorites" },
+            { key: "models", label: "Models" },
             { key: "jira", label: "Jira" },
             { key: "repos", label: "Repos" },
           ].map((s) => (
@@ -212,6 +214,7 @@ export function SettingsPage() {
             ) : null}
 
             {section === "favorites" ? <FavoritesSection /> : null}
+            {section === "models" ? <ModelsSection /> : null}
             {section === "repos" ? <ReposSection /> : null}
 
             {section === "general" ? (
@@ -474,6 +477,261 @@ function FavoritesSection() {
     <div className="field-row"><ModelSettings models={catalog.find((h) => h.harness === harness)?.models ?? []} model={draft.model} reasoning={draft.reasoning} setModel={(model) => update({ model })} setReasoning={(reasoning) => update({ reasoning })} fieldClass="field" /></div>
     {error ? <div className="inline-error">{error}</div> : null}
     <div className="form-foot"><button className="btn btn-primary" disabled={busy || !draft.name.trim() || !harness || (!!draft.agent && !matchingAgents.some((a) => a.id === draft.agent))} onClick={() => { const next = [...favorites]; const favorite = { ...draft, name: draft.name.trim(), harness }; if (editing === null) next.push(favorite); else next[editing] = favorite; void save(next); }}>{editing === null ? "Add favorite" : "Save favorite"}</button>{editing !== null ? <button className="btn" onClick={() => { setEditing(null); setDraft(EMPTY_FAVORITE); }}>Cancel</button> : null}</div>
+  </section>;
+}
+
+// ---- model facts catalog ----
+
+// Facts are data the human edits: a new model release (or a correction) is a
+// row here, never a code change. The shipped defaults are read-only; editing one
+// stores an override under the same model key, removing it restores the default.
+
+type EffortDraft = { effort: string; index: string; cost: string; min: string };
+type BenchDraft = { name: string; score: string };
+type FactsDraft = {
+  id: string;
+  retention: Retention;
+  asOf: string;
+  source: string;
+  monthlyUsd: string;
+  efforts: EffortDraft[];
+  bench: BenchDraft[];
+};
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const EMPTY_FACTS_DRAFT: FactsDraft = {
+  id: "",
+  retention: "none",
+  asOf: todayIso(),
+  source: "",
+  monthlyUsd: "",
+  efforts: [{ effort: "default", index: "", cost: "", min: "" }],
+  bench: [],
+};
+
+const asText = (value: number | undefined) => (value === undefined ? "" : String(value));
+
+function draftOf(id: string, facts: ModelFacts): FactsDraft {
+  return {
+    id,
+    retention: facts.retention,
+    asOf: facts.asOf,
+    source: facts.source ?? "",
+    monthlyUsd: asText(facts.quota?.monthlyUsd),
+    efforts: Object.entries(facts.efforts ?? {}).map(([effort, row]) => ({ effort, index: asText(row.index), cost: asText(row.costPerTask), min: asText(row.minPerTask) })),
+    bench: Object.entries(facts.bench ?? {}).map(([name, score]) => ({ name, score: String(score) })),
+  };
+}
+
+/** Build the catalog entry the API will validate again; throws a readable message. */
+function factsOf(draft: FactsDraft): { id: string; facts: ModelFacts } {
+  const id = draft.id.trim();
+  if (!id) throw new Error("Model id required.");
+  const asOf = draft.asOf.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) throw new Error("As of must be YYYY-MM-DD.");
+  const number = (raw: string, label: string): number | undefined => {
+    if (!raw.trim()) return undefined;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) throw new Error(`${label} must be a number.`);
+    return value;
+  };
+  const efforts: NonNullable<ModelFacts["efforts"]> = {};
+  for (const row of draft.efforts) {
+    const effort = row.effort.trim() || "default";
+    const facts: EffortFacts = {};
+    const index = number(row.index, `Index for ${effort}`);
+    const cost = number(row.cost, `Cost per task for ${effort}`);
+    const min = number(row.min, `Minutes per task for ${effort}`);
+    if (index !== undefined) facts.index = index;
+    if (cost !== undefined) facts.costPerTask = cost;
+    if (min !== undefined) facts.minPerTask = min;
+    if (Object.keys(facts).length > 0) efforts[effort] = facts;
+  }
+  const bench: Record<string, number> = {};
+  for (const row of draft.bench) {
+    const name = row.name.trim();
+    if (!name) continue;
+    const score = number(row.score, `Score for ${name}`);
+    if (score === undefined) throw new Error(`Score for ${name} is required.`);
+    bench[name] = score;
+  }
+  const monthlyUsd = number(draft.monthlyUsd, "Monthly limit");
+  return {
+    id,
+    facts: {
+      retention: draft.retention,
+      ...(monthlyUsd !== undefined ? { quota: { monthlyUsd } } : {}),
+      ...(Object.keys(efforts).length > 0 ? { efforts } : {}),
+      ...(Object.keys(bench).length > 0 ? { bench } : {}),
+      asOf,
+      ...(draft.source.trim() ? { source: draft.source.trim() } : {}),
+    },
+  };
+}
+
+function factsSummary(facts: ModelFacts): string {
+  const first = facts.efforts?.default ?? Object.values(facts.efforts ?? {})[0];
+  return [
+    first?.index !== undefined ? `${first.index} index` : null,
+    first?.costPerTask !== undefined ? `$${first.costPerTask.toFixed(2)}/task` : null,
+    `retention ${retentionLabel(facts.retention)}`,
+    facts.quota ? `$${facts.quota.monthlyUsd}/month` : null,
+    `as of ${facts.asOf}`,
+  ].filter(Boolean).join(" · ");
+}
+
+function ModelsSection() {
+  const [catalog, setCatalog] = useState<ModelCatalog>({});
+  const [mine, setMine] = useState<ModelCatalog>({});
+  const [loaded, setLoaded] = useState(false);
+  const [draft, setDraft] = useState<FactsDraft>(EMPTY_FACTS_DRAFT);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // The server is the source of truth (merged catalog + the user's overrides):
+  // remounting the tab must not resurrect a stale snapshot.
+  const load = useCallback(async () => {
+    const [models, cfg] = await Promise.all([api.getModels(), api.getConfig()]);
+    setCatalog(models.models);
+    setMine(cfg.models ?? {});
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    load()
+      .catch((e: unknown) => { if (!cancelled) setError(errText(e)); })
+      .finally(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [load]);
+
+  const run = async (label: string, fn: () => Promise<unknown>, okMsg: string) => {
+    if (busy) return;
+    setBusy(label);
+    setError(null);
+    setMsg(null);
+    try {
+      await fn();
+      setMsg(okMsg);
+      await load();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const edit = (id: string) => {
+    setError(null);
+    setMsg(null);
+    setDraft(draftOf(id, catalog[id]));
+    setEditing(id);
+  };
+
+  const startAdd = () => {
+    setError(null);
+    setMsg(null);
+    setDraft({ ...EMPTY_FACTS_DRAFT, efforts: [{ effort: "default", index: "", cost: "", min: "" }] });
+    setEditing(null);
+  };
+
+  const save = () => {
+    let parsed: { id: string; facts: ModelFacts };
+    try { parsed = factsOf(draft); } catch (e) { setError(errText(e)); return; }
+    void run("save", async () => {
+      await api.putConfig({ models: { ...mine, [parsed.id]: parsed.facts } });
+      setEditing(null);
+      setDraft(EMPTY_FACTS_DRAFT);
+    }, "Model facts saved — the indicators use them on the next page load.");
+  };
+
+  const remove = (id: string) => {
+    void run("remove", async () => {
+      const next = { ...mine };
+      delete next[id];
+      await api.putConfig({ models: next });
+      if (editing === id) { setEditing(null); setDraft(EMPTY_FACTS_DRAFT); }
+    }, "Override removed — the shipped facts apply again.");
+  };
+
+  const ids = Object.keys(catalog).sort();
+
+  return <section className="panel-form models-panel">
+    <h2 className="panel-title">Models</h2>
+    <p className="muted">
+      What Corral shows next to a model: quality (Artificial Analysis index, benchmark scores), cost per task,
+      monthly plan limit, speed, data retention and when the numbers were collected. Corral chooses nothing from
+      this — it only reports, and a warning never blocks a dispatch.
+    </p>
+    <p className="muted">
+      Keys are the model ids your harnesses report (see <span className="mono">GET /api/harnesses</span>); use
+      <span className="mono"> prefix*</span> for ids a harness suffixes with a date or variant. A model with no entry
+      shows “no data”. Editing a shipped entry stores your version under the same key.
+    </p>
+    {!loaded ? <p className="muted"><Spinner /> Loading model facts…</p> : ids.length === 0 ? <p className="muted">No catalog entries yet — add one below.</p> : (
+      <ul className="repo-list">
+        {ids.map((id) => (
+          <li className="repo-row" key={id}>
+            <div className="repo-info">
+              <span className="repo-name mono">{id}</span>
+              <span className="muted">{factsSummary(catalog[id])}</span>
+              {mine[id] ? <span className="badge badge-target">edited</span> : <span className="badge badge-mute">shipped</span>}
+            </div>
+            <div className="repo-actions">
+              <button className="btn" disabled={busy !== null} onClick={() => edit(id)}>Edit</button>
+              <button
+                className="btn"
+                disabled={busy !== null || !mine[id]}
+                title={mine[id] ? "Remove your override; the shipped facts apply again" : "Shipped default — edit it to override it"}
+                onClick={() => remove(id)}
+              >
+                Remove
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    )}
+    <h3 className="panel-subtitle">{editing ? `Edit ${editing}` : "Add a model"}</h3>
+    <div className="field-row">
+      <label className="field"><span>Model id</span><input value={draft.id} disabled={editing !== null} onChange={(e) => setDraft({ ...draft, id: e.target.value })} placeholder="opencode-go/kimi-k3.1-pro or claude-opus-5*" /></label>
+      <label className="field"><span>Retention</span><select value={draft.retention} onChange={(e) => setDraft({ ...draft, retention: e.target.value as Retention })}>{RETENTIONS.map((retention) => <option key={retention} value={retention}>{retentionLabel(retention)}</option>)}</select></label>
+      <label className="field"><span>As of</span><input value={draft.asOf} onChange={(e) => setDraft({ ...draft, asOf: e.target.value })} placeholder="2026-11-11" /></label>
+    </div>
+    <div className="field-row">
+      <label className="field"><span>Monthly plan limit (USD, optional)</span><input type="number" step="any" value={draft.monthlyUsd} onChange={(e) => setDraft({ ...draft, monthlyUsd: e.target.value })} /></label>
+      <label className="field"><span>Source (optional)</span><input value={draft.source} onChange={(e) => setDraft({ ...draft, source: e.target.value })} placeholder="Where the numbers come from" /></label>
+    </div>
+    <div className="field">
+      <span>Efforts</span>
+      {draft.efforts.map((row, index) => (
+        <div className="field-row" key={index}>
+          <label className="field"><span>Reasoning value</span><input value={row.effort} onChange={(e) => setDraft({ ...draft, efforts: draft.efforts.map((item, i) => i === index ? { ...item, effort: e.target.value } : item) })} placeholder="default, high, …" /></label>
+          <label className="field"><span>Index</span><input type="number" step="any" value={row.index} onChange={(e) => setDraft({ ...draft, efforts: draft.efforts.map((item, i) => i === index ? { ...item, index: e.target.value } : item) })} /></label>
+          <label className="field"><span>Cost/task USD</span><input type="number" step="any" value={row.cost} onChange={(e) => setDraft({ ...draft, efforts: draft.efforts.map((item, i) => i === index ? { ...item, cost: e.target.value } : item) })} /></label>
+          <label className="field"><span>Minutes/task</span><input type="number" step="any" value={row.min} onChange={(e) => setDraft({ ...draft, efforts: draft.efforts.map((item, i) => i === index ? { ...item, min: e.target.value } : item) })} /></label>
+          <button className="btn" disabled={draft.efforts.length === 1} onClick={() => setDraft({ ...draft, efforts: draft.efforts.filter((_, i) => i !== index) })}>Remove</button>
+        </div>
+      ))}
+      <button className="btn" onClick={() => setDraft({ ...draft, efforts: [...draft.efforts, { effort: "", index: "", cost: "", min: "" }] })}>Add effort</button>
+    </div>
+    <div className="field">
+      <span>Benchmark scores</span>
+      {draft.bench.map((row, index) => (
+        <div className="field-row" key={index}>
+          <label className="field"><span>Benchmark</span><input value={row.name} onChange={(e) => setDraft({ ...draft, bench: draft.bench.map((item, i) => i === index ? { ...item, name: e.target.value } : item) })} placeholder="Terminal-Bench 4.0" /></label>
+          <label className="field"><span>Score</span><input type="number" step="any" value={row.score} onChange={(e) => setDraft({ ...draft, bench: draft.bench.map((item, i) => i === index ? { ...item, score: e.target.value } : item) })} /></label>
+          <button className="btn" onClick={() => setDraft({ ...draft, bench: draft.bench.filter((_, i) => i !== index) })}>Remove</button>
+        </div>
+      ))}
+      <button className="btn" onClick={() => setDraft({ ...draft, bench: [...draft.bench, { name: "", score: "" }] })}>Add benchmark</button>
+    </div>
+    {error ? <div className="inline-error">{error}</div> : null}
+    {msg ? <div className="inline-ok">{msg}</div> : null}
+    <div className="form-foot">
+      <button className="btn btn-primary" disabled={busy !== null || !draft.id.trim()} onClick={() => save()}>{busy === "save" ? <Spinner /> : null}{busy === "save" ? "Saving…" : editing ? "Save model" : "Add model"}</button>
+      {editing !== null ? <button className="btn" disabled={busy !== null} onClick={startAdd}>New model</button> : null}
+    </div>
   </section>;
 }
 
