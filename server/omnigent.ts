@@ -172,6 +172,8 @@ export class OmnigentBackend implements WorkerBackend {
   private subs = new Set<(e: WorkerEvent) => void>();
   private taskIds = new Map<string, string | null>();
   private localProbe = new LocalModelProbe();
+  /** omnigent project name -> first-class project id (see `projectIdFor`). */
+  private projectIds = new Map<string, string>();
 
   constructor(cfg: OmnigentConfig) {
     this.cfg = cfg;
@@ -319,13 +321,20 @@ export class OmnigentBackend implements WorkerBackend {
   }
 
   async start(start: WorkerStart): Promise<WorkerSession> {
+    // File the session into the repository's omnigent project. `project_id` is
+    // the membership omnigent's own project features read (project settings,
+    // Canvas grouping, the project page, `GET /v1/sessions?project=`); the
+    // legacy `omni_project` label below only keeps older servers grouping the
+    // session in the sidebar.
+    const projectName = start.project?.trim() ? start.project : null;
+    const projectId = projectName ? await this.projectIdFor(projectName) : null;
     const meta: Record<string, unknown> = {
       // No title = omnigent generates one (untitled tasks).
       ...(start.name ? { title: start.name } : {}),
       labels: {
         "corral.task": start.taskId ?? "",
         "corral.harness": start.harness,
-        ...(start.project ? { omni_project: start.project } : {}),
+        ...(projectName ? { omni_project: projectName } : {}),
       },
       workspace: start.repoPath,
     };
@@ -336,12 +345,17 @@ export class OmnigentBackend implements WorkerBackend {
         ...(start.git.base ? { base_branch: start.git.base } : {}),
         ...(start.git.existingWorktree ? { existing_worktree: true } : {}),
       };
+    } else if (projectId) {
+      // A filed create fills omitted ``agent_id`` / ``workspace`` / ``git``
+      // from the project's defaults. Corral decides the worktree itself, so an
+      // explicit null keeps a project default from forcing one.
+      meta.git = null;
     }
     if (this.cfg.hostId) meta.host_id = this.cfg.hostId;
     if (start.model) meta.model_override = start.model;
     if (start.reasoning) meta.reasoning_effort = start.reasoning;
 
-    let address: string;
+    let agentId: string;
     if (start.agent) {
       // Explicit agent choice: JSON create bound to that registered agent.
       const agents = await this.listAgents();
@@ -355,21 +369,32 @@ export class OmnigentBackend implements WorkerBackend {
       if (harnessOf(agent.harness) !== start.harness) {
         throw new Error(`Agent "${agent.name}" uses harness "${agent.harness}", incompatible with selected harness "${start.harness}"`);
       }
-      const created = await this.request<Record<string, unknown>>("POST", "/v1/sessions", {
-        ...meta,
-        agent_id: agent.id,
-      });
-      address = str(created.id) ?? str(created.session_id) ?? "";
+      agentId = agent.id;
     } else {
       // Bare harness: run Corral's own minimal agent for this harness (never a
       // named third-party agent), through the JSON create so worktrees work.
-      const agentId = await this.ensureHarnessAgent(start.harness);
-      const created = await this.request<Record<string, unknown>>("POST", "/v1/sessions", {
-        ...meta,
-        agent_id: agentId,
-      });
-      address = str(created.id) ?? str(created.session_id) ?? "";
+      agentId = await this.ensureHarnessAgent(start.harness);
     }
+    const body: Record<string, unknown> = { ...meta, agent_id: agentId };
+    let created: Record<string, unknown>;
+    try {
+      created = await this.request<Record<string, unknown>>("POST", "/v1/sessions", {
+        ...body,
+        ...(projectId ? { project_id: projectId } : {}),
+      });
+    } catch (err) {
+      // A project deleted (or unshared) since we cached its id must not fail a
+      // dispatch: forget it and retry once with the legacy label alone. The
+      // next dispatch re-resolves the project. Any other failure (e.g. a
+      // worktree collision) propagates untouched.
+      const message = err instanceof Error ? err.message : String(err);
+      const projectRejected =
+        /\bproject\b/i.test(message) && /\b(not found|forbidden|not owned|unsupported|disabled)\b/i.test(message);
+      if (!projectId || !projectName || !projectRejected) throw err;
+      this.projectIds.delete(projectName);
+      created = await this.request<Record<string, unknown>>("POST", "/v1/sessions", body);
+    }
+    const address = str(created.id) ?? str(created.session_id) ?? "";
     if (!address) throw new Error("omnigent create returned no session id");
 
     const session = (await this.get(address)) ?? this.normalize({ id: address, ...meta });
@@ -381,6 +406,50 @@ export class OmnigentBackend implements WorkerBackend {
       throw new Error(`session created (${session.address}) but prompt delivery failed: ${err}`);
     }
     return session;
+  }
+
+  /** The caller's first-class projects, or null when the server has no
+   *  projects API (older build: the legacy label is the only grouping). */
+  private async listProjects(): Promise<{ id: string; name: string }[] | null> {
+    try {
+      const res = await this.request<{ data?: Record<string, unknown>[] }>("GET", "/v1/projects");
+      return (res.data ?? [])
+        .map((p) => ({ id: str(p.id) ?? "", name: str(p.name) ?? "" }))
+        .filter((p) => p.id && p.name);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Find-or-create the omnigent project named `name` (the task repository's
+   *  display name), so a dispatched session is filed into a real project and
+   *  not just labelled with one. Returns null when there is nothing to file
+   *  into: an older server without the projects API, or one we could not
+   *  reach/write — the dispatch then proceeds with the legacy label alone. */
+  private async projectIdFor(name: string): Promise<string | null> {
+    const cached = this.projectIds.get(name);
+    if (cached) return cached;
+    const known = await this.listProjects();
+    if (known === null) return null;
+    const existing = known.find((p) => p.name === name);
+    if (existing) {
+      this.projectIds.set(name, existing.id);
+      return existing.id;
+    }
+    try {
+      const created = await this.request<Record<string, unknown>>("POST", "/v1/projects", { name });
+      const id = str(created.id);
+      if (!id) return null;
+      this.projectIds.set(name, id);
+      return id;
+    } catch {
+      // A concurrent dispatch created it between our list and our create: the
+      // server rejects the duplicate name, so re-read once and use that row.
+      const raced = (await this.listProjects())?.find((p) => p.name === name);
+      if (!raced) return null;
+      this.projectIds.set(name, raced.id);
+      return raced.id;
+    }
   }
 
   /** Map a short harness name to the registry's engine id (prefer *-native). */

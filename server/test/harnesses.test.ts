@@ -66,15 +66,84 @@ test("falls back to local OpenCode models when the host catalog is unsupported",
 
 test("session creation files the task group in an Omnigent project", async () => {
   const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  const posts: { path: string; body: any }[] = [];
   let labels: unknown;
+  let projectId: unknown;
   (backend as unknown as { request: (m: string, p: string, b?: any) => Promise<any> }).request = async (method, path, body) => {
     if (path.startsWith("/v1/agents")) return { data: [{ id: "a", name: "custom", harness: "codex-native" }] };
-    if (method === "POST" && path === "/v1/sessions") { labels = body.labels; return { id: "s" }; }
+    if (method === "GET" && path === "/v1/projects") return { data: [{ id: "p1", name: "Other repo" }] };
+    if (method === "POST" && path === "/v1/projects") { posts.push({ path, body }); return { id: "p2", name: body.name }; }
+    if (method === "POST" && path === "/v1/sessions") { labels = body.labels; projectId = body.project_id; return { id: "s" }; }
     if (method === "GET") return { id: "s" };
     return {};
   };
   await backend.start({ taskId: "t", name: null, repoPath: "/repo", git: null, prompt: "go", harness: "codex", agent: "custom", model: null, reasoning: null, project: "My repo" });
+  // The project is created once and the session is filed into it, not just
+  // labelled: `project_id` is what omnigent's project features read.
+  assert.deepEqual(posts, [{ path: "/v1/projects", body: { name: "My repo" } }]);
+  assert.equal(projectId, "p2");
   assert.deepEqual(labels, { "corral.task": "t", "corral.harness": "codex", omni_project: "My repo" });
+});
+
+test("reuses an existing project and does not create a duplicate", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  const posts: string[] = [];
+  const created: any[] = [];
+  (backend as unknown as { request: (m: string, p: string, b?: any) => Promise<any> }).request = async (method, path, body) => {
+    if (path.startsWith("/v1/agents")) return { data: [{ id: "a", name: "custom", harness: "codex-native" }] };
+    if (method === "GET" && path === "/v1/projects") return { data: [{ id: "p1", name: "corral" }] };
+    if (method === "POST" && path === "/v1/projects") { posts.push("projects"); return { id: "new" }; }
+    if (method === "POST" && path === "/v1/sessions") { created.push(body); return { id: `s${created.length}` }; }
+    if (method === "GET") return { id: "s" };
+    return {};
+  };
+  const args = { taskId: "t", name: null, repoPath: "/repo", git: null, prompt: "go", harness: "codex", agent: "custom", model: null, reasoning: null, project: "corral" };
+  await backend.start(args);
+  await backend.start({ ...args, taskId: "t2" });
+  assert.deepEqual(posts, []);
+  assert.deepEqual(created.map((b) => b.project_id), ["p1", "p1"]);
+  // A filed create must not let a project's git default force a worktree.
+  assert.equal(created[0].git, null);
+});
+
+test("falls back to the legacy project label when the server has no projects API", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  let created: any;
+  (backend as unknown as { request: (m: string, p: string, b?: any) => Promise<any> }).request = async (method, path, body) => {
+    if (path.startsWith("/v1/agents")) return { data: [{ id: "a", name: "custom", harness: "codex-native" }] };
+    if (path === "/v1/projects") throw new Error("omnigent GET /v1/projects -> 404: Not Found");
+    if (method === "POST" && path === "/v1/sessions") { created = body; return { id: "s" }; }
+    if (method === "GET") return { id: "s" };
+    return {};
+  };
+  await backend.start({ taskId: "t", name: null, repoPath: "/repo", git: null, prompt: "go", harness: "codex", agent: "custom", model: null, reasoning: null, project: "My repo" });
+  assert.equal("project_id" in created, false);
+  assert.equal(created.labels.omni_project, "My repo");
+});
+
+test("retries without the project when the cached project was deleted", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  const attempts: any[] = [];
+  let deleted = false;
+  (backend as unknown as { request: (m: string, p: string, b?: any) => Promise<any> }).request = async (method, path, body) => {
+    if (path.startsWith("/v1/agents")) return { data: [{ id: "a", name: "custom", harness: "codex-native" }] };
+    if (method === "GET" && path === "/v1/projects") return { data: [{ id: "p1", name: "corral" }] };
+    if (method === "POST" && path === "/v1/sessions") {
+      attempts.push(body);
+      if (body.project_id && deleted) throw new Error('omnigent POST /v1/sessions -> 404: {"error":{"message":"Project not found"}}');
+      return { id: "s" };
+    }
+    if (method === "GET") return { id: "s" };
+    return {};
+  };
+  const args = { taskId: "t", name: null, repoPath: "/repo", git: null, prompt: "go", harness: "codex", agent: "custom", model: null, reasoning: null, project: "corral" };
+  await backend.start(args);
+  deleted = true;
+  await backend.start({ ...args, taskId: "t2" });
+  assert.equal(attempts.length, 3);
+  assert.equal(attempts[1].project_id, "p1");
+  assert.equal("project_id" in attempts[2], false);
+  assert.equal(attempts[2].labels.omni_project, "corral");
 });
 
 test("session details expose the reported model and reasoning, not the model override", async () => {
