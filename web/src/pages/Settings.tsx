@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import type { Config, Context, EffortFacts, Favorite, ModelFacts, ModelCatalog, Repo, Retention } from "../types";
+import type { Config, Context, EffortFacts, Favorite, ModelFacts, ModelCatalog, Repo, Retention, Reviewer } from "../types";
 import { RETENTIONS, retentionLabel } from "../model-indicators";
 import { CONTEXTS } from "../favorite-context";
 import { errText } from "../util";
@@ -121,6 +121,7 @@ export function SettingsPage() {
           {[
             { key: "general", label: "General" },
             { key: "favorites", label: "Favorites" },
+            { key: "reviewers", label: "Reviewers" },
             { key: "models", label: "Models" },
             { key: "jira", label: "Jira" },
             { key: "repos", label: "Repos" },
@@ -214,6 +215,7 @@ export function SettingsPage() {
             ) : null}
 
             {section === "favorites" ? <FavoritesSection /> : null}
+            {section === "reviewers" ? <ReviewersSection /> : null}
             {section === "models" ? <ModelsSection /> : null}
             {section === "repos" ? <ReposSection /> : null}
 
@@ -426,7 +428,7 @@ function ReposSection() {
   );
 }
 
-const EMPTY_FAVORITE: Favorite = { name: "", harness: "", agent: "", model: "", reasoning: "", context: "professional" };
+const EMPTY_FAVORITE: Favorite = { name: "", harness: "", agent: "", model: "", reasoning: "", context: "professional", review: "" };
 
 function ContextSelect({ value, onChange, disabled }: { value: Context; onChange: (context: Context) => void; disabled?: boolean }) {
   return <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as Context)}>{CONTEXTS.map((c) => <option key={c} value={c}>{c}</option>)}</select>;
@@ -441,12 +443,14 @@ function FavoritesSection() {
   const [editing, setEditing] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reviewers, setReviewers] = useState<Reviewer[]>([]);
   // The server is the source of truth: this section is remounted on every tab
   // switch, so seeding it from a snapshot taken when Settings loaded brought
   // old contexts back (and the next save wrote them over the saved ones).
   const loadFavorites = useCallback(async () => {
     const cfg = await api.getConfig();
     setFavorites(cfg.favorites ?? []);
+    setReviewers(cfg.reviewers ?? []);
   }, []);
   useEffect(() => {
     let cancelled = false;
@@ -469,14 +473,58 @@ function FavoritesSection() {
   return <section className="panel-form">
     <h2 className="panel-title">Task favorites</h2>
     <p className="muted">Save combinations for one-click selection when creating a task.</p>
-    {!loaded ? <p className="muted"><Spinner /> Loading favorites…</p> : favorites.length === 0 ? <p className="muted">{error ? "Could not load favorites." : "No favorites yet — add one below."}</p> : <ul className="repo-list">{favorites.map((f, i) => <li className="repo-row" key={i}><div className="repo-info"><strong>{f.name}</strong><span className="muted">{[f.context, f.harness, agents.find((a) => a.id === f.agent)?.name || f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning"].join(" · ")}</span></div><div className="repo-actions"><button className="btn" disabled={busy} onClick={() => { setDraft(f); setEditing(i); }}>Edit</button><button className="btn" disabled={busy} onClick={() => void save(favorites.filter((_, n) => n !== i))}>Remove</button></div></li>)}</ul>}
+    {!loaded ? <p className="muted"><Spinner /> Loading favorites…</p> : favorites.length === 0 ? <p className="muted">{error ? "Could not load favorites." : "No favorites yet — add one below."}</p> : <ul className="repo-list">{favorites.map((f, i) => <li className="repo-row" key={i}><div className="repo-info"><strong>{f.name}</strong><span className="muted">{[f.context, f.harness, agents.find((a) => a.id === f.agent)?.name || f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning", f.review ? `review: ${f.review}` : "no review"].join(" · ")}</span></div><div className="repo-actions"><button className="btn" disabled={busy} onClick={() => { setDraft(f); setEditing(i); }}>Edit</button><button className="btn" disabled={busy} onClick={() => void save(favorites.filter((_, n) => n !== i))}>Remove</button></div></li>)}</ul>}
     <div className="field-row"><label className="field"><span>Name</span><input value={draft.name} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. Code review" /></label>
     <label className="field"><span>Context</span><ContextSelect value={draft.context} onChange={(context) => update({ context })} /></label></div>
-    <div className="field-row"><label className="field"><span>Harness</span><select value={harness} onChange={(e) => update({ harness: e.target.value, agent: "", model: "", reasoning: "" })}>{catalog.length === 0 ? <option value="">No configured harnesses</option> : null}{draft.harness && !catalog.some((h) => h.harness === draft.harness) ? <option value={draft.harness}>{draft.harness} (unavailable)</option> : null}{catalog.map((h) => <option key={h.harness} value={h.harness}>{h.harness}</option>)}</select></label>
+    <div className="field-row"><label className="field"><span>Reviewer</span><select value={draft.review} onChange={(e) => update({ review: e.target.value })}><option value="">— none —</option>{draft.review && !reviewers.some((r) => r.name === draft.review) ? <option value={draft.review}>{draft.review} (unavailable)</option> : null}{reviewers.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}</select></label>
+    <label className="field"><span>Harness</span><select value={harness} onChange={(e) => update({ harness: e.target.value, agent: "", model: "", reasoning: "" })}>{catalog.length === 0 ? <option value="">No configured harnesses</option> : null}{draft.harness && !catalog.some((h) => h.harness === draft.harness) ? <option value={draft.harness}>{draft.harness} (unavailable)</option> : null}{catalog.map((h) => <option key={h.harness} value={h.harness}>{h.harness}</option>)}</select></label>
     <label className="field"><span>Agent</span><select value={draft.agent} onChange={(e) => update({ agent: e.target.value })}><option value="">— none (bare harness) —</option>{draft.agent && !matchingAgents.some((a) => a.id === draft.agent) ? <option value={draft.agent}>{draft.agent} (unavailable)</option> : null}{matchingAgents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label></div>
     <div className="field-row"><ModelSettings models={catalog.find((h) => h.harness === harness)?.models ?? []} model={draft.model} reasoning={draft.reasoning} setModel={(model) => update({ model })} setReasoning={(reasoning) => update({ reasoning })} fieldClass="field" /></div>
     {error ? <div className="inline-error">{error}</div> : null}
     <div className="form-foot"><button className="btn btn-primary" disabled={busy || !draft.name.trim() || !harness || (!!draft.agent && !matchingAgents.some((a) => a.id === draft.agent))} onClick={() => { const next = [...favorites]; const favorite = { ...draft, name: draft.name.trim(), harness }; if (editing === null) next.push(favorite); else next[editing] = favorite; void save(next); }}>{editing === null ? "Add favorite" : "Save favorite"}</button>{editing !== null ? <button className="btn" onClick={() => { setEditing(null); setDraft(EMPTY_FAVORITE); }}>Cancel</button> : null}</div>
+  </section>;
+}
+
+function ReviewersSection() {
+  const [reviewers, setReviewers] = useState<Reviewer[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [draft, setDraft] = useState<Reviewer>({ name: "", command: "" });
+  const [editing, setEditing] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const cfg = await api.getConfig();
+    setReviewers(cfg.reviewers ?? []);
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    load()
+      .catch((e: unknown) => { if (!cancelled) setError(errText(e)); })
+      .finally(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [load]);
+
+  const update = (patch: Partial<Reviewer>) => setDraft((d) => ({ ...d, ...patch }));
+  const save = async (next: Reviewer[]) => {
+    setBusy(true); setError("");
+    try {
+      await api.putConfig({ reviewers: next });
+      setReviewers(next); setEditing(null); setDraft({ name: "", command: "" });
+      await load().catch(() => undefined);
+    } catch (e) { setError(errText(e)); } finally { setBusy(false); }
+  };
+
+  return <section className="panel-form">
+    <h2 className="panel-title">Reviewers</h2>
+    <p className="muted">Named commands a code task runs on its diff before opening the PR. <span className="mono">{"{base_branch}"}</span> is replaced with the task's base branch at dispatch; the resolved command is frozen on the task.</p>
+    {!loaded ? <p className="muted"><Spinner /> Loading reviewers…</p> : reviewers.length === 0 ? <p className="muted">{error ? "Could not load reviewers." : "No reviewers yet — add one below."}</p> : <ul className="repo-list">{reviewers.map((r, i) => <li className="repo-row" key={i}><div className="repo-info"><strong>{r.name}</strong><span className="mono muted">{r.command}</span></div><div className="repo-actions"><button className="btn" disabled={busy} onClick={() => { setDraft(r); setEditing(i); }}>Edit</button><button className="btn" disabled={busy} onClick={() => void save(reviewers.filter((_, n) => n !== i))}>Remove</button></div></li>)}</ul>}
+    <div className="field-row">
+      <label className="field"><span>Name</span><input value={draft.name} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. cubic" /></label>
+      <label className="field"><span>Command</span><input value={draft.command} onChange={(e) => update({ command: e.target.value })} placeholder="cubic review --base {base_branch} --json" /></label>
+    </div>
+    {error ? <div className="inline-error">{error}</div> : null}
+    <div className="form-foot"><button className="btn btn-primary" disabled={busy || !draft.name.trim() || !draft.command.trim()} onClick={() => { const next = [...reviewers]; const reviewer = { name: draft.name.trim(), command: draft.command.trim() }; if (editing === null) next.push(reviewer); else next[editing] = reviewer; void save(next); }}>{editing === null ? "Add reviewer" : "Save reviewer"}</button>{editing !== null ? <button className="btn" onClick={() => { setEditing(null); setDraft({ name: "", command: "" }); }}>Cancel</button> : null}</div>
   </section>;
 }
 

@@ -28,6 +28,7 @@ type Task = {
   id: string; title: string; prompt: string; repo_path: string;
   kind: "code" | "review";    // review: review pr_url, no branch, no PR loop
   pr_url: string | null;      // the task's PR, or the reviewed PR/MR for kind "review"
+  review: string | null;      // resolved review command, frozen at dispatch (code tasks)
   target: string;             // "", "claude", "codex", "opencode"
   target_state: "suggested" | "confirmed";
   base_branch: string | null; branch: string | null; worktree_path: string | null;
@@ -71,7 +72,7 @@ type Item = {
 - `POST /api/tasks` `{title?, prompt?, kind?, pr_url?, repo_path?, target?, model?, reasoning?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch. `kind: "review"` requires `pr_url` (GitHub pull or GitLab MR URL); the title defaults to `Review <pr_url>`
 - `PATCH /api/tasks/:id` partial task → `Task` — `kind` is fixed at creation and ignored
 - `POST /api/tasks/:id/archive-session` → `Task` — archives the session and then the dispatched task; leaves the task unchanged if session archiving fails
-- `POST /api/tasks/:id/dispatch` `{target?, use_worktree?, agent?, model?, reasoning?}` → `{address, worktreePath, branch}` — uses saved model and reasoning when omitted; creates worktree + starts the agent (409 if already dispatched, 400 if no target). A review task runs on `claude` only (400 otherwise), in `repo_path` with no worktree and no branch (`branch: ""`), with the `skills/review.md` convention: drafts first, publish after the human approves in the inbox
+- `POST /api/tasks/:id/dispatch` `{target?, use_worktree?, agent?, model?, reasoning?, review?}` → `{address, worktreePath, branch}` — uses saved model and reasoning when omitted; creates worktree + starts the agent (409 if already dispatched, 400 if no target). `review` is a reviewer name from `GET /api/config` `reviewers`; its command (with `{base_branch}` replaced by the task's base branch or the repo's default) is appended to the prompt and frozen on the task. A review task runs on `claude` only (400 otherwise), in `repo_path` with no worktree and no branch (`branch: ""`), with the `skills/review.md` convention: drafts first, publish after the human approves in the inbox
 - `POST /api/tasks/:id/cleanup` → `{ok}` — removes the task's worktree
 
 ### Jira
@@ -101,14 +102,15 @@ type Item = {
 - `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`. A `done` report on a review task creates a `digest` item (no PR gate); review tasks are never PR-synced
 - `GET /api/metrics/summary` → `{by_name: [{name, count, last_ms}], recent: [{id, ts, name, ref, data}]}`
 - `GET /api/terminals` → tracked terminals `[{address, task_id, name, agent, last_status, last_turn, updated_ms}]`
-- `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, favorites: Favorite[], models: {[modelId]: ModelFacts}, token /* masked */}` — `models` holds only the user's overrides, not the shipped defaults.
+- `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, favorites: Favorite[], reviewers: Reviewer[], models: {[modelId]: ModelFacts}, token /* masked */}` — `models` holds only the user's overrides, not the shipped defaults.
 - `ModelFacts` is `{retention: "none"|"30d"|"trains"|"unknown", quota?: {monthlyUsd}, efforts?: {[reasoning]: {index?, costPerTask?, minPerTask?}}, bench?: {[name]: score}, asOf: "YYYY-MM-DD", source?}`. `efforts.default` is the fallback when the harness's reasoning value has no entry.
 - `GET /api/models` → `{models: {[modelId]: ModelFacts}}` — the shipped defaults (`server/model-catalog.json`) merged with the config overrides, user entry winning per model key. Keys are the ids the harnesses report (`GET /api/harnesses`), or `prefix*` for ids a harness suffixes with a date or variant; matching is exact id first, then the longest prefix.
 - `GET /api/models/availability` → `{providers: {[provider]: {status: "up"|"down"|"unknown", models: string[]}}}` — probes the local model servers configured in `omnigent.localProviders` (`GET <baseUrl>/models`, 2 s timeout, cached 30 s). A probe that does not answer in time is `unknown`, never `down`; an unconfigured provider is `unknown`.
-- `Favorite` is `{name, harness, agent, model, reasoning, context}`; empty agent/model/reasoning mean defaults. `context` is `"professional"` or `"personal"`; a favorite saved without one reads as `"professional"`, any other value is rejected (400). The task form shows only the favorites matching the repo's context.
+- `Favorite` is `{name, harness, agent, model, reasoning, context, review}`; empty agent/model/reasoning mean defaults, and `review` is a reviewer name (empty = none). `context` is `"professional"` or `"personal"`; a favorite saved without one reads as `"professional"`, any other value is rejected (400). The task form shows only the favorites matching the repo's context.
 - `GET /api/repos` → `Repo[]`, where `Repo` is `{id, name, path, jira_prefix, context, source, created_ms}`; `context` is `"professional" | "personal" | null`, and null reads as professional.
 - `PATCH /api/repos/:id` `{name?, jira_prefix?, context?}` → `Repo` — other fields are ignored; a `context` other than the two values or `null` is a 400.
-- `PUT /api/config` `{jira?: {baseUrl, email, token, jql}, assistant?: string[], agents?: {...}, favorites?: Favorite[], models?: {[modelId]: ModelFacts}}` → `{ok}`. A retention outside the four values, a non-numeric cost/index/minutes/score/monthly limit, or an `asOf` that is not `YYYY-MM-DD` is a 400.
+- `Reviewer` is `{name, command}` — a named review command. The command may contain `{base_branch}`, replaced with the task's base branch (or the repo's default) when a task is dispatched with that reviewer. Names are unique; both fields are required and trimmed.
+- `PUT /api/config` `{jira?: {baseUrl, email, token, jql}, assistant?: string[], agents?: {...}, favorites?: Favorite[], reviewers?: Reviewer[], models?: {[modelId]: ModelFacts}}` → `{ok}`. A retention outside the four values, a non-numeric cost/index/minutes/score/monthly limit, or an `asOf` that is not `YYYY-MM-DD` is a 400.
 - `GET /api/health` → `{ok: true}` (no auth)
 
 - `GET /api/errors` → current background synchronization errors (`source`, `message`, `updated_ms`); cleared when the operation succeeds.

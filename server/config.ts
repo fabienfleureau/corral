@@ -6,6 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Favorite } from "./favorites.ts";
+import type { Reviewer } from "./reviewers.ts";
 import type { ModelFacts } from "./model-catalog.ts";
 import type { ModelPrice } from "./usage.ts";
 
@@ -31,6 +32,8 @@ export interface OmnigentConfig {
 
 export interface Config {
   favorites?: Favorite[];
+  /** Named review commands; a favorite picks one by name. */
+  reviewers?: Reviewer[];
   /** Model facts catalog overrides (exact id or "prefix*"), merged over the
    *  shipped defaults per model key. */
   models?: Record<string, ModelFacts>;
@@ -85,6 +88,10 @@ function defaultConfig(): Config {
     },
     usage: { prices: {} },
     models: {},
+    reviewers: [
+      { name: "cubic", command: "cubic review --base {base_branch} --json" },
+      { name: "ocr", command: "ocr review --from {base_branch} --provider chatgpt --model gpt-6.1-sol --effort medium --audience agent --format json" },
+    ],
   };
 }
 

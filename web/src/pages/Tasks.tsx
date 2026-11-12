@@ -5,7 +5,7 @@ import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, 
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
 import type { DispatchResult, NewTaskInput } from "../api";
-import type { AgentQuota, Context, Favorite, JiraSearchResult, ModelAvailability, ModelCatalog, Repo, Task } from "../types";
+import type { AgentQuota, Context, Favorite, JiraSearchResult, ModelAvailability, ModelCatalog, Repo, Reviewer, Task } from "../types";
 import { modelFactsReport, retentionLabel } from "../model-indicators";
 import type { HarnessModels, ModelFactsReport, ModelSelection } from "../model-indicators";
 import { favoritesFor, repoContext } from "../favorite-context";
@@ -32,6 +32,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [agentOptions, setAgentOptions] = useState<Record<string, { id: string; name: string }[]>>({});
   const [modelFacts, setModelFacts] = useState<ModelCatalog>({});
   const [providerModels, setProviderModels] = useState<Record<string, ModelAvailability>>({});
+  const [reviewers, setReviewers] = useState<Reviewer[]>([]);
 
   useEffect(() => {
     api
@@ -50,6 +51,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   useEffect(() => {
     api.getModels().then((res) => setModelFacts(res.models)).catch(() => undefined);
     api.getModelAvailability().then((res) => setProviderModels(res.providers)).catch(() => undefined);
+    api.getConfig().then((cfg) => setReviewers(cfg.reviewers ?? [])).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -128,7 +130,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -149,7 +151,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         </div>
 
         {showImport ? <JiraImport repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} onImported={refresh} onClose={() => setShowImport(false)} /> : null}
-        <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} onDone={refresh} />
+        <NewTaskForm tasks={tasks} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} onDone={refresh} />
 
         <div className="task-list-controls">
             <label className="check-inline">
@@ -194,6 +196,7 @@ function TaskRow({
   catalog,
   modelFacts,
   providerModels,
+  reviewers,
   refresh,
 }: {
   task: Task;
@@ -204,6 +207,7 @@ function TaskRow({
   catalog: Record<string, ModelOption[]>;
   modelFacts: ModelCatalog;
   providerModels: Record<string, ModelAvailability>;
+  reviewers: Reviewer[];
   refresh: () => void;
 }) {
   const [showDispatch, setShowDispatch] = useState(task.status === "open" || (task.status === "dispatched" && !task.terminal_address));
@@ -214,6 +218,7 @@ function TaskRow({
   const [model, setModel] = useState(task.model ?? "");
   const [reasoning, setReasoning] = useState(task.reasoning ?? "");
   const [agent, setAgent] = useState(task.agent ?? "");
+  const [reviewName, setReviewName] = useState("");
   const [useWorktree, setUseWorktree] = useState(true);
   const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
   const [showComment, setShowComment] = useState(false);
@@ -261,6 +266,7 @@ function TaskRow({
         agent: agent || null,
         model: model.trim() || null,
         reasoning: reasoning.trim() || null,
+        review: review ? null : reviewName || null,
       });
       setDispatchResult(result);
       setShowDispatch(false);
@@ -342,6 +348,7 @@ function TaskRow({
             <span className="muted">Reasoning: {task.session_reasoning || "Unknown"}</span>
           </> : null}
           {task.branch ? <span className="mono">{task.branch}</span> : null}
+          {task.review ? <span className="mono muted" title="Review command (frozen at dispatch)">review: {task.review}</span> : null}
           {task.pr_url ? (
             <a href={task.pr_url} target="_blank" rel="noreferrer" className="pr-pill" title={task.pr_url}>
               {prLabel(task.pr_url)}
@@ -433,6 +440,14 @@ function TaskRow({
                 ))}
               </select>
             </label>
+            {review ? null : <label className="field-inline">
+              <span>Reviewer</span>
+              <select value={reviewName} onChange={(e) => setReviewName(e.target.value)}>
+                <option value="">— none —</option>
+                {reviewName && !reviewers.some((r) => r.name === reviewName) ? <option value={reviewName}>{reviewName} (unavailable)</option> : null}
+                {reviewers.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+              </select>
+            </label>}
             <ModelSettings models={catalog[selectedTarget] ?? []} model={model} reasoning={reasoning} setModel={setModel} setReasoning={setReasoning} fieldClass="field-inline" />
             <ModelFactsLine report={modelFactsReport({
               selection: { harness: selectedTarget, model, reasoning },
@@ -596,7 +611,7 @@ function copyWithExecCommand(text: string): boolean {
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
-function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; onDone: () => void }) {
+function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, reviewers, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; reviewers: Reviewer[]; onDone: () => void }) {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   useEffect(() => { api.getConfig().then((cfg) => setFavorites(cfg.favorites ?? [])).catch(() => undefined); }, []);
   const [kind, setKind] = useState<"code" | "review">("code");
@@ -609,6 +624,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const [repoTouched, setRepoTouched] = useState(false);
   const [repoPath, setRepoPath] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
+  const [reviewName, setReviewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -651,7 +667,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
       onDone();
       if (dispatch) {
         try {
-          await api.dispatchTask(task.id, { target: selectedTarget, use_worktree: !review, agent: agent || null });
+          await api.dispatchTask(task.id, { target: selectedTarget, use_worktree: !review, agent: agent || null, review: review ? null : reviewName || null });
           onDone();
         } catch (err) {
           setError(`Task created, but dispatch failed: ${errText(err)}`);
@@ -722,7 +738,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           favorite={f}
           disabled={!formTargets.includes(f.harness)}
           report={modelFactsReport({ selection: { harness: f.harness, model: f.model, reasoning: f.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: formContext, providers: providerModels })}
-          onPick={() => { setTarget(f.harness); setAgent(f.agent); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}
+          onPick={() => { setTarget(f.harness); setAgent(f.agent); setReviewName(f.review ?? ""); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}
         />
       ))}</div></div> : null}
       <div className="field-row">
@@ -736,6 +752,13 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           {(agentOptions[selectedTarget] ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select></label>
       </div>
+      {review ? null : <div className="field-row">
+        <label className="field"><span>Reviewer</span><select value={reviewName} onChange={(e) => setReviewName(e.target.value)}>
+          <option value="">— none —</option>
+          {reviewName && !reviewers.some((r) => r.name === reviewName) ? <option value={reviewName}>{reviewName} (unavailable)</option> : null}
+          {reviewers.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+        </select></label>
+      </div>}
       <div className="field-row">
         <ModelSettings models={catalog[selectedTarget] ?? []} model={selectedSettings.model} reasoning={selectedSettings.reasoning} setModel={(value) => setSetting("model", value)} setReasoning={(value) => setSetting("reasoning", value)} fieldClass="field" />
       </div>

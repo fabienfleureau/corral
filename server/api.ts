@@ -1,4 +1,5 @@
 import { isContext, parseFavorites } from "./favorites.ts";
+import { parseReviewers, type Reviewer } from "./reviewers.ts";
 import { errors } from "./errors.ts";
 // HTTP API + static hosting. Token auth middleware (token-ready for LAN/team),
 // SSE hub for live inbox updates.
@@ -364,6 +365,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       model?: string | null;
       reasoning?: string | null;
       agent?: string | null;
+      review?: string | null;
     };
     const target = b.target ?? task.target;
     if (!target) return json(res, 400, { error: "target required (claude|codex|opencode)" });
@@ -375,6 +377,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         model: b.model === undefined ? task.model : b.model,
         reasoning: b.reasoning === undefined ? task.reasoning : b.reasoning,
         agent: b.agent === undefined ? task.agent ?? null : b.agent,
+        review: b.review ?? null,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
       json(res, 200, result);
@@ -725,6 +728,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, {
       // Favorites saved before contexts existed read as professional.
       favorites: (cfg.favorites ?? []).map((f) => ({ ...f, context: isContext(f.context) ? f.context : "professional" })),
+      reviewers: cfg.reviewers ?? [],
       port: cfg.port,
       host: cfg.host,
       agents: Object.keys(cfg.agents),
@@ -739,9 +743,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   on("PUT", "/api/config", (req, res, { body }) => {
-    const b = body as { jira?: Record<string, string>; assistant?: string[]; agents?: Record<string, string[]>; favorites?: unknown; models?: unknown };
+    const b = body as { jira?: Record<string, string>; assistant?: string[]; agents?: Record<string, string[]>; favorites?: unknown; models?: unknown; reviewers?: unknown };
     if (b.favorites !== undefined) {
       try { b.favorites = parseFavorites(b.favorites); } catch { return json(res, 400, { error: "Invalid favorites" }); }
+    }
+    if (b.reviewers !== undefined) {
+      try { b.reviewers = parseReviewers(b.reviewers); } catch { return json(res, 400, { error: "Invalid reviewers" }); }
     }
     if (b.models !== undefined) {
       try { b.models = parseCatalog(b.models); } catch (err) { return json(res, 400, { error: err instanceof Error ? err.message : String(err) }); }
@@ -757,9 +764,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       writeFileSync(path, JSON.stringify(merged, null, 2) + "\n");
     } catch {
       if (b.favorites !== undefined) return json(res, 500, { error: "Could not save favorites" });
+      if (b.reviewers !== undefined) return json(res, 500, { error: "Could not save reviewers" });
       if (b.models !== undefined) return json(res, 500, { error: "Could not save models" });
     }
     if (b.favorites !== undefined) state.cfg.favorites = b.favorites as import("./favorites.ts").Favorite[];
+    if (b.reviewers !== undefined) state.cfg.reviewers = b.reviewers as Reviewer[];
     if (b.models !== undefined) state.cfg.models = b.models as import("./model-catalog.ts").ModelCatalog;
     json(res, 200, { ok: true });
   });
