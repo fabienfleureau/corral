@@ -9,7 +9,7 @@ import { ExternalLinkIcon, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
 import { inProgressInboxItems, inProgressInboxTasks, selectedInboxItem } from "../inbox-selection";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
-import { inboxTitle } from "../inbox-title";
+import { inboxTitle, itemDisplayTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
 import { QuestionReply } from "../QuestionReply";
 
@@ -357,7 +357,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
           <>
             <div className="detail-head">
               <div className="detail-title-row">
-                <h2 className="detail-title">{selected.title}</h2>
+                <h2 className="detail-title">{itemDisplayTitle(selected.title)}</h2>
                 {prUrl ? (
                   <a href={prUrl} target="_blank" rel="noreferrer" className="btn btn-primary pr-open" title={prUrl}>
                     Open {prLabel(prUrl)}
@@ -397,7 +397,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             <div className="detail-body">
               {selected.structured ? (
                 <>
-                  {selected.summary ? <Markdown text={selected.summary} className="body-text" /> : null}
+                  {/* A PR item's summary is its gate status, already in the badge above. */}
+                  {selected.summary && selected.kind !== "pr" ? <Markdown text={selected.summary} className="body-text" /> : null}
                   {selected.body && selected.body !== selected.summary ? (
                     <Markdown text={selected.body} className="body-text" />
                   ) : null}

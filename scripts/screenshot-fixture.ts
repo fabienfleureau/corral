@@ -1,6 +1,7 @@
 import { Db } from "../server/db.ts";
 import type { Favorite } from "../server/favorites.ts";
-import type { Task } from "../server/types.ts";
+import { prItemBody, type PrInfo } from "../server/pr.ts";
+import type { Item, Task } from "../server/types.ts";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -27,7 +28,96 @@ export function seedScreenshotData(db: Db): void {
   }));
   db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
   db.insertRepo({ id: "sample-home", name: "side-project", path: "/sample/side-project", jira_prefix: null, context: "personal", source: "manual", created_ms: now });
+  seedInboxItems(db, now);
   seedBenchmarks(db);
+}
+
+/** Open inbox items: a ready PR, a PR still needing work, and a question. */
+export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
+  const pr = (overrides: Partial<PrInfo>): PrInfo => ({
+    url: "https://github.com/example/project/pull/42",
+    title: "feat(search): rank results by recency",
+    state: "OPEN",
+    number: 42,
+    description: "## Why\n\nRecent results are buried under old but heavily linked ones.\n\n## What\n\nRank by recency and show why a result matched.",
+    additions: 142,
+    deletions: 38,
+    changed_files: 6,
+    mergeable: "MERGEABLE",
+    base_ref: "main",
+    review_decision: null,
+    human_approvals: null,
+    checks: { total: 3, failed: 0, pending: false },
+    threads: [],
+    ...overrides,
+  });
+  const items: Item[] = [
+    {
+      id: "sample-pr-ready",
+      kind: "pr",
+      status: "open",
+      title: "PR ready for review: feat(search): rank results by recency",
+      summary: "ready for review",
+      body: prItemBody(pr({})),
+      context: "",
+      options: null,
+      ready: 1,
+      source_ref: null,
+      task_id: null,
+      structured: 1,
+      created_ms: now - 20 * 60_000,
+      updated_ms: now - 20 * 60_000,
+      resolved_ms: null,
+      snooze_until_ms: null,
+    },
+    {
+      id: "sample-pr-work",
+      kind: "pr",
+      status: "open",
+      title: "PR needs work: fix(auth): refresh expired session tokens",
+      summary: "1 unresolved review comment, 1 failing check",
+      body: prItemBody(pr({
+        url: "https://gitlab.com/example/platform/-/merge_requests/29",
+        title: "fix(auth): refresh expired session tokens",
+        number: 29,
+        description: "## Why\n\nLong-lived tabs lost their session after the access token expired.\n\n## What\n\nRefresh the token before the request and retry once on 401.",
+        additions: 64,
+        deletions: 12,
+        changed_files: 3,
+        checks: { total: 3, failed: 1, pending: false },
+        threads: [{ id: "note-1", author: "reviewer", body: "Please cover the concurrent refresh case." }],
+      })),
+      context: "",
+      options: null,
+      ready: 0,
+      source_ref: null,
+      task_id: null,
+      structured: 1,
+      created_ms: now - 3 * 60 * 60_000,
+      updated_ms: now - 3 * 60 * 60_000,
+      resolved_ms: null,
+      snooze_until_ms: null,
+    },
+    {
+      id: "sample-question",
+      kind: "question",
+      status: "open",
+      title: "Which page size should the search endpoint default to?",
+      summary: "",
+      body: "Both clients paginate, but they disagree on the default.\n\n- `20` keeps the first response small.\n- `50` halves the number of round trips for bulk imports.\n\nThe endpoint is not public yet, so either default is cheap to change later.",
+      context: "",
+      options: JSON.stringify(["20", "50", "none"]),
+      ready: 1,
+      source_ref: null,
+      task_id: null,
+      structured: 1,
+      created_ms: now - 26 * 60 * 60_000,
+      updated_ms: now - 26 * 60 * 60_000,
+      resolved_ms: null,
+      snooze_until_ms: null,
+    },
+  ];
+  for (const item of items) db.insertItem(item);
 }
 
 /** Published results for the benchmark matrix: matched, versioned and orphaned models. */
