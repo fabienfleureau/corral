@@ -45,6 +45,7 @@ export type Item = {
   task_id: string | null;
   structured: number; // 1 = agent reported it, 0 = blocked-status fallback
   ready: number; // for pr items: 1 = review gate passes (threads resolved, checks green)
+  handling: number; // for pr items: 1 = the agent has the PR work in flight
   created_ms: number;
   updated_ms: number;
   resolved_ms: number | null;

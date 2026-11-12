@@ -33,7 +33,9 @@ export function seedScreenshotData(db: Db): void {
 }
 
 /** Open inbox items: a ready PR, a PR still needing work, two questions — the
- *  last one from the Jira-imported task, so rows show ticket provenance. */
+ *  last one from the Jira-imported task, so rows show ticket provenance. Plus,
+ *  for the in-progress view, a PR item the agent is handling (merge conflicts)
+ *  whose task has already reported done. */
 export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
   const pr = (overrides: Partial<PrInfo>): PrInfo => ({
     url: "https://github.com/example/project/pull/42",
@@ -132,6 +134,35 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
       structured: 1,
       created_ms: now - 30_000,
       updated_ms: now - 30_000,
+      resolved_ms: null,
+      snooze_until_ms: null,
+    },
+    {
+      id: "sample-pr-rebase",
+      kind: "pr",
+      status: "open",
+      title: "PR needs work: chore(ci): bump the release workflow to Node 22",
+      summary: "merge conflicts",
+      body: prItemBody(pr({
+        url: "https://github.com/example/project/pull/57",
+        title: "chore(ci): bump the release workflow to Node 22",
+        number: 57,
+        description: "## Why\n\nRelease builds still run on Node 20.\n\n## What\n\nMove the release job to Node 22.",
+        additions: 9,
+        deletions: 7,
+        changed_files: 1,
+        mergeable: "CONFLICTING",
+        checks: { total: 2, failed: 0, pending: false },
+      })),
+      context: "",
+      options: null,
+      ready: 0,
+      handling: 1,
+      source_ref: null,
+      task_id: "sample-done",
+      structured: 1,
+      created_ms: now - 45 * 60_000,
+      updated_ms: now - 5 * 60_000,
       resolved_ms: null,
       snooze_until_ms: null,
     },

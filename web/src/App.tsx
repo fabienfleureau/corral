@@ -8,6 +8,7 @@ import { createNotificationTracker, sendDesktopNotification } from "./notificati
 import type { Item } from "./types";
 import { useVisibleInboxItems } from "./use-visible-inbox-items";
 import { Spinner } from "./ui";
+import { openInboxItems } from "./inbox-selection";
 import { rememberInboxItems, unseenInboxItems } from "./inbox-seen";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
@@ -43,7 +44,9 @@ export function App() {
   const [otherCounts, setCounts] = useState<Counts>({ inbox: 0, tasks: 0, pulls: 0, sessions: 0, errors: 0 });
   const [openItems, setOpenItems] = useState<Item[]>([]);
   const visibleOpenItems = useVisibleInboxItems(openItems);
-  const counts = { ...otherCounts, inbox: visibleOpenItems.length };
+  /** What actually asks the human for something: the agent is not handling it. */
+  const openHumanItems = openInboxItems(visibleOpenItems);
+  const counts = { ...otherCounts, inbox: openHumanItems.length };
   const [seenItems, setSeenItems] = useState<string[]>(() => {
     try {
       const stored: unknown = JSON.parse(localStorage.getItem("corral.seenInboxItems") || "[]");
@@ -147,8 +150,8 @@ export function App() {
 
   useEffect(() => {
     const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (icon) icon.href = unseenInboxItems(visibleOpenItems, seenItems) ? "/favicon-inbox.svg" : "/favicon.svg";
-  }, [visibleOpenItems, seenItems]);
+    if (icon) icon.href = unseenInboxItems(openHumanItems, seenItems) ? "/favicon-inbox.svg" : "/favicon.svg";
+  }, [openHumanItems, seenItems]);
 
   // Offline mode: track connectivity (the service worker serves cached data).
   const [online, setOnline] = useState(() =>

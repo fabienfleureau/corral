@@ -7,7 +7,7 @@ export function createNotificationTracker() {
     if (event.type !== "item.created" && event.type !== "item.updated") return null;
     const { item } = event;
     if (!item) return null;
-    if (item.status !== "open" || (item.kind !== "question" && item.kind !== "pr")) {
+    if (item.status !== "open" || item.handling === 1 || (item.kind !== "question" && item.kind !== "pr")) {
       notified.delete(item.id);
       return null;
     }

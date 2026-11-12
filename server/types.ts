@@ -73,6 +73,11 @@ export interface Item {
   structured: number;
   /** For pr items: 1 = the review gate passes (threads resolved, checks green). */
   ready: number;
+  /** For pr items: 1 while the agent has the PR work in flight (merge
+   *  conflicts, review comments). The item waits under "In progress" instead
+   *  of asking the human for something it cannot act on yet. Absent on rows
+   *  written before the column existed: treat as 0. */
+  handling?: number;
   /** Captured from a backend elicitation: JSON {id, kind}. Replies answer it
    *  through resolveElicitation instead of a new conversation message. */
   elicitation?: string | null;
