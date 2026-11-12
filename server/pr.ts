@@ -14,6 +14,7 @@ import type { Item, Task } from "./types.ts";
 import { DATA_NOT_INSTRUCTIONS, questionConvention, slugify } from "./dispatch.ts";
 import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraStage, type JiraTransitionGateway } from "./jira-status.ts";
+import { logTaskEvent, promptData } from "./task-events.ts";
 
 export interface PrThread {
   /** Stable id (GraphQL thread id, or GitLab discussion id) for dedupe. */
@@ -606,6 +607,24 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
             ...(work.comments ? { pushed: sig } : {}),
             ...(work.conflict ? { conflict: true } : {}),
           });
+          // The work handed to the agent is a prompt like any other: the
+          // history shows what was sent and to which session.
+          if (work.comments) {
+            logTaskEvent(db, task.id, "prompt", `Review comments sent to the agent (${pr.threads.length})`, promptData(workMessage(pr, task, { comments: true, conflict: false }), {
+              source: "pr-comments",
+              threads: pr.threads.length,
+              session: address,
+              pr: pr.url,
+            }));
+          }
+          if (work.conflict) {
+            logTaskEvent(db, task.id, "prompt", `Merge conflicts sent to the agent (base ${pr.base_ref})`, promptData(workMessage(pr, task, { comments: false, conflict: true }), {
+              source: "pr-conflict",
+              base: pr.base_ref,
+              session: address,
+              pr: pr.url,
+            }));
+          }
           if (work.comments) {
             db.recordMetric("pr.comments_pushed", task.id, {
               threads: pr.threads.length,
@@ -654,6 +673,9 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
     };
     db.insertItem(item);
     db.recordMetric("item.created", item.id, { kind: "pr", capture: "pr-sync", task_id: task.id, ready: item.ready });
+    if (ready && !shouldResolve) {
+      logTaskEvent(db, task.id, "pr", `PR ${readyStatus}`, { pr: pr.url, checks: pr.checks, threads: pr.threads.length });
+    }
     hub.broadcast("item.created", item);
     if (merged) resolveMergedTask(db, hub, task);
     return pr;
@@ -687,6 +709,9 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
     hub.broadcast("item.updated", db.getItem(existing.id));
     if (patch.ready === 1) {
       db.recordMetric("item.ready_for_review", existing.id, { task_id: task.id });
+      logTaskEvent(db, task.id, "pr", `PR ${readyStatus}`, { pr: pr.url, checks: pr.checks, threads: pr.threads.length });
+    } else if (patch.ready === 0 && existing.ready === 1) {
+      logTaskEvent(db, task.id, "pr", `PR no longer ready: ${reasons.join(", ") || "gate failing"}`, { pr: pr.url });
     }
   }
   if (merged) resolveMergedTask(db, hub, task);
@@ -735,6 +760,7 @@ function resolveMergedTask(db: Db, hub: Hub, task: Task): void {
   if (current && current.status !== "done" && current.status !== "archived") {
     db.updateTask(task.id, { status: "done" });
     db.recordMetric("task.done", task.id, { how: "pr-merged" });
+    logTaskEvent(db, task.id, "pr", "PR merged — task done, inbox items archived", { pr: current.pr_url });
     hub.broadcast("task.updated", db.getTask(task.id));
   }
 }

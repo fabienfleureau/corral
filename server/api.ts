@@ -16,6 +16,7 @@ import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { dispatchTask } from "./dispatch.ts";
+import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
@@ -242,6 +243,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     } else {
       await state.backend.send(address, text);
     }
+    // A reply is a prompt to the agent: the task's history shows what the
+    // human answered and which question it closed.
+    if (item.task_id) {
+      const answered = content !== undefined ? "answers to a question batch" : permission ? `permission: ${permission}` : oneLine(text, 110);
+      logTaskEvent(state.db, item.task_id, "prompt", `Replied: ${answered}`, promptData(
+        content !== undefined ? JSON.stringify(content) : permission || text.trim(),
+        { item_id: item.id, item_kind: item.kind, session: address },
+      ));
+    }
     state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now(), body: `${item.body}\n\n**Reply:** ${content !== undefined ? JSON.stringify(content) : permission || text.trim()}` });
     state.db.recordMetric("item.replied", item.id, { address });
     state.hub.broadcast("item.updated", state.db.getItem(item.id));
@@ -332,6 +342,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     };
     state.db.insertTask(task);
     state.db.recordMetric("task.created", task.id, { source: b.jira_key ? "jira" : "manual" });
+    logTaskEvent(state.db, task.id, "created", kind === "review" ? "Review task created" : "Task created", {
+      source: b.jira_key ? "jira" : "manual",
+      kind,
+      repo: task.repo_path || null,
+      target: task.target || null,
+      pr: task.pr_url,
+    });
     state.hub.broadcast("task.updated", task);
     json(res, 200, task);
   });
@@ -345,6 +362,14 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     state.db.updateTask(task.id, patch);
     state.hub.broadcast("task.updated", state.db.getTask(task.id));
     json(res, 200, state.db.getTask(task.id));
+  });
+
+  on("GET", "/api/tasks/:id/events", (_req, res, { params, url }) => {
+    const task = state.db.getTask(params.id);
+    if (!task) return json(res, 404, { error: "task not found" });
+    const requested = Number(url.searchParams.get("limit") ?? 0);
+    const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 2000) : 500;
+    json(res, 200, state.db.listTaskEvents(task.id, limit));
   });
 
   on("POST", "/api/tasks/:id/archive-session", async (_req, res, { params }) => {
@@ -678,6 +703,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         };
         state.db.insertTask(task);
         state.db.recordMetric("jira.imported", task.id, { key });
+        logTaskEvent(state.db, task.id, "created", `Imported from Jira ${f.jira_key}`, {
+          source: "jira",
+          key: f.jira_key,
+          jira_status: f.jira_status,
+          repo: task.repo_path || null,
+        });
         state.hub.broadcast("task.updated", task);
         out.created.push(task);
       } catch (err) {
@@ -694,6 +725,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     try {
       const used = await state.jira.markDone(task.jira_key, (body as { transition_id?: string })?.transition_id);
       state.db.recordMetric("jira.marked_done", task.id, { key: task.jira_key, transition: used.id });
+      logTaskEvent(state.db, task.id, "jira", `Marked ${task.jira_key} done (${used.name ?? used.id})`, { key: task.jira_key, transition: used.id });
       json(res, 200, { ok: true, transition: used });
     } catch (err) {
       json(res, 502, { error: String(err) });
@@ -708,6 +740,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     try {
       await state.jira.addComment(task.jira_key, text);
       state.db.recordMetric("jira.commented", task.id, { key: task.jira_key });
+      logTaskEvent(state.db, task.id, "jira", `Commented on ${task.jira_key}`, { key: task.jira_key, chars: text.length });
       json(res, 200, { ok: true });
     } catch (err) {
       json(res, 502, { error: String(err) });

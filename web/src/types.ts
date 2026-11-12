@@ -67,6 +67,27 @@ export type SessionInfo = {
   exit_code: number | null;
 };
 
+/** One entry of a task's history (see server/task-events.ts). */
+export type TaskEventKind =
+  | "created"
+  | "updated"
+  | "status"
+  | "prompt"
+  | "question"
+  | "jira"
+  | "pr"
+  | "session";
+
+export type TaskEvent = {
+  id: number;
+  task_id: string;
+  ts: number;
+  kind: TaskEventKind;
+  message: string;
+  /** JSON object with the detail behind the message, or null. */
+  data: string | null;
+};
+
 export type PullColor = "green" | "orange" | "red";
 
 export type Pull = {

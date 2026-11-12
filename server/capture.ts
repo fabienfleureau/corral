@@ -16,6 +16,7 @@ import type { Db } from "./db.ts";
 import type { JiraTransitionGateway } from "./jira-status.ts";
 import type { WorkerBackend, WorkerElicitation, WorkerEvent } from "./worker.ts";
 import { clearItemHandling, syncTaskPr } from "./pr.ts";
+import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import type { Item } from "./types.ts";
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
@@ -110,6 +111,7 @@ export class CaptureEngine {
       // Claim before sending: an uncertain delivery must never trigger duplicates.
       this.db.recordMetric("task.initial_retry", address, { task_id: task.id });
       await this.backend.send(address, prompt);
+      logTaskEvent(this.db, task.id, "prompt", "Initial prompt re-sent (the run failed to start)", promptData(prompt, { source: "retry", session: address }));
     } finally {
       this.retrying.delete(address);
     }
@@ -205,6 +207,12 @@ export class CaptureEngine {
       capture: elicitations.length > 0 ? "elicitation" : "blocked-fallback",
       task_id: taskId,
     });
+    if (taskId) {
+      logTaskEvent(this.db, taskId, "question", `Agent asked: ${oneLine(title, 110)}`, {
+        item_id: item.id,
+        capture: structured ? "elicitation" : "blocked-fallback",
+      });
+    }
     this.hub.broadcast("item.created", item);
     return item;
   }
@@ -227,6 +235,10 @@ export class CaptureEngine {
       if (task && (task.status === "dispatched" || task.status === "open")) {
         this.db.updateTask(task.id, { status: "done", exit_code: e.exit_code ?? null });
         this.db.recordMetric("task.finished", task.id, { exit_code: e.exit_code ?? null });
+        logTaskEvent(this.db, task.id, "session", "Agent session finished", {
+          exit_code: e.exit_code ?? null,
+          session: e.address,
+        });
         const updated = this.db.getTask(task.id);
         this.hub.broadcast("task.updated", updated);
         if (updated) {
@@ -276,6 +288,10 @@ export class CaptureEngine {
           : opts.body.trim();
         // A merged PR already archived the task: keep it archived.
         this.db.updateTask(task.id, task.status === "archived" ? { handoff } : { status: "done", handoff });
+        logTaskEvent(this.db, task.id, "session", `Agent reported done: ${oneLine(opts.title, 100)}`, {
+          report: opts.kind ?? "done",
+          item_kind: itemKind,
+        });
         this.hub.broadcast("task.updated", this.db.getTask(task.id));
       }
     }

@@ -18,6 +18,7 @@
 import type { Db } from "./db.ts";
 import type { JiraTransition } from "./jira.ts";
 import type { Task } from "./types.ts";
+import { logTaskEvent } from "./task-events.ts";
 
 export type JiraStage = "to_do" | "in_progress" | "code_review" | "ready_to_merge" | "done";
 
@@ -229,6 +230,11 @@ async function applyStage(deps: JiraSyncDeps, staleTask: Task, stage: JiraStage)
       stage,
       error: result.reason.slice(0, 300),
       path,
+    });
+    logTaskEvent(deps.db, task.id, "jira", `Jira status update failed (wanted ${status})`, {
+      key: task.jira_key,
+      stage,
+      error: result.reason.slice(0, 300),
     });
   }
   return result;
