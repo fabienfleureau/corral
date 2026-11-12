@@ -22,6 +22,8 @@ export type Task = {
   jira_url: string | null;
   jira_parent_key: string | null;
   pr_url: string | null;
+  /** Resolved review command, frozen at dispatch; null when none. */
+  review: string | null;
   status: "open" | "dispatched" | "done" | "archived";
   terminal_address: string | null;
   exit_code: number | null;
@@ -119,10 +121,12 @@ export type Repo = {
 };
 
 export type Context = "professional" | "personal";
-export type Favorite = { name: string; harness: string; agent: string; model: string; reasoning: string; context: Context };
+export type Favorite = { name: string; harness: string; agent: string; model: string; reasoning: string; context: Context; review: string };
+export type Reviewer = { name: string; command: string };
 
 export type Config = {
   favorites: Favorite[];
+  reviewers: Reviewer[];
   port: number;
   host: string;
   agents: string[];

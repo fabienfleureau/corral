@@ -25,7 +25,7 @@ export function slugify(s: string, max = 40): string {
   return slug || "task";
 }
 
-export function questionConvention(cfg: Config, task: Task): string {
+export function questionConvention(cfg: Config, task: Task, reviewCommand: string | null = null): string {
   const read = (name: string, fallback: string): string => {
     const path = join(cfg.configDir, "skills", name);
     const local = join(process.cwd(), "skills", name);
@@ -43,6 +43,11 @@ export function questionConvention(cfg: Config, task: Task): string {
       read("question-report.md", "When you need the human, ask clearly and wait. Do not guess."),
       read("pr-loop.md", ""),
     ];
+  if (task.kind !== "review" && reviewCommand) {
+    // A callback replacement, not a string: review commands legitimately contain
+    // `$` sequences ($$, $&, $') that replaceAll would otherwise expand.
+    parts.push(read("pre-pr-review.md", "").replaceAll("{review_command}", () => reviewCommand));
+  }
   return parts.filter(Boolean).join("\n\n---\n\n")
     .replaceAll("{task_id}", task.id)
     .replaceAll("{corral_url}", `http://${cfg.host}:${cfg.port}`)
@@ -104,6 +109,19 @@ async function worktreeBase(repo: string, base: string | null): Promise<string |
   return commit(`origin/${branch}`);
 }
 
+/** The remote default branch *name* (for a review command's {base_branch}),
+ *  null when the repo has no origin to ask. Mirrors worktreeBase's default. */
+async function defaultBranchName(repo: string): Promise<string | null> {
+  const git = async (...args: string[]) => (await execFileAsync("git", ["-C", repo, ...args], {
+    encoding: "utf8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  })).stdout.trim();
+  const remotes = (await git("remote")).split("\n");
+  if (!remotes.includes("origin")) return null;
+  await git("fetch", "origin");
+  const remoteHead = await git("ls-remote", "--symref", "origin", "HEAD");
+  return remoteHead.match(/^ref: refs\/heads\/(.+)\s+HEAD$/m)?.[1] ?? null;
+}
+
 export interface DispatchResult {
   address: string;
   worktreePath: string;
@@ -121,6 +139,8 @@ export async function dispatchTask(
     model?: string | null;
     reasoning?: string | null;
     agent?: string | null;
+    /** Reviewer name (from cfg.reviewers); resolved to its command and frozen on the task. */
+    review?: string | null;
   } = {},
 ): Promise<DispatchResult> {
   if (!task.repo_path?.trim()) {
@@ -147,7 +167,18 @@ export async function dispatchTask(
   const taskContext = [...new Set([task.title.trim(), task.prompt.trim()].filter(Boolean))];
   if (task.jira_url) taskContext.push(`Jira: ${task.jira_url}`);
   if (review) taskContext.push(`Review this PR/MR: ${task.pr_url}`);
-  const fullPrompt = `${taskContext.join("\n\n")}\n\n---\n${questionConvention(cfg, task)}`;
+
+  // Resolve the reviewer before building the prompt: {base_branch} needs the
+  // task's pinned branch, or the remote default when the task did not pin one.
+  let reviewCommand: string | null = null;
+  if (!review && opts.review) {
+    const reviewer = (cfg.reviewers ?? []).find((r) => r.name === opts.review);
+    if (!reviewer) throw new Error(`unknown reviewer: ${opts.review}`);
+    const baseBranch = task.base_branch?.trim() || await defaultBranchName(task.repo_path);
+    reviewCommand = reviewer.command.replaceAll("{base_branch}", () => baseBranch ?? "");
+  }
+
+  const fullPrompt = `${taskContext.join("\n\n")}\n\n---\n${questionConvention(cfg, task, reviewCommand)}`;
 
   let session: WorkerSession;
   try {
@@ -197,6 +228,7 @@ export async function dispatchTask(
     branch: review ? null : branch,
     worktree_path: useWorktree && session.cwd ? session.cwd : null,
     terminal_address: session.address,
+    review: reviewCommand,
   });
   db.upsertTerminal({
     address: session.address,

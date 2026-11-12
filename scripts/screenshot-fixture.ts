@@ -6,16 +6,16 @@ import { pathToFileURL } from "node:url";
 
 /** One favorite per context, plus one more professional, to show the task form filter. */
 export const screenshotFavorites: Favorite[] = [
-  { name: "Careful review", harness: "claude", agent: "", model: "opus", reasoning: "high", context: "professional" },
-  { name: "Quick fix", harness: "codex", agent: "", model: "gpt-6.1-sol", reasoning: "low", context: "professional" },
-  { name: "Bulk Go work", harness: "opencode", agent: "", model: "opencode-go/kimi-k3.1-pro", reasoning: "", context: "professional" },
-  { name: "Side project", harness: "opencode", agent: "", model: "opencode-go/claude-haiku-5-5", reasoning: "high", context: "personal" },
+  { name: "Careful review", harness: "claude", agent: "", model: "opus", reasoning: "high", context: "professional", review: "cubic" },
+  { name: "Quick fix", harness: "codex", agent: "", model: "gpt-6.1-sol", reasoning: "low", context: "professional", review: "" },
+  { name: "Bulk Go work", harness: "opencode", agent: "", model: "opencode-go/kimi-k3.1-pro", reasoning: "", context: "professional", review: "" },
+  { name: "Side project", harness: "opencode", agent: "", model: "opencode-go/claude-haiku-5-5", reasoning: "high", context: "personal", review: "" },
 ];
 
 export function seedScreenshotData(db: Db): void {
-  const rows: Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning">[] = [
+  const rows: Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning" | "review">[] = [
     { id: "sample-open", title: "Improve search results", status: "open", target: "codex", model: "gpt-5.4", reasoning: "high" },
-    { id: "sample-running", title: "Add keyboard navigation", status: "dispatched", target: "claude", model: null, reasoning: null },
+    { id: "sample-running", title: "Add keyboard navigation", status: "dispatched", target: "claude", model: null, reasoning: null, review: "cubic review --base main --json" },
     { id: "sample-done", title: "Update project documentation", status: "done", target: "codex", model: null, reasoning: null },
   ];
   const now = Date.UTC(2025, 0, 15, 12);

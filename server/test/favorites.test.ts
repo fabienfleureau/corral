@@ -8,7 +8,7 @@ import { createHttpServer, type AppState } from "../api.ts";
 import { Db } from "../db.ts";
 
 test("favorites retain all dispatch choices and reject malformed input", () => {
-  const favorites = [{ name: "Review", harness: "codex", agent: "reviewer", model: "m", reasoning: "high", context: "personal" }];
+  const favorites = [{ name: "Review", harness: "codex", agent: "reviewer", model: "m", reasoning: "high", context: "personal", review: "" }];
   deepStrictEqual(parseFavorites(favorites), favorites);
   deepStrictEqual(parseFavorites([]), []);
   throws(() => parseFavorites([{ ...favorites[0], harness: "" }]));
@@ -17,9 +17,14 @@ test("favorites retain all dispatch choices and reject malformed input", () => {
 
 test("favorites without a context are professional and unknown contexts are rejected", () => {
   const legacy = { name: "Review", harness: "codex", agent: "", model: "", reasoning: "" };
-  deepStrictEqual(parseFavorites([legacy]), [{ ...legacy, context: "professional" }]);
+  deepStrictEqual(parseFavorites([legacy]), [{ ...legacy, context: "professional", review: "" }]);
   throws(() => parseFavorites([{ ...legacy, context: "work" }]));
   throws(() => parseFavorites([{ ...legacy, context: null }]));
+});
+
+test("favorites without a review read it as empty", () => {
+  const favorite = { name: "Review", harness: "codex", agent: "", model: "", reasoning: "", context: "personal", review: "cubic" };
+  deepStrictEqual(parseFavorites([{ ...favorite, review: undefined }]), [{ ...favorite, review: "" }]);
 });
 
 test("saving favorites keeps their context, and later settings saves do not drop it", async () => {
@@ -60,8 +65,8 @@ test("saving favorites keeps their context, and later settings saves do not drop
   try {
     equal((await put({ favorites })).status, 200);
     deepStrictEqual((await read()).favorites, [
-      { ...favorites[0], context: "personal" },
-      { ...favorites[1], context: "professional" },
+      { ...favorites[0], context: "personal", review: "" },
+      { ...favorites[1], context: "professional", review: "" },
     ]);
     // Saving other settings rewrites config.json: favorites and their contexts survive.
     equal((await put({ jira: { jql: "labels = AGENTIC_WORKFLOW" } })).status, 200);
@@ -69,7 +74,7 @@ test("saving favorites keeps their context, and later settings saves do not drop
     deepStrictEqual(storedContexts(), ["personal", "professional"]);
     // A stale client can still overwrite the list, but a context it omits reads back as professional.
     equal((await put({ favorites: [favorites[1]] })).status, 200);
-    deepStrictEqual((await read()).favorites, [{ ...favorites[1], context: "professional" }]);
+    deepStrictEqual((await read()).favorites, [{ ...favorites[1], context: "professional", review: "" }]);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));

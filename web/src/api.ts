@@ -198,7 +198,7 @@ export const api = {
   archiveTaskSession: (id: string): Promise<Task> => post<Task>(`/api/tasks/${id}/archive-session`),
   dispatchTask: (
     id: string,
-    input: { target?: string; use_worktree?: boolean; agent?: string | null; model?: string | null; reasoning?: string | null },
+    input: { target?: string; use_worktree?: boolean; agent?: string | null; model?: string | null; reasoning?: string | null; review?: string | null },
   ): Promise<DispatchResult> =>
     post<DispatchResult>(`/api/tasks/${id}/dispatch`, input),
   cleanupTask: (id: string): Promise<{ ok: boolean }> => post<{ ok: boolean }>(`/api/tasks/${id}/cleanup`),
@@ -259,7 +259,7 @@ export const api = {
   setImprovementSchedule: (intervalDays: number): Promise<ImprovementStatus> => put<ImprovementStatus>("/api/improvement", { intervalDays }),
   runImprovement: (): Promise<Item> => post<Item>("/api/improvement/run"),
   getConfig: (): Promise<Config> => get<Config>("/api/config"),
-  putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[]; models?: ModelCatalog }): Promise<{ ok: boolean }> =>
+  putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[]; reviewers?: import("./types").Reviewer[]; models?: ModelCatalog }): Promise<{ ok: boolean }> =>
     put<{ ok: boolean }>("/api/config", input),
 };
 

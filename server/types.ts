@@ -24,6 +24,8 @@ export interface Task {
   agent?: string | null;
   model?: string | null;
   reasoning?: string | null;
+  /** Resolved review command line, frozen at dispatch (a named reviewer's command). */
+  review?: string | null;
   base_branch: string | null;
   branch: string | null;
   worktree_path: string | null;
