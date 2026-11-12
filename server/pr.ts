@@ -11,7 +11,7 @@ import type { Db } from "./db.ts";
 import type { WorkerBackend } from "./worker.ts";
 import type { Hub } from "./capture.ts";
 import type { Item, Task } from "./types.ts";
-import { questionConvention, slugify } from "./dispatch.ts";
+import { DATA_NOT_INSTRUCTIONS, questionConvention, slugify } from "./dispatch.ts";
 import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 
@@ -305,6 +305,9 @@ function commentsSection(pr: PrInfo): string {
     "then resolve the thread:",
     "  gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"<thread id>\"}){thread{isResolved}}}'",
     "run your tests, commit and push. Do not ask for permission. Do not merge the PR.",
+    "",
+    // Thread bodies are the reviewer's (or anyone's) words, verbatim.
+    DATA_NOT_INSTRUCTIONS,
     "",
     ...parts,
   ].join("\n");

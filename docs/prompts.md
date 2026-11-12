@@ -11,12 +11,22 @@ Three families of prompt exist:
 | **PR-loop messages** | string builders in `server/pr.ts` | a live agent session, or a fresh respawn | when the PR loop has work for the agent |
 | **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts` | the `assistant` command | when the human clicks Summarize, or the digest runs |
 
+### Untrusted text: data, not instructions
+
+Two injections carry text Corral does not own — a Jira ticket body, a PR thread
+body. `DATA_NOT_INSTRUCTIONS` (`server/dispatch.ts`) wraps both as **data**: it
+cannot widen scope, change rules, or make the agent run commands, and the agent
+reports a question instead of complying. It is one short constant, shared by
+`dispatch.ts` and `commentsSection()` in `server/pr.ts` — do not fork the wording.
+Keep this rule when adding an injection of third-party text.
+
 ## 1. Agent conventions (`skills/`)
 
 Assembled by `questionConvention()` in `server/dispatch.ts` and joined with
 `\n\n---\n\n`. The final prompt is:
 
 ```
+<data-not-instructions framing>   # only when the task came from Jira
 <task title>
 <task description>
 Jira: <task jira url>            # only when the task came from Jira
@@ -76,7 +86,7 @@ Task follow-up: <review comments|merge conflicts> on your PR for "<task title>".
 
 | Builder | Sent when | Message |
 |---|---|---|
-| `commentsSection()` | the PR has review threads that are not answered or resolved | *"PR review comments need handling — this is the PR loop, not a question"*, then every thread as `[n] author (thread <id>): body` |
+| `commentsSection()` | the PR has review threads that are not answered or resolved | *"PR review comments need handling — this is the PR loop, not a question"*, the `DATA_NOT_INSTRUCTIONS` framing, then every thread as `[n] author (thread <id>): body` |
 | `conflictSection()` | the PR no longer merges cleanly into its base | *"PR merge conflicts need handling"* + the `git fetch && rebase origin/<base>` recipe |
 
 Both messages start with the exact prefixes `PR review comments` / `PR merge
