@@ -7,7 +7,7 @@ import type { Item, SessionInfo, Task } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
 import { ExternalLinkIcon, JiraPill, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
-import { inProgressInboxItems, inProgressInboxTasks, selectedInboxItem } from "../inbox-selection";
+import { inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxItems, selectedInboxItem } from "../inbox-selection";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle, itemDisplayTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
@@ -81,7 +81,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const snoozedItems = useVisibleInboxItems(allItems, "snoozed");
   const inProgressItems = useMemo(() => inProgressInboxItems(allItems, tasks), [allItems, tasks]);
   const inProgressTasks = useMemo(() => inProgressInboxTasks(tasks), [tasks]);
-  const openItems = useMemo(() => visibleItems.filter((i) => i.status === "open"), [visibleItems]);
+  const openItems = useMemo(() => openInboxItems(visibleItems), [visibleItems]);
   const items = statusFilter === "snoozed" ? snoozedItems : statusFilter === "in-progress" ? inProgressItems : openItems;
   useEffect(() => {
     const acknowledge = () => {
@@ -221,6 +221,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const linkedTask = selected?.task_id ? tasksById[selected.task_id] ?? null : null;
   const selectedTask = selectedTaskId ? inProgressTasks.find((task) => task.id === selectedTaskId) ?? null : null;
   const prUrl = selected ? itemPrUrl(selected.body, linkedTask?.pr_url) : null;
+  /** An item the agent is handling reads as "in progress", not "open". */
+  const selectedInProgress = selected !== null && isHandlingItem(selected) && selected.status === "open";
   const now = Date.now();
 
   return (
@@ -294,7 +296,9 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                       <span>·</span>
                       <span>{item.structured ? "structured" : "auto-captured"}</span>
                       {item.kind === "pr" && item.status === "open" ? (
-                        item.ready === 1 ? (
+                        item.handling === 1 ? (
+                          <span className="badge badge-mine">agent working</span>
+                        ) : item.ready === 1 ? (
                           <span className="badge badge-ready">{item.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
                         ) : (
                           <span className="badge badge-wait">needs work</span>
@@ -379,13 +383,17 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   {selected.structured ? "structured report" : "auto-captured"}
                 </span>
                 {selected.kind === "pr" && selected.status === "open" ? (
-                  selected.ready === 1 ? (
+                  selected.handling === 1 ? (
+                    <span className="badge badge-mine">agent working — {selected.summary || "PR loop"}</span>
+                  ) : selected.ready === 1 ? (
                     <span className="badge badge-ready">{selected.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
                   ) : (
                     <span className="badge badge-wait">needs work — {selected.summary || "see body"}</span>
                   )
                 ) : null}
-                <span className={`chip chip-static status-${selected.status}`}>{selected.status}</span>
+                <span className={`chip chip-static status-${selectedInProgress ? "dispatched" : selected.status}`}>
+                  {selectedInProgress ? "in progress" : selected.status}
+                </span>
                 {linkedTask ? (
                   <span className="meta-task">
                     Task: <strong>{linkedTask.title || linkedTask.prompt.trim().split("\n")[0].slice(0, 120) || "Untitled task"}</strong>

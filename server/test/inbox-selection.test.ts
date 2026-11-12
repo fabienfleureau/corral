@@ -45,3 +45,21 @@ test("in-progress inbox includes dispatched tasks without any inbox item", async
   const tasks = [{ id: "working", status: "dispatched" }, { id: "new", status: "open" }, { id: "finished", status: "done" }] as import("../../web/src/types.ts").Task[];
   assert.deepEqual(inProgressInboxTasks(tasks).map((task) => task.id), ["working"]);
 });
+
+test("a PR item the agent is handling leaves the open inbox for in progress", async () => {
+  const { openInboxItems, inProgressInboxItems, selectedInboxItem } = await import("../../web/src/inbox-selection.ts");
+  const handling = { id: "handling", kind: "pr", status: "open", handling: 1, ready: 0, task_id: "done-task" } as Item;
+  const waiting = { id: "waiting", kind: "pr", status: "open", handling: 0, ready: 0, task_id: "done-task" } as Item;
+  // The task already reported done: only the handling flag keeps the item around.
+  const tasks = [{ id: "done-task", status: "done" }] as import("../../web/src/types.ts").Task[];
+  assert.deepEqual(openInboxItems([handling, waiting]).map((i) => i.id), ["waiting"]);
+  assert.deepEqual(inProgressInboxItems([handling, waiting], tasks).map((i) => i.id), ["handling"]);
+  assert.equal(selectedInboxItem(handling, [handling], "in-progress"), handling);
+  assert.equal(selectedInboxItem(handling, [handling], "open"), null);
+});
+
+test("an archived item leaves in progress even while it is handled", async () => {
+  const { inProgressInboxItems } = await import("../../web/src/inbox-selection.ts");
+  const archived = { id: "archived", kind: "pr", status: "archived", handling: 1, ready: 0, task_id: null } as Item;
+  assert.deepEqual(inProgressInboxItems([archived], []), []);
+});

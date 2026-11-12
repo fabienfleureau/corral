@@ -6,7 +6,7 @@ import type { Item } from "../../web/src/types.ts";
 const item = (overrides: Partial<Item> = {}): Item => ({
   id: "one", kind: "question", status: "open", title: "Question", summary: "", body: "Help",
   context: "", options: null, elicitation: null, source_ref: null, task_id: null, structured: 1,
-  ready: 1, created_ms: 1, updated_ms: 1, resolved_ms: null, snooze_until_ms: null, ...overrides,
+  ready: 1, handling: 0, created_ms: 1, updated_ms: 1, resolved_ms: null, snooze_until_ms: null, ...overrides,
 });
 
 test("notifies again when a question is reopened, but not for repeated updates", () => {

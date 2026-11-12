@@ -50,6 +50,8 @@ type Item = {
   source_ref: string | null;   // herdr terminal address for question items
   task_id: string | null;
   structured: number;          // 1 = agent reported it, 0 = blocked-status fallback
+  ready: number;               // pr items: 1 = review gate passes (threads resolved, checks green)
+  handling: number;            // pr items: 1 = the agent has the PR work in flight
   created_ms: number; updated_ms: number;
   resolved_ms: number | null; snooze_until_ms: number | null;
 };

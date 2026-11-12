@@ -445,6 +445,23 @@ function patchMeta(db: Db, taskId: string, patch: PrMeta): void {
   db.updateTask(taskId, { pr_meta: JSON.stringify(meta) });
 }
 
+/** The agent has this task's PR item in flight: the item waits under
+ *  "In progress" instead of asking the human for something nobody can act on
+ *  yet. Cleared when the run ends or the gate passes. */
+function setItemHandling(db: Db, hub: Hub, taskId: string, handling: boolean): void {
+  const item = db.listItems({ kind: "pr" }).find((i) => i.task_id === taskId && i.status !== "archived");
+  const value = handling ? 1 : 0;
+  if (!item || (item.handling ?? 0) === value) return;
+  db.updateItem(item.id, { handling: value });
+  hub.broadcast("item.updated", db.getItem(item.id));
+}
+
+/** The run ended (finished, idle, or reported done): the PR item goes back to
+ *  the open inbox while the gate still fails. */
+export function clearItemHandling(db: Db, hub: Hub, taskId: string): void {
+  setItemHandling(db, hub, taskId, false);
+}
+
 /** Tasks with a delivery underway: blocks a concurrent sync (periodic,
  *  /check-pr, finish event) from respawning a second agent. */
 const delivering = new Set<string>();
@@ -518,6 +535,8 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
       void deliverWork(db, opts.cfg, opts.backend, task, pr, work)
         .then((address) => {
           if (!address) return; // not delivered: retry on the next sync
+          // The agent owns the item now: it shows under "In progress".
+          setItemHandling(db, hub, task.id, true);
           patchMeta(db, task.id, {
             ...(work.comments ? { pushed: sig } : {}),
             ...(work.conflict ? { conflict: true } : {}),
@@ -555,6 +574,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
       context: "",
       options: null,
       ready: shouldResolve ? 1 : ready ? 1 : 0,
+      handling: 0,
       source_ref: task.terminal_address,
       task_id: task.id,
       structured: 1,
@@ -581,6 +601,10 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   if (existing.summary !== summary) patch.summary = summary;
   const readyFlag = shouldResolve ? 1 : ready ? 1 : 0;
   if (existing.ready !== readyFlag) patch.ready = readyFlag;
+  // Keeping the work is up to the run: this only ends the handling phase when
+  // the gate passes or the PR closes (capture clears it when a run ends).
+  const handling = shouldResolve || ready ? 0 : existing.handling ?? 0;
+  if ((existing.handling ?? 0) !== handling) patch.handling = handling;
   if (shouldResolve && existing.status !== doneStatus && existing.status !== "archived") {
     patch.status = doneStatus;
     patch.resolved_ms = existing.resolved_ms ?? Date.now();

@@ -15,7 +15,7 @@ import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { JiraTransitionGateway } from "./jira-status.ts";
 import type { WorkerBackend, WorkerElicitation, WorkerEvent } from "./worker.ts";
-import { syncTaskPr } from "./pr.ts";
+import { clearItemHandling, syncTaskPr } from "./pr.ts";
 import type { Item } from "./types.ts";
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
@@ -70,6 +70,9 @@ export class CaptureEngine {
     if (!tracked && !taskId) return; // not a Corral session
     const blocked = e.status === "blocked";
     const wasBlocked = tracked?.last_status === "blocked";
+    const status = e.status ?? null;
+    // A run ended: the PR item the agent was handling goes back to the inbox.
+    const runEnded = tracked?.last_status === "working" && (status === "idle" || status === "done" || status === "error");
     this.db.upsertTerminal({
       address: e.address,
       task_id: taskId,
@@ -84,6 +87,7 @@ export class CaptureEngine {
     }
 
     if (["idle", "done", "error"].includes(e.status ?? "")) await this.retryInitialFailure(e.address, taskId);
+    if (runEnded && taskId) clearItemHandling(this.db, this.hub, taskId);
 
     if (blocked) {
       await this.ensureQuestionItem(e, taskId);
@@ -218,6 +222,8 @@ export class CaptureEngine {
     const taskId = e.task_id ?? this.db.getTerminal(e.address)?.task_id ?? null;
     if (taskId) {
       const task = this.db.getTask(taskId);
+      // The session is gone: whatever it was handling is the human's again.
+      clearItemHandling(this.db, this.hub, taskId);
       if (task && (task.status === "dispatched" || task.status === "open")) {
         this.db.updateTask(task.id, { status: "done", exit_code: e.exit_code ?? null });
         this.db.recordMetric("task.finished", task.id, { exit_code: e.exit_code ?? null });
@@ -311,6 +317,7 @@ export class CaptureEngine {
           context: context || existing.context,
           source_ref: address ?? existing.source_ref,
           ready: 0,
+          handling: 0,
           status: "open",
           resolved_ms: null,
         });
@@ -331,6 +338,7 @@ export class CaptureEngine {
       context,
       options: optionsJson,
       ready: itemKind === "pr" ? 0 : 1,
+      handling: 0,
       source_ref: address,
       task_id: taskId,
       structured: 1,
