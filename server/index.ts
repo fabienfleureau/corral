@@ -7,7 +7,7 @@ import { OmnigentBackend } from "./omnigent.ts";
 import { CaptureEngine } from "./capture.ts";
 import { JiraClient } from "./jira.ts";
 import { prCandidateTasks, syncAllPrs, syncTaskPr } from "./pr.ts";
-import { refreshPulls } from "./pulls.ts";
+import { primePullCache, refreshPulls } from "./pulls.ts";
 import { createHttpServer, type AppState } from "./api.ts";
 import { SessionFacts } from "./session-facts.ts";
 import type { ServerResponse } from "node:http";
@@ -66,10 +66,14 @@ const subscription = backend.onEvent((e) => void capture.handleEvent(e));
 // PR discovery + the PR loop: find review links, feed comments back to agents.
 setInterval(() => void syncAllPrs(db, hub, { backend, cfg, jira }, 0).catch(() => undefined), 120_000);
 
-// Pull Requests page: refresh where the human is awaited (GitHub + GitLab).
-// Best effort; each refresh broadcasts "pulls.updated" so open pages reload.
-setTimeout(() => void refreshPulls(hub).catch(() => undefined), 3_000);
-setInterval(() => void refreshPulls(hub).catch(() => undefined), 180_000);
+// Pull Requests page: where the human is awaited, plus colleagues' open PRs in
+// the repos they can push to (GitHub + GitLab). Show the last listing from disk
+// right away, then refresh in the background; each refresh broadcasts
+// "pulls.updated" so open pages reload.
+primePullCache(db);
+const pullRefresh = () => refreshPulls(hub, { repoPaths: db.listRepos().map((repo) => repo.path), db });
+setTimeout(() => void pullRefresh().catch(() => undefined), 3_000);
+setInterval(() => void pullRefresh().catch(() => undefined), 180_000);
 
 const server = createHttpServer(state);
 server.listen(cfg.port, cfg.host, () => {

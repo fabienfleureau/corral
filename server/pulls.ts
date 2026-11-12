@@ -1,12 +1,15 @@
 // Pull Requests page: open/draft PRs & MRs (GitHub + GitLab) where the human
 // is awaited — review requested, or authored by them (how agent-created PRs
-// appear). Status color per the review rule:
+// appear) — plus the open PRs/MRs of colleagues in the repos they can push to
+// (so a teammate's PR is one click from a review task). Status color per the
+// review rule:
 //   red    failing checks / changes requested
 //   orange draft, checks running, unresolved threads, or NO SIGNALS YET
 //          (a freshly created PR is orange until automated reviews pass)
 //   green  checks green, reviews passed, nothing unresolved
 
 import type { Hub } from "./capture.ts";
+import type { Db } from "./db.ts";
 import { mapLimit, runAsync } from "./exec.ts";
 import { errors } from "./errors.ts";
 
@@ -36,6 +39,12 @@ function run(cmd: string, args: string[], timeout = 20_000): Promise<string> {
 
 /** Per-PR platform calls in flight at once. */
 const CONCURRENCY = 4;
+/** Open PRs per repo taken from a colleague's repo (most recent first). */
+const PER_REPO = 5;
+/** Upper bound on colleague PRs coloured per refresh, so the page stays fast. */
+const COLLEAGUE_LIMIT = 30;
+/** Repos only change hands rarely: re-probe push access at most this often. */
+const SCOPE_TTL_MS = 6 * 60 * 60_000;
 
 function epochMs(v: unknown): number {
   const t = Date.parse(String(v ?? ""));
@@ -44,12 +53,10 @@ function epochMs(v: unknown): number {
 
 // ---- GitHub ----
 
-async function githubLogin(): Promise<string | null> {
-  try {
-    return (JSON.parse(await run("gh", ["api", "user"])) as { login?: string }).login ?? null;
-  } catch {
-    return null;
-  }
+async function githubLogin(): Promise<string> {
+  const login = (JSON.parse(await run("gh", ["api", "user"])) as { login?: string }).login;
+  if (!login) throw new Error("GitHub returned no login");
+  return login;
 }
 
 interface GhPullBrief {
@@ -113,6 +120,106 @@ export function githubRepoFromUrl(url: string): string {
   return m ? `${m[1]}/${m[2]}` : "";
 }
 
+// ---- colleague scope ----
+
+/** A repo on one of the two hosts: `owner/name` or `group/project`. */
+export interface PullScope {
+  host: "github" | "gitlab";
+  path: string;
+}
+
+/** `owner/name` (GitHub) or `group/project` (GitLab) from a git remote URL. */
+export function remoteFromUrl(url: string): PullScope | null {
+  const m = url.trim().match(/^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@/]+@)?([^/:]+)[:/](.+?)\/?$/i);
+  if (!m) return null;
+  const host = m[1].toLowerCase();
+  const segments = m[2].replace(/\/+$/, "").replace(/\.git$/i, "").split("/").filter(Boolean);
+  if (segments.length < 2) return null;
+  if (host === "github.com") return segments.length === 2 ? { host: "github", path: segments.join("/") } : null;
+  if (host.includes("gitlab")) return { host: "gitlab", path: segments.join("/") };
+  return null;
+}
+
+/** GitLab "Developer" and up can open merge requests in a project. */
+const GITLAB_DEVELOPER = 30;
+
+async function canPush(scope: PullScope): Promise<boolean> {
+  try {
+    if (scope.host === "github") {
+      return (await run("gh", ["api", `repos/${scope.path}`, "--jq", ".permissions.push"])).trim() === "true";
+    }
+    const project = JSON.parse(await run("glab", ["api", `projects/${encodeURIComponent(scope.path)}`])) as {
+      permissions?: { project_access?: { access_level?: number } | null; group_access?: { access_level?: number } | null };
+    };
+    const level = Math.max(
+      project.permissions?.project_access?.access_level ?? 0,
+      project.permissions?.group_access?.access_level ?? 0,
+    );
+    return level >= GITLAB_DEVELOPER;
+  } catch {
+    return false; // unknown access reads as "not ours"
+  }
+}
+
+let scopeCache: { at: number; key: string; scopes: PullScope[] } | null = null;
+let scopeInflight: Promise<PullScope[]> | null = null;
+
+/**
+ * Which of the human's repos they can push to — i.e. their team's repos, not
+ * the upstream projects they merely cloned. PR/MR authors in those repos are
+ * the colleagues whose work the page lists.
+ */
+export async function pushableScopes(repoPaths: string[]): Promise<PullScope[]> {
+  const key = [...repoPaths].sort().join("\n");
+  if (scopeCache && scopeCache.key === key && Date.now() - scopeCache.at < SCOPE_TTL_MS) return scopeCache.scopes;
+  if (!scopeInflight) {
+    scopeInflight = (async () => {
+      const remotes = await mapLimit(repoPaths, 8, async (path) => {
+        try {
+          return await run("git", ["-C", path, "remote", "get-url", "origin"], 5_000);
+        } catch {
+          return "";
+        }
+      });
+      const unique = new Map<string, PullScope>();
+      for (const remote of remotes) {
+        const scope = remote ? remoteFromUrl(remote) : null;
+        if (scope) unique.set(`${scope.host}:${scope.path}`, scope);
+      }
+      const checked = await mapLimit([...unique.values()], 4, async (scope) => ({ scope, ok: await canPush(scope) }));
+      const scopes = checked.filter((c) => c.ok).map((c) => c.scope);
+      scopeCache = { at: Date.now(), key, scopes };
+      return scopes;
+    })().finally(() => {
+      scopeInflight = null;
+    });
+  }
+  return scopeInflight;
+}
+
+/** Open PR URLs of a repo, most recently updated first. */
+async function githubOpenUrls(scope: PullScope): Promise<string[]> {
+  try {
+    const list = JSON.parse(
+      await run("gh", ["api", `repos/${scope.path}/pulls?state=open&per_page=${PER_REPO}&sort=updated&direction=desc`]),
+    ) as { html_url?: string }[];
+    return list.map((p) => p.html_url ?? "").filter(Boolean);
+  } catch {
+    return []; // best effort: a repo we cannot list simply contributes nothing
+  }
+}
+
+/** Open merge requests of a project, most recently updated first. */
+async function gitlabOpenMrs(scope: PullScope): Promise<GlabMR[]> {
+  try {
+    return JSON.parse(
+      await run("glab", ["api", `projects/${encodeURIComponent(scope.path)}/merge_requests?state=opened&per_page=${PER_REPO}&order_by=updated_at&sort=desc`]),
+    ) as GlabMR[];
+  } catch {
+    return [];
+  }
+}
+
 /** Unresolved, unanswered threads; null when the query fails. */
 async function githubUnresolvedThreads(url: string): Promise<number | null> {
   // https://github.com/owner/repo/pull/123
@@ -150,7 +257,7 @@ async function searchUrls(args: string[]): Promise<string[]> {
   }
 }
 
-async function githubPull(url: string, login: string): Promise<Pull | null> {
+async function githubPull(url: string, login: string, awaitingMe: boolean): Promise<Pull | null> {
   try {
     const d = JSON.parse(
       await run("gh", [
@@ -179,7 +286,7 @@ async function githubPull(url: string, login: string): Promise<Pull | null> {
       state: d.isDraft ? "draft" : d.state.toLowerCase(),
       author,
       isMine: author === login,
-      awaitingMe: true, // discovered via review-requested or author
+      awaitingMe,
       color,
       reason,
       updated_ms: epochMs(d.updatedAt),
@@ -189,13 +296,23 @@ async function githubPull(url: string, login: string): Promise<Pull | null> {
   }
 }
 
-async function listGitHub(): Promise<Pull[]> {
+async function listGitHub(scopes: PullScope[]): Promise<Pull[]> {
   const login = await githubLogin();
-  if (!login) return [];
+  // Where the human is awaited: their review requests and their own PRs.
   const found = await Promise.all([searchUrls([`--review-requested=${login}`]), searchUrls([`--author=${login}`])]);
-  const urls = [...new Set(found.flat())];
-  const pulls = await mapLimit(urls, CONCURRENCY, (url) => githubPull(url, login));
-  return pulls.filter((p): p is Pull => p !== null);
+  const awaiting = [...new Set(found.flat())];
+  const known = new Set(awaiting);
+  // Then colleagues: open PRs in the repos they can push to.
+  const repos = scopes.filter((scope) => scope.host === "github");
+  const colleagueUrls = (await mapLimit(repos, CONCURRENCY, githubOpenUrls))
+    .flat()
+    .filter((url, index, all) => !known.has(url) && all.indexOf(url) === index)
+    .slice(0, COLLEAGUE_LIMIT);
+  const [mine, others] = await Promise.all([
+    mapLimit(awaiting, CONCURRENCY, (url) => githubPull(url, login, true)),
+    mapLimit(colleagueUrls, CONCURRENCY, (url) => githubPull(url, login, false)),
+  ]);
+  return [...mine, ...others].filter((p): p is Pull => p !== null);
 }
 
 // ---- GitLab ----
@@ -221,7 +338,7 @@ interface GlabMR {
   updated_at: string;
 }
 
-async function gitlabPull(mr: GlabMR, login: string): Promise<Pull> {
+async function gitlabPull(mr: GlabMR, login: string, awaitingMe: boolean): Promise<Pull> {
   const draft = Boolean(mr.draft ?? mr.work_in_progress);
   const base = `projects/${mr.project_id}/merge_requests/${mr.iid}`;
   // The list endpoint carries no pipeline and no approvals: fetch both.
@@ -255,25 +372,30 @@ async function gitlabPull(mr: GlabMR, login: string): Promise<Pull> {
     state: draft ? "draft" : mr.state.toLowerCase() === "opened" ? "open" : mr.state.toLowerCase(),
     author,
     isMine: author === login,
-    awaitingMe: true,
+    awaitingMe,
     color,
     reason: pipeline ? reason : reason === "reviewed, no checks configured" ? "no pipeline yet" : reason,
     updated_ms: epochMs(mr.updated_at),
   };
 }
 
-async function listGitLab(): Promise<Pull[]> {
+async function listGitLab(scopes: PullScope[]): Promise<Pull[]> {
   const login = await gitlabLogin();
   if (!login) return [];
-  const seen = new Map<string, GlabMR>();
+  const seen = new Map<string, { mr: GlabMR; awaitingMe: boolean }>();
   const lists = await Promise.all(
     [
       `merge_requests?scope=all&state=opened&author_username=${login}&per_page=50`,
       `merge_requests?scope=all&state=opened&reviewer_username=${login}&per_page=50`,
     ].map((q) => run("glab", ["api", q]).then((s) => JSON.parse(s) as GlabMR[])),
   );
-  for (const mr of lists.flat()) seen.set(mr.web_url, mr);
-  return mapLimit([...seen.values()], CONCURRENCY, (mr) => gitlabPull(mr, login));
+  for (const mr of lists.flat()) seen.set(mr.web_url, { mr, awaitingMe: true });
+  // Colleagues: open MRs of the projects the human can push to, capped.
+  const colleague = (
+    await mapLimit(scopes.filter((scope) => scope.host === "gitlab"), CONCURRENCY, gitlabOpenMrs)
+  ).flat().filter((mr) => !seen.has(mr.web_url)).slice(0, COLLEAGUE_LIMIT);
+  for (const mr of colleague) seen.set(mr.web_url, { mr, awaitingMe: false });
+  return mapLimit([...seen.values()], CONCURRENCY, ({ mr, awaitingMe }) => gitlabPull(mr, login, awaitingMe));
 }
 
 // ---- cache ----
@@ -282,28 +404,70 @@ let cache: Pull[] = [];
 let lastMs = 0;
 let inflight: Promise<Pull[]> | null = null;
 
+export interface PullRefresh {
+  /** Local repo paths Corral knows: where colleagues' PRs are looked for. */
+  repoPaths?: string[];
+  /** Storage for the last listing, so a restart does not show an empty page. */
+  db?: Db;
+}
+
+/** Load the last listing saved before the previous shutdown. */
+export function primePullCache(db: Db): void {
+  const row = db.raw.prepare("SELECT fetched_ms, pulls FROM pull_snapshot WHERE id = 1").get() as
+    | { fetched_ms: number; pulls: string }
+    | undefined;
+  if (!row) return;
+  try {
+    const saved = JSON.parse(row.pulls) as Pull[];
+    if (!Array.isArray(saved) || saved.length === 0) return;
+    cache = saved;
+    lastMs = row.fetched_ms;
+  } catch {
+    /* a snapshot we cannot read is not worth a crash */
+  }
+}
+
+function savePullCache(db: Db, pulls: Pull[], fetchedMs: number): void {
+  try {
+    db.raw
+      .prepare(
+        "INSERT INTO pull_snapshot (id, fetched_ms, pulls) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET fetched_ms=excluded.fetched_ms, pulls=excluded.pulls",
+      )
+      .run(fetchedMs, JSON.stringify(pulls));
+  } catch {
+    /* the page still works from memory */
+  }
+}
+
 /** Refresh from both platforms (single-flight) and tell open pages. */
-export function refreshPulls(hub?: Hub): Promise<Pull[]> {
-  inflight ??= doRefresh(hub).finally(() => {
+export function refreshPulls(hub?: Hub, opts: PullRefresh = {}): Promise<Pull[]> {
+  inflight ??= doRefresh(hub, opts).finally(() => {
     inflight = null;
   });
   return inflight;
 }
 
-async function doRefresh(hub?: Hub): Promise<Pull[]> {
+async function doRefresh(hub: Hub | undefined, opts: PullRefresh): Promise<Pull[]> {
+  const scopePaths = opts.repoPaths ?? [];
+  const scopes = scopePaths.length > 0 ? await pushableScopes(scopePaths) : [];
   const [gh, gl] = await Promise.all([
-    listGitHub(),
-    listGitLab().then((pulls) => { errors.clear("GitLab sync"); return pulls; }).catch((err: unknown) => {
+    // A failing platform keeps its last listing rather than emptying the page.
+    listGitHub(scopes).then((pulls) => { errors.clear("GitHub sync"); return pulls; }).catch((err: unknown) => {
+      errors.fail("GitHub sync", err);
+      return cache.filter((pull) => pull.host === "github");
+    }),
+    listGitLab(scopes).then((pulls) => { errors.clear("GitLab sync"); return pulls; }).catch((err: unknown) => {
       errors.fail("GitLab sync", err);
       return cache.filter((pull) => pull.host === "gitlab");
     }),
   ]);
   const pulls = [...gh, ...gl];
-  // Awaiting-my-review first, then color severity, then recency.
+  // What awaits the human first, then color severity, then recency.
   const rank: Record<PullColor, number> = { red: 0, orange: 1, green: 2 };
-  pulls.sort((a, b) => rank[a.color] - rank[b.color] || b.updated_ms - a.updated_ms);
+  pulls.sort((a, b) => Number(b.awaitingMe) - Number(a.awaitingMe) || rank[a.color] - rank[b.color] || b.updated_ms - a.updated_ms);
   cache = pulls;
   lastMs = Date.now();
+  if (opts.db) savePullCache(opts.db, cache, lastMs);
   hub?.broadcast("pulls.updated", { fetched_ms: lastMs });
   return cache;
 }

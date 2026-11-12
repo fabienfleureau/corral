@@ -1505,6 +1505,13 @@ select:focus {
   font-size: 0.9em;
 }
 
+/* Review a colleague's PR from its row: stays put vertically, does not shrink. */
+.pull-review {
+  align-self: center;
+  flex-shrink: 0;
+  text-decoration: none;
+}
+
 .dot {
   width: 10px;
   height: 10px;

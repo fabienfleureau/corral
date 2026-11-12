@@ -1,6 +1,7 @@
 import { Db } from "../server/db.ts";
 import type { Favorite } from "../server/favorites.ts";
 import { prItemBody, type PrInfo } from "../server/pr.ts";
+import type { Pull } from "../server/pulls.ts";
 import type { Item, Task } from "../server/types.ts";
 import type { TaskEvent } from "../server/task-events.ts";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -35,6 +36,47 @@ export function seedScreenshotData(db: Db): void {
   seedInboxItems(db, now);
   seedBenchmarks(db);
   seedTaskHistory(db, now);
+  seedPulls(db, now);
+}
+
+/** The Pull Requests listing: what awaits the human (their own PRs, a requested
+ *  review) plus colleagues' open PRs in the repos they can push to. */
+export function seedPulls(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
+  const minute = 60_000;
+  const pulls: Pull[] = [
+    {
+      id: "https://github.com/example/project/pull/312", host: "github", number: 312, repo: "example/project",
+      title: "feat(cli): add a --json flag to task history", author: "fabienf", isMine: true, awaitingMe: true,
+      state: "open", url: "https://github.com/example/project/pull/312", color: "orange",
+      reason: "checks running", updated_ms: now - 8 * minute,
+    },
+    {
+      id: "https://github.com/example/project/pull/289", host: "github", number: 289, repo: "example/project",
+      title: "fix(auth): refresh expired session tokens", author: "camille", isMine: false, awaitingMe: true,
+      state: "open", url: "https://github.com/example/project/pull/289", color: "red",
+      reason: "1 failing check", updated_ms: now - 24 * minute,
+    },
+    {
+      id: "https://github.com/example/project/pull/303", host: "github", number: 303, repo: "example/project",
+      title: "refactor(inbox): split the item pane into components", author: "thomas", isMine: false, awaitingMe: false,
+      state: "open", url: "https://github.com/example/project/pull/303", color: "green",
+      reason: "checks green, reviewed", updated_ms: now - 95 * minute,
+    },
+    {
+      id: "https://gitlab.com/example/platform/-/merge_requests/31", host: "gitlab", number: 31, repo: "example/platform",
+      title: "Draft: stream usage events instead of polling", author: "lea", isMine: false, awaitingMe: false,
+      state: "draft", url: "https://gitlab.com/example/platform/-/merge_requests/31", color: "orange",
+      reason: "draft", updated_ms: now - 3 * 60 * minute,
+    },
+    {
+      id: "https://gitlab.com/example/platform/-/merge_requests/28", host: "gitlab", number: 28, repo: "example/platform",
+      title: "chore(deps): bump the worker base image", author: "yuki", isMine: false, awaitingMe: false,
+      state: "open", url: "https://gitlab.com/example/platform/-/merge_requests/28", color: "orange",
+      reason: "2 unresolved review comments", updated_ms: now - 5 * 60 * minute,
+    },
+  ];
+  db.raw.prepare("INSERT INTO pull_snapshot (id, fetched_ms, pulls) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET fetched_ms=excluded.fetched_ms, pulls=excluded.pulls")
+    .run(now, JSON.stringify(pulls));
 }
 
 /** History for the tasks the inbox screenshots open: the dispatch timeline of

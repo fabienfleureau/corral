@@ -14,7 +14,8 @@ import { errText, formatTs, isPrUrl, prLabel, REVIEW_HARNESS, timeAgo } from "..
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 import { batchImportItems } from "../jira-import";
 import type { ImportSettings } from "../jira-import";
-import { promptFromHash } from "../selection-task";
+import { taskPrefillFromHash } from "../selection-task";
+import type { TaskPrefill } from "../selection-task";
 
 export function TasksPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -35,20 +36,17 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [modelFacts, setModelFacts] = useState<ModelCatalog>({});
   const [providerModels, setProviderModels] = useState<Record<string, ModelAvailability>>({});
   const [reviewers, setReviewers] = useState<Reviewer[]>([]);
-  /** Text selected elsewhere (the inbox) and handed over as a prompt prefill. */
-  const [prefill, setPrefill] = useState<{ text: string } | null>(() => {
-    const text = promptFromHash(window.location.hash);
-    return text ? { text } : null;
-  });
+  /** Something picked elsewhere (an inbox selection, a PR from the Pulls page). */
+  const [prefill, setPrefill] = useState<TaskPrefill | null>(() => taskPrefillFromHash(window.location.hash));
   const clearPrefill = useMemo(() => () => setPrefill(null), []);
 
-  // A selection deep link (#/tasks?prompt=…) becomes form state, then leaves the
-  // URL so a reload or a shared link does not resurrect a stale prompt.
+  // A deep link (#/tasks?prompt=… or #/tasks?review=…) becomes form state, then
+  // leaves the URL so a reload or a shared link does not resurrect a stale one.
   useEffect(() => {
     const read = () => {
-      const text = promptFromHash(window.location.hash);
-      if (!text) return;
-      setPrefill({ text });
+      const next = taskPrefillFromHash(window.location.hash);
+      if (!next) return;
+      setPrefill(next);
       history.replaceState(null, "", "#/tasks");
     };
     read();
@@ -637,7 +635,7 @@ function copyWithExecCommand(text: string): boolean {
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
-function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, reviewers, prefill, onPrefillHandled, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; reviewers: Reviewer[]; prefill: { text: string } | null; onPrefillHandled: () => void; onDone: () => void }) {
+function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, reviewers, prefill, onPrefillHandled, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; reviewers: Reviewer[]; prefill: TaskPrefill | null; onPrefillHandled: () => void; onDone: () => void }) {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   useEffect(() => { api.getConfig().then((cfg) => setFavorites(cfg.favorites ?? [])).catch(() => undefined); }, []);
   const [kind, setKind] = useState<"code" | "review">("code");
@@ -653,16 +651,28 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const [reviewName, setReviewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [prefilled, setPrefilled] = useState(prefill !== null);
+  /** What the deep link that filled the form was: a selection or a PR to review. */
+  const [prefilled, setPrefilled] = useState<"selection" | "review" | null>(() => (prefill ? (prefill.prUrl ? "review" : "selection") : null));
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const prUrlRef = useRef<HTMLInputElement | null>(null);
 
-  // A passage selected elsewhere becomes the prompt, focused and ready to edit.
+  // Picked elsewhere: a passage becomes the prompt, a PR/MR becomes a review.
   useEffect(() => {
     if (!prefill) return;
-    setKind("code");
-    setPrompt(prefill.text);
-    setPrefilled(true);
     onPrefillHandled();
+    if (prefill.prUrl) {
+      setKind("review");
+      setPrUrl(prefill.prUrl);
+      setPrefilled("review");
+      const frame = requestAnimationFrame(() => {
+        prUrlRef.current?.scrollIntoView({ block: "center" });
+        prUrlRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+    setKind("code");
+    setPrompt(prefill.text ?? "");
+    setPrefilled("selection");
     const frame = requestAnimationFrame(() => {
       promptRef.current?.scrollIntoView({ block: "center" });
       promptRef.current?.focus();
@@ -676,7 +686,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
     setRepoPath("");
     setBaseBranch("");
     setError(null);
-    setPrefilled(false);
+    setPrefilled(null);
   };
 
   const selectedRepo = repoTouched ? repoChoice : (repos[0]?.path ?? "");
@@ -728,7 +738,9 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
       <h2 className="panel-title">New task</h2>
       {prefilled ? (
         <p className="inline-ok" role="status">
-          Prompt prefilled from your selection — edit it, then create or dispatch.
+          {prefilled === "review"
+            ? "PR/MR prefilled from the Pull Requests page — check the harness, then create or dispatch."
+            : "Prompt prefilled from your selection — edit it, then create or dispatch."}
         </p>
       ) : null}
       <div className="seg" role="radiogroup" aria-label="Task type">
@@ -739,7 +751,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
         <>
           <label className="field">
             <span>PR/MR URL</span>
-            <input value={prUrl} onChange={(e) => setPrUrl(e.target.value)} placeholder="https://gitlab.com/group/project/-/merge_requests/123" />
+            <input ref={prUrlRef} value={prUrl} onChange={(e) => setPrUrl(e.target.value)} placeholder="https://gitlab.com/group/project/-/merge_requests/123" />
           </label>
           {prUrl.trim() && !prUrlValid ? <div className="inline-error">Paste a GitHub pull request or GitLab merge request URL.</div> : null}
           <p className="muted form-hint">The agent reviews with the fabien-reviewer skill and posts comments as drafts. Nothing is published until you approve the list in the inbox. No branch, no code changes.</p>
