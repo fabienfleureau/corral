@@ -17,7 +17,7 @@ import { summarizeText, llmComplete } from "./llm.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { dispatchTask } from "./dispatch.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
-import { startSyncAllPrs, syncTaskPr } from "./pr.ts";
+import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
 import { cachedPulls, refreshPulls } from "./pulls.ts";
 import type { Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
@@ -421,14 +421,25 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
   });
 
-  on("POST", "/api/tasks/:id/check-pr", async (req, res, { params }) => {
+  // Re-check one task's PR/MR now. `force: true` (inbox "force refresh") also
+  // re-hands review comments and merge conflicts the loop already pushed, and
+  // waits for the hand-off so the caller can report what it did.
+  on("POST", "/api/tasks/:id/check-pr", async (req, res, { params, body }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
     if (task.kind === "review") return json(res, 400, { error: "review tasks have no PR of their own" });
     if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
+    const force = (body as { force?: unknown } | undefined)?.force === true;
+    const report: { delivered: PrDelivery | null } = { delivered: null };
     try {
-      const pr = await syncTaskPr(state.db, state.hub, task, { backend: state.backend, cfg: state.cfg, jira: state.jira ?? null });
-      json(res, 200, { pr, task: state.db.getTask(task.id) });
+      const pr = await syncTaskPr(state.db, state.hub, task, {
+        backend: state.backend,
+        cfg: state.cfg,
+        jira: state.jira ?? null,
+        force,
+        onDelivered: (delivery) => { report.delivered = delivery; },
+      });
+      json(res, 200, { pr, task: state.db.getTask(task.id), delivered: report.delivered });
     } catch (err) {
       json(res, 500, { error: String(err) });
     }

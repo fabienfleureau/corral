@@ -332,6 +332,12 @@ export interface PrWork {
   conflict: boolean;
 }
 
+/** Work handed to the agent by a sync (reported by a forced refresh). */
+export interface PrDelivery extends PrWork {
+  /** Session the work went to, or null when the hand-off failed. */
+  address: string | null;
+}
+
 function workMessage(pr: PrInfo, task: Task, work: PrWork): string {
   const sections: string[] = [];
   if (work.conflict) sections.push(conflictSection(pr, task));
@@ -475,6 +481,12 @@ export interface SyncOptions {
   jira?: JiraTransitionGateway | null;
   /** Injected for tests. */
   finder?: (repoPath: string, branch: string) => PrInfo | null | Promise<PrInfo | null>;
+  /** A human asked for this check (inbox "force refresh"): re-hand the PR's
+   *  review comments and merge conflicts even when the loop already pushed
+   *  them, and wait for the hand-off so the caller can report it. */
+  force?: boolean;
+  /** Called when the sync handed work to the agent. */
+  onDelivered?: (delivery: PrDelivery) => void;
 }
 
 /**
@@ -527,13 +539,16 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   if (!shouldResolve && opts.backend && opts.cfg && !delivering.has(task.id)) {
     const sig = threadSignature(pr);
     const work: PrWork = {
-      comments: pr.threads.length > 0 && meta.pushed !== sig,
-      conflict: conflicting && !meta.conflict,
+      // A forced refresh re-hands work the loop already pushed: the human asked
+      // because the last hand-off did not land (failed run, unresolved thread).
+      comments: pr.threads.length > 0 && (opts.force === true || meta.pushed !== sig),
+      conflict: conflicting && (opts.force === true || !meta.conflict),
     };
     if (work.comments || work.conflict) {
       delivering.add(task.id);
-      void deliverWork(db, opts.cfg, opts.backend, task, pr, work)
+      const delivery = deliverWork(db, opts.cfg, opts.backend, task, pr, work)
         .then((address) => {
+          opts.onDelivered?.({ address, comments: work.comments, conflict: work.conflict });
           if (!address) return; // not delivered: retry on the next sync
           // The agent owns the item now: it shows under "In progress".
           setItemHandling(db, hub, task.id, true);
@@ -553,6 +568,10 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
         })
         .catch(() => undefined)
         .finally(() => delivering.delete(task.id));
+      // A forced refresh is an explicit human action: answer once the hand-off
+      // happened (or failed) instead of leaving the inbox guessing.
+      if (opts.force) await delivery;
+      else void delivery;
     }
   }
 
