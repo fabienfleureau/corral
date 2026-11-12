@@ -8,6 +8,7 @@ import { createNotificationTracker, sendDesktopNotification } from "./notificati
 import type { Item } from "./types";
 import { useVisibleInboxItems } from "./use-visible-inbox-items";
 import { Spinner } from "./ui";
+import { SelectionToTask } from "./SelectionToTask";
 import { openInboxItems } from "./inbox-selection";
 import { rememberInboxItems, unseenInboxItems } from "./inbox-seen";
 import { InboxPage } from "./pages/Inbox";
@@ -224,6 +225,7 @@ export function App() {
         {tab === "settings" ? <SettingsPage /> : null}
         {tab === "errors" ? <section><h1>Error center</h1><p className="muted">Current background synchronization errors. Errors clear after a successful refresh.</p>{errors.length === 0 ? <p>No current errors.</p> : errors.map((error) => <div className="inline-error" key={error.source}><strong>{error.source}</strong><p>{error.message}</p><small>{new Date(error.updated_ms).toLocaleString()}</small></div>)}</section> : null}
       </main>
+      <SelectionToTask />
     </div>
   );
 }

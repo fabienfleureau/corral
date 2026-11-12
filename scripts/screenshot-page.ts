@@ -2,15 +2,17 @@
 // Protocol. `chrome --screenshot` fires as soon as the page has loaded, which
 // races pages that fetch after mount (benchmarks waits for the harness
 // catalog), so this waits for an optional settle expression instead.
+// An optional prepare expression puts the page into the state to capture
+// (selecting text, opening a panel) before that wait starts.
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const [chrome, url, output, settleExpression = "true", settleTimeoutMs = "10000"] = process.argv.slice(2);
+const [chrome, url, output, settleExpression = "true", settleTimeoutMs = "10000", prepareExpression = ""] = process.argv.slice(2);
 if (!chrome || !url || !output) {
-  console.error("Usage: screenshot-page.ts <chrome> <url> <output.png> [settle-expression] [timeout-ms]");
+  console.error("Usage: screenshot-page.ts <chrome> <url> <output.png> [settle-expression] [timeout-ms] [prepare-expression]");
   process.exit(2);
 }
 
@@ -82,6 +84,10 @@ try {
   await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send("Page.navigate", { url }, sessionId);
   await waitForEvent("Page.loadEventFired", sessionId, Number(settleTimeoutMs));
+  // Put the page in the state to capture before waiting for it to settle.
+  if (prepareExpression.trim()) {
+    await send("Runtime.evaluate", { expression: prepareExpression, awaitPromise: true, returnByValue: true }, sessionId);
+  }
   // Let post-mount fetches land; settleExpression decides when the page is done.
   const deadline = Date.now() + Number(settleTimeoutMs);
   await new Promise((r) => setTimeout(r, 150));
