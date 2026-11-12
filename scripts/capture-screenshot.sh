@@ -70,7 +70,10 @@ case "$route" in
   *) settle="true" ;;
 esac
 settle=${CORRAL_FIXTURE_SETTLE:-$settle}
+# An optional prepare expression runs before that wait: it puts the page into
+# the state to capture when a plain navigation cannot (a text selection).
+prepare=${CORRAL_FIXTURE_PREPARE:-}
 node "$fixture_root/scripts/screenshot-page.ts" "$chrome" \
-  "http://127.0.0.1:$port/?token=screenshot-fixture#$route" "$output" "$settle"
+  "http://127.0.0.1:$port/?token=screenshot-fixture#$route" "$output" "$settle" 10000 "$prepare"
 test -s "$output"
 echo "Saved $output"

@@ -69,6 +69,19 @@ CORRAL_FIXTURE_HARNESSES=1 scripts/capture-screenshot.sh "$PWD" "$shot_dir/after
 Captures go through `scripts/screenshot-page.ts` (Chrome DevTools Protocol), which
 waits for the page to settle instead of firing at load.
 
+A state a navigation cannot produce — a text selection, an open panel — needs a
+prepare expression, which runs before that wait:
+
+```sh
+CORRAL_FIXTURE_SETTLE="Boolean(document.querySelector('.selection-task'))" \
+CORRAL_FIXTURE_PREPARE="$(cat select-first-paragraph.js)" \
+  scripts/capture-screenshot.sh "$PWD" "$shot_dir/after.png" /inbox
+```
+
+The prepare expression is evaluated in the page; an async IIFE can poll for
+fixture data that renders after mount. Capture the same route and viewport in
+the base checkout (no prepare) for the before image.
+
 Replace `origin/main` with the PR base and `/tasks` with the same hash route for
 both captures. Set `CHROME` to the Chrome/Chromium executable if it is not at
 its default macOS location. The capture uses 1440×1000 pixels, a fresh profile,
