@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, modelChoices, reasoningChoices } from "../task-page";
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
+import { TaskHistoryButton } from "../TaskHistory";
 import type { DispatchResult, NewTaskInput } from "../api";
 import type { AgentQuota, Context, Favorite, JiraSearchResult, ModelAvailability, ModelCatalog, Repo, Reviewer, Task } from "../types";
 import { modelFactsReport, retentionLabel } from "../model-indicators";
@@ -151,7 +152,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} version={eventVersion} refresh={refresh} />
             ))}
           </div>
         ) : null}
@@ -218,6 +219,7 @@ function TaskRow({
   modelFacts,
   providerModels,
   reviewers,
+  version,
   refresh,
 }: {
   task: Task;
@@ -229,6 +231,8 @@ function TaskRow({
   modelFacts: ModelCatalog;
   providerModels: Record<string, ModelAvailability>;
   reviewers: Reviewer[];
+  /** SSE-driven counter: an open history refetches when the task moves. */
+  version: number;
   refresh: () => void;
 }) {
   const [showDispatch, setShowDispatch] = useState(task.status === "open" || (task.status === "dispatched" && !task.terminal_address));
@@ -382,6 +386,7 @@ function TaskRow({
               if (result.url) window.open(result.url, "_blank", "noopener");
             })} disabled={busy !== null}>Open session</button>
           ) : null}
+          <TaskHistoryButton taskId={task.id} title={task.title || firstLine(task.prompt) || "Untitled task"} version={version} />
           <span className="time muted" title={formatTs(task.updated_ms)}>
             {timeAgo(task.updated_ms)}
           </span>

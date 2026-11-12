@@ -12,6 +12,7 @@ import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle, itemDisplayTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
 import { QuestionReply } from "../QuestionReply";
+import { TaskHistoryButton } from "../TaskHistory";
 
 type StatusFilter = "open" | "snoozed" | "in-progress";
 
@@ -404,6 +405,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     {openBusy ? "Opening…" : "View task"}
                   </button>
                 ) : <span className="muted">No session available.</span>}
+                <TaskHistoryButton taskId={selectedTask.id} title={selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"} version={eventVersion} />
                 {selectedTask.branch ? <ForcePrRefresh task={selectedTask} onChecked={refresh} /> : null}
                 <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask)} title="Archive this task; its session keeps running">
                   Archive task
@@ -501,6 +503,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   </button>
                 ) : null}
                 {selected.kind === "pr" && linkedTask?.branch ? <ForcePrRefresh task={linkedTask} onChecked={refresh} /> : null}
+                {linkedTask ? <TaskHistoryButton taskId={linkedTask.id} title={linkedTask.title || linkedTask.prompt.trim().split("\n")[0] || "Untitled task"} version={eventVersion} /> : null}
                 <button
                   className="btn"
                   onClick={() => void runAction(() => api.resolveItem(selected.id))}

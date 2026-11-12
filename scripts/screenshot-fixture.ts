@@ -2,6 +2,7 @@ import { Db } from "../server/db.ts";
 import type { Favorite } from "../server/favorites.ts";
 import { prItemBody, type PrInfo } from "../server/pr.ts";
 import type { Item, Task } from "../server/types.ts";
+import type { TaskEvent } from "../server/task-events.ts";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -33,6 +34,40 @@ export function seedScreenshotData(db: Db): void {
   db.insertRepo({ id: "sample-home", name: "side-project", path: "/sample/side-project", jira_prefix: null, context: "personal", source: "manual", created_ms: now });
   seedInboxItems(db, now);
   seedBenchmarks(db);
+  seedTaskHistory(db, now);
+}
+
+/** History for the tasks the inbox screenshots open: the dispatch timeline of
+ *  the Jira-imported task (the one whose question is in the inbox) and the PR
+ *  loop of the task behind the "PR needs work" row. */
+export function seedTaskHistory(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
+  const hour = 60 * 60_000;
+  const events: { task: string; at: number; kind: TaskEvent["kind"]; message: string; data?: Record<string, unknown> }[] = [
+    { task: "sample-running", at: now - 50 * hour, kind: "created", message: "Imported from Jira EX-1234", data: { source: "jira", key: "EX-1234", jira_status: "To Do" } },
+    { task: "sample-running", at: now - 26 * hour, kind: "updated", message: "Model: sonnet", data: { field: "model", to: "sonnet" } },
+    { task: "sample-running", at: now - 25 * hour, kind: "prompt", message: "Initial prompt sent to claude", data: { source: "dispatch", harness: "claude", model: "sonnet", reasoning: "high", chars: 1834, text: "Add keyboard navigation\n\nEvery list in the app is tab-navigable except the inbox: j/k should move the selection and enter should open the item." } },
+    { task: "sample-running", at: now - 25 * hour, kind: "status", message: "Status: open → dispatched", data: { from: "open", to: "dispatched" } },
+    { task: "sample-running", at: now - 25 * hour, kind: "session", message: "Worktree: /sample/example-project-worktrees/feat-keyboard-nav", data: { to: "/sample/example-project-worktrees/feat-keyboard-nav" } },
+    { task: "sample-running", at: now - 25 * hour, kind: "jira", message: "Jira: To Do → In Progress", data: { from: "To Do", to: "In Progress" } },
+    { task: "sample-running", at: now - 4 * hour, kind: "prompt", message: "Review comments sent to the agent (2)", data: { source: "pr-comments", threads: 2, pr: "https://github.com/example/project/pull/58" } },
+    { task: "sample-running", at: now - 30_000, kind: "question", message: "Agent asked: Which keyboard shortcut should open the command palette?", data: { capture: "elicitation" } },
+    { task: "sample-done", at: now - 47 * hour, kind: "created", message: "Task created", data: { source: "manual" } },
+    { task: "sample-done", at: now - 46 * hour, kind: "status", message: "Status: open → dispatched", data: { from: "open", to: "dispatched" } },
+    { task: "sample-done", at: now - 6 * hour, kind: "status", message: "Status: dispatched → done", data: { from: "dispatched", to: "done" } },
+    { task: "sample-done", at: now - 5 * hour, kind: "prompt", message: "Merge conflicts sent to the agent (base main)", data: { source: "pr-conflict", base: "main", pr: "https://github.com/example/project/pull/57" } },
+    { task: "sample-pr-task", at: now - 5 * hour, kind: "created", message: "Task created", data: { source: "manual" } },
+    { task: "sample-pr-task", at: now - 4 * hour, kind: "pr", message: "PR linked: https://gitlab.com/example/platform/-/merge_requests/29", data: { to: "https://gitlab.com/example/platform/-/merge_requests/29" } },
+    { task: "sample-pr-task", at: now - 3 * hour, kind: "pr", message: "PR no longer ready: 1 unresolved review comment, 1 failing check", data: { pr: "https://gitlab.com/example/platform/-/merge_requests/29" } },
+  ];
+  for (const event of events) {
+    db.insertTaskEvent({
+      task_id: event.task,
+      ts: event.at,
+      kind: event.kind,
+      message: event.message,
+      data: event.data ? JSON.stringify(event.data) : null,
+    });
+  }
 }
 
 /** Open inbox items: a ready PR, a PR still needing work, two questions — the

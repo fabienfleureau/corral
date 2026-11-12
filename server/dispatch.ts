@@ -13,6 +13,7 @@ import type { Db } from "./db.ts";
 import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 import { gitToplevel } from "./repos.ts";
+import { logTaskEvent, promptData } from "./task-events.ts";
 import type { WorkerBackend, WorkerSession } from "./worker.ts";
 import { taskLabel, type Task } from "./types.ts";
 
@@ -270,6 +271,19 @@ export async function dispatchTask(
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
   });
+  // The prompt is what the agent was asked to do: keep it (truncated) so the
+  // task's history shows it, and the conventions that were in force with it.
+  logTaskEvent(db, task.id, "prompt", `Initial prompt sent to ${target}`, promptData(fullPrompt, {
+    source: "dispatch",
+    harness: target,
+    kind: review ? "review" : "code",
+    model: opts.model === undefined ? task.model ?? null : opts.model,
+    reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
+    agent: opts.agent ?? null,
+    branch: review ? null : branch,
+    worktree: useWorktree && session.cwd ? session.cwd : null,
+    session: session.address,
+  }));
 
   // Implementation started: move the ticket to "In Progress". Best effort and
   // never awaited — an unreachable Jira must not delay or fail a dispatch.

@@ -3,7 +3,7 @@ import type { BenchmarkSnapshot } from "./types";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
-import type { Config, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, Pull, Repo, SessionInfo, Task, UsageRange, UsageReport } from "./types";
+import type { Config, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -211,6 +211,7 @@ export const api = {
   ): Promise<DispatchResult> =>
     post<DispatchResult>(`/api/tasks/${id}/dispatch`, input),
   cleanupTask: (id: string): Promise<{ ok: boolean }> => post<{ ok: boolean }>(`/api/tasks/${id}/cleanup`),
+  taskEvents: (id: string): Promise<TaskEvent[]> => get<TaskEvent[]>(`/api/tasks/${id}/events`),
   checkPr: (id: string, opts: { force?: boolean } = {}): Promise<CheckPrResult> =>
     post<CheckPrResult>(`/api/tasks/${id}/check-pr`, opts.force ? { force: true } : undefined),
 

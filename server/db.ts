@@ -3,6 +3,7 @@
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
 import type { Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskStatus, TrackedTerminal } from "./types.ts";
+import { logTaskChanges, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -80,6 +81,17 @@ CREATE TABLE IF NOT EXISTS metrics_events (
   data TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_name ON metrics_events(name, ts);
+
+-- Task history: what happened to one task, in order (see task-events.ts).
+CREATE TABLE IF NOT EXISTS task_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL,
+  data TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, ts);
 `;
 
 export class Db {
@@ -134,6 +146,15 @@ export class Db {
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
     const repoCols = this.raw.prepare("PRAGMA table_info(repos)").all() as { name: string }[];
     if (!repoCols.some((c) => c.name === "context")) this.raw.exec(`ALTER TABLE repos ADD COLUMN context TEXT`);
+    // Task history arrived after tasks did: give every pre-existing task the one
+    // event its row still knows the time of, so a history never starts blank.
+    // Flagged as backfilled — the other events happened at unknown times.
+    this.raw.exec(`
+      INSERT INTO task_events (task_id, ts, kind, message, data)
+      SELECT id, created_ms, 'created', 'Task created (history starts here)', '{"backfilled":true}'
+      FROM tasks
+      WHERE NOT EXISTS (SELECT 1 FROM task_events WHERE task_events.task_id = tasks.id)
+    `);
   }
 
   close(): void {
@@ -162,12 +183,17 @@ export class Db {
   updateTask(id: string, patch: Partial<Task>, touch = true): void {
     const keys = Object.keys(patch).filter((k) => k !== "id") as (keyof Task)[];
     if (keys.length === 0) return;
+    // Read before writing: the diff is what the task's history records, so
+    // every state change is logged wherever it comes from (an API edit, a
+    // dispatch, the Jira sync, the PR loop) without each caller remembering to.
+    const before = this.getTask(id);
     const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
     const values = keys.map((k) => patch[k] as never);
     // Internal bookkeeping (a PR snapshot) must not make a stale task look
     // recently active: touch=false keeps updated_ms untouched.
     if (touch) this.stmt(`UPDATE tasks SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
     else this.stmt(`UPDATE tasks SET ${sets} WHERE id = ?`).run(...values, id);
+    if (before) logTaskChanges(this, before, patch);
   }
 
   getTask(id: string): Task | null {
@@ -185,6 +211,24 @@ export class Db {
       ? this.stmt(`SELECT * FROM tasks WHERE status = ? ORDER BY created_ms DESC`).all(status)
       : this.stmt(`SELECT * FROM tasks ORDER BY created_ms DESC`).all();
     return rows as unknown as Task[];
+  }
+
+  // ---- task history ----
+
+  insertTaskEvent(e: Omit<TaskEvent, "id">): void {
+    this.stmt(`INSERT INTO task_events (task_id, ts, kind, message, data) VALUES (?, ?, ?, ?, ?)`).run(
+      e.task_id, e.ts, e.kind, e.message, e.data,
+    );
+  }
+
+  /** One task's history, oldest first (the order a timeline reads in). */
+  listTaskEvents(taskId: string, limit = 500): TaskEvent[] {
+    // Newest N by rowid, then flipped back to chronological order: a very long
+    // history keeps its most recent events, in reading order.
+    const rows = this.stmt(
+      `SELECT * FROM (SELECT * FROM task_events WHERE task_id = ? ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC`,
+    ).all(taskId, limit);
+    return rows as unknown as TaskEvent[];
   }
 
   // ---- items ----
