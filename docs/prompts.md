@@ -49,8 +49,10 @@ What each one is for:
   write a `## Handoff`, then POST `kind: "done"` to `/api/reports`; POST
   `kind: "question"` (with one-click `options`) only when genuinely blocked.
 - **`pr-loop.md`** — the PR loop: comparable before/after screenshots for UI
-  changes, handling review comments (reply *or* fix, then resolve the thread),
-  merge conflicts (`rebase`, `--force-with-lease`), and the rule to never merge.
+  changes, keeping the PR/MR title and description current after every push
+  (Corral renders that description at the top of the inbox item), handling
+  review comments (reply *or* fix, then resolve the thread), merge conflicts
+  (`rebase`, `--force-with-lease`), and the rule to never merge.
 - **`pre-pr-review.md`** — runs the task's configured reviewer command on the
   diff before the PR opens; two rounds max, and the outcome goes in the PR body.
 - **`review.md`** — reviewing someone else's PR/MR: read-only, post **drafts**

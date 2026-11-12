@@ -35,6 +35,17 @@ capture outside it. Use a separate temporary browser profile. If capture or
 upload still fails, state the specific failure in the PR and completion report;
 never claim a visual check passed without reviewing the images.
 
+## After every push: keep the title and description current
+
+Opening the PR/MR is not the end of its description. After **each** push — a
+review fix, a rebase, a change of approach — re-read the title and body against
+what the branch now does and rewrite whatever went stale (`gh pr edit` /
+`glab mr update`): scope, files touched, risk, how to test, the screenshots that
+are actually in it. Corral shows the PR/MR description at the top of the inbox
+item the human reviews, so a body left as written when the PR opened is the only
+description they will read. If the new commit changed a claim the body makes,
+change the claim in that same push — a stale body is a stale review.
+
 ## When review comments come back
 
 Corral watches your PR. When review comments or threads appear, Corral pushes
