@@ -245,6 +245,19 @@ export type UsageReport = {
   };
 };
 
+// ---- platform API rate limits (GET /api/rate-limits) ----
+
+/** One GitHub resource (core, search, graphql) or the GitLab API throttle. */
+export type RateLimitWindow = { name: string; limit: number; remaining: number; reset_ms: number | null };
+
+export type PlatformRateLimit = {
+  host: "github" | "gitlab";
+  /** Empty when the fetch failed; `note` says why. */
+  windows: RateLimitWindow[];
+  note: string | null;
+  fetched_ms: number;
+};
+
 export interface PrAdditionsGroup { key: string; additions: number; available: number; total: number }
 
 export interface BenchmarkResult { id: string; benchmark: string; agent: string; model: string; reasoning: string | null; score: number; date: string | null; source: string }

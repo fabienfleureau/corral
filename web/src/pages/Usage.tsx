@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AgentQuota, UsageAgent, UsageRange, UsageReport, UsageTotals } from "../types";
+import type { AgentQuota, PlatformRateLimit, RateLimitWindow, UsageAgent, UsageRange, UsageReport, UsageTotals } from "../types";
 import { errText, formatTs, timeAgo } from "../util";
 import { Spinner } from "../ui";
 
@@ -85,6 +85,46 @@ function QuotaCard({ q }: { q: AgentQuota }) {
   );
 }
 
+function QuotaBar({ label, detail, usedPercent }: { label: string; detail: string; usedPercent: number }) {
+  const pct = Math.max(0, Math.min(100, usedPercent));
+  const tone = pct >= 90 ? "usage-bar-hot" : pct >= 70 ? "usage-bar-warm" : "";
+  return (
+    <div className="usage-quota-row">
+      <div className="usage-quota-label">
+        <span>{label}</span>
+        <span className="muted">{detail}</span>
+      </div>
+      <div className="usage-bar">
+        <div className={`usage-bar-fill ${tone}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** One GitHub resource (core, search, graphql) or the GitLab throttle. */
+function RateLimitCard({ rl }: { rl: PlatformRateLimit }) {
+  return (
+    <div className="usage-card">
+      <div className="usage-card-head">
+        <strong>{rl.host === "github" ? "GitHub API" : "GitLab API"}</strong>
+        {rl.windows.length === 0 ? <span className="badge badge-wait">unavailable</span> : null}
+      </div>
+      {rl.windows.length === 0 ? <div className="muted">{rl.note ?? "No rate limit data."}</div> : null}
+      {rl.windows.map((w) => (
+        <QuotaBar
+          key={w.name}
+          label={w.name}
+          detail={`${Math.round((w.remaining / w.limit) * 100)}% left · ${resetIn(w.reset_ms)}`}
+          usedPercent={((w.limit - w.remaining) / w.limit) * 100}
+        />
+      ))}
+      <div className="muted usage-small" title={formatTs(rl.fetched_ms)}>
+        as of {timeAgo(rl.fetched_ms)}
+      </div>
+    </div>
+  );
+}
+
 function Timeline({ report, metric }: { report: UsageReport; metric: Metric }) {
   const rows = report.timeline.map((b) => ({
     start: b.start_ms,
@@ -136,6 +176,26 @@ export function UsagePage() {
   const [tick, setTick] = useState(0);
   const [force, setForce] = useState(false);
   const [linesGroup, setLinesGroup] = useState<"project" | "model" | "task">("project");
+  const [limits, setLimits] = useState<PlatformRateLimit[] | null>(null);
+  const [limitsReload, setLimitsReload] = useState(0);
+
+  // GitHub/GitLab quota does not depend on the range or the log scan; the server
+  // caches it for a minute, so a mount fetch is cheap.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getRateLimits(limitsReload > 0)
+      .then((r) => {
+        if (!cancelled) setLimits(r.limits);
+      })
+      .catch(() => {
+        // A missing platform CLI must not break the usage page.
+        if (!cancelled) setLimits([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [limitsReload]);
 
   useEffect(() => {
     const onHash = () => setParams(paramsFromHash());
@@ -198,6 +258,7 @@ export function UsagePage() {
             onClick={() => {
               setForce(true);
               setTick((t) => t + 1);
+              setLimitsReload((n) => n + 1);
             }}
           >
             {loading ? <Spinner /> : null}
@@ -223,6 +284,19 @@ export function UsagePage() {
               {report.quota.map((q) => (
                 <QuotaCard key={q.agent} q={q} />
               ))}
+            </div>
+
+            <h2 className="usage-h">Platform API</h2>
+            <div className="usage-grid">
+              {limits === null ? (
+                <div className="usage-card">
+                  <Spinner label="Reading rate limits…" />
+                </div>
+              ) : limits.length === 0 ? (
+                <div className="usage-card muted">No GitHub or GitLab rate limit data.</div>
+              ) : (
+                limits.map((rl) => <RateLimitCard key={rl.host} rl={rl} />)
+              )}
             </div>
 
             <h2 className="usage-h">Overview</h2>
