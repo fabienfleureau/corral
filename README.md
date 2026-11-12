@@ -67,6 +67,14 @@ corral add "Fix flaky upload test" --repo ~/work/api --prompt "…" --target cla
 corral status
 ```
 
+## Prompts
+
+Corral tells each agent what to do through short prompt conventions. **Every
+prompt it sends — the injected `skills/*.md` conventions, the PR-loop messages,
+and Corral's own assistant calls — is listed in [`docs/prompts.md`](docs/prompts.md)**:
+what it says, when it is sent, and which placeholders get substituted. Start
+there before changing agent behaviour.
+
 ## Configuration
 
 `~/.config/corral/config.json` (generated on first run):
@@ -76,7 +84,7 @@ corral status
 | `port` / `host` | `4787` / `127.0.0.1` | localhost; token middleware ready for LAN/team |
 | `token` | generated | shared by web cookie + CLI + agent reports |
 | `herdrSocket` | `~/.local/state/herdr-core/default/default.sock` | herdr-core JSON-RPC socket |
-| `agents` | `claude`, `codex`, `opencode` | launch argv per target, `{prompt}` placeholder |
+| `agents` | `claude`, `codex`, `opencode` | harnesses offered in the UI; sessions launch through omnigent's registry harness |
 | `assistant` | `["claude","-p","{prompt}"]` | Corral's own LLM calls (summarization) |
 | `jira` | `{baseUrl, email, token, jql, statuses?}` | email + API token (Basic); `statuses` maps stage → Jira status name (`to_do`, `in_progress`, `code_review`, `ready_to_merge`, `done`), blank disables a stage |
 | `worktreesDir` | `~/.herdr/worktrees` | per-task worktrees |
@@ -95,7 +103,8 @@ server/       Node 22 (type-stripped TS), no runtime deps
   jira-status.ts  task lifecycle → Jira status (forward-only, walks missing stages)
   db.ts       SQLite (tasks, items, terminals, metrics_events)
   cli.ts      corral add / status / serve
-skills/       question-report.md (injected into agent prompts), clarify.md
+skills/       agent prompt conventions, injected at dispatch (see docs/prompts.md)
+docs/         prompts.md — the registry of every prompt Corral sends
 ```
 
 Storage: `~/.local/share/corral/corral.db` (SQLite). The data model carries

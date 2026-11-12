@@ -97,7 +97,10 @@ never commit screenshots or generated fixture data.
 - Storage is SQLite (`server/db.ts`); schema changes are **additive** with
   `ALTER TABLE` migrations in `Db.migrate()`.
 - Agent-facing prompt text lives in `skills/` and is injected at dispatch —
-  keep it short and imperative.
+  keep it short and imperative. Every prompt Corral sends (these conventions,
+  the PR-loop messages, the assistant calls) is registered in
+  `docs/prompts.md`; add the row in the same PR as the prompt, or
+  `server/test/prompts-doc.test.ts` fails.
 - Web UI work (`web/`) uses the `modern-web-guidance` skill, installed in
   `.agents/skills/` (Codex, OpenCode) and linked from `.claude/skills/` for
   Claude Code. Baseline target: Baseline Widely available. Refresh with
@@ -110,6 +113,7 @@ never commit screenshots or generated fixture data.
 | `server/` | API (`api.ts`), worker seam (`worker.ts`, `omnigent.ts`), PR loop (`pr.ts`), inbox lifecycle (`capture.ts`), dispatch (`dispatch.ts`) |
 | `web/` | React UI, hash-routed pages (`#/inbox`, `#/tasks`, `#/pulls`, `#/sessions`, `#/settings`) |
 | `skills/` | Prompt conventions for dispatched agents (question reports, PR loop, handoff) |
+| `docs/prompts.md` | Registry of every prompt Corral sends — the place to look first |
 | `API.md` | HTTP contract — keep in sync with `server/api.ts` |
 
 ## Product decisions are binding

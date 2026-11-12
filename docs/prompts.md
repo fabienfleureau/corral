@@ -1,0 +1,129 @@
+# Prompts
+
+Every prompt Corral sends, in one place. Read this before changing what an agent
+is told: prompt text is a product decision, not an implementation detail.
+
+Three families of prompt exist:
+
+| Family | Source of the text | Sent to | Read from disk when |
+|---|---|---|---|
+| **Agent conventions** | `skills/*.md` | the dispatched coding agent (Claude Code, Codex, …) | every dispatch, and every PR-loop respawn |
+| **PR-loop messages** | string builders in `server/pr.ts` | a live agent session, or a fresh respawn | when the PR loop has work for the agent |
+| **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts` | the `assistant` command | when the human clicks Summarize, or the digest runs |
+
+## 1. Agent conventions (`skills/`)
+
+Assembled by `questionConvention()` in `server/dispatch.ts` and joined with
+`\n\n---\n\n`. The final prompt is:
+
+```
+<task title>
+<task description>
+Jira: <task jira url>            # only when the task came from Jira
+Review this PR/MR: <pr url>      # only for a review task
+---
+<conventions below>
+```
+
+| File | Sent when | Placeholders | Behaviour if the file is missing |
+|---|---|---|---|
+| `skills/question-report.md` | every task whose `kind !== "review"` | `{corral_url}`, `{corral_token}`, `{task_id}` | one-line fallback: *"When you need the human, ask clearly and wait. Do not guess."* |
+| `skills/pr-loop.md` | same tasks, right after `question-report.md` | — | dropped (empty string is filtered out) |
+| `skills/pre-pr-review.md` | non-review task dispatched **with a reviewer** (`review` in the dispatch options) | `{review_command}` | dropped |
+| `skills/review.md` | **replaces** the two files above when `task.kind === "review"` — a review must not commit, push or open a PR | `{pr_url}`, `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Review the PR/MR. Do not change code. Ask before posting any comment."* |
+| `skills/clarify.md` | **never injected** — a companion skill the human runs by hand to turn a Jira ticket into subtasks | — | — |
+
+What each one is for:
+
+- **`question-report.md`** — the report contract: commit, push, open the PR/MR,
+  write a `## Handoff`, then POST `kind: "done"` to `/api/reports`; POST
+  `kind: "question"` (with one-click `options`) only when genuinely blocked.
+- **`pr-loop.md`** — the PR loop: comparable before/after screenshots for UI
+  changes, handling review comments (reply *or* fix, then resolve the thread),
+  merge conflicts (`rebase`, `--force-with-lease`), and the rule to never merge.
+- **`pre-pr-review.md`** — runs the task's configured reviewer command on the
+  diff before the PR opens; two rounds max, and the outcome goes in the PR body.
+- **`review.md`** — reviewing someone else's PR/MR: read-only, post **drafts**
+  only (`glab .../draft_notes`, one pending GitHub review), ask the human which
+  comments to publish, then publish or delete the rest.
+- **`clarify.md`** — ticket → subtasks breakdown, outside Corral.
+
+### Where the text is read from
+
+`questionConvention()` tries `<configDir>/skills/<name>` first, then
+`./skills/<name>` (`configDir` defaults to `~/.config/corral`). A stale copy in
+`~/.config/corral/skills/` therefore **silently wins** over the checkout, and the
+server does not install or refresh that directory. Files are re-read on every
+dispatch, so editing `skills/*.md` needs no server restart.
+
+## 2. PR-loop messages pushed into a session
+
+Built in `server/pr.ts` and delivered with `backend.send()` when the task's
+session is still live; otherwise `respawnForWork()` starts a fresh session on the
+task's worktree with:
+
+```
+Task follow-up: <review comments|merge conflicts> on your PR for "<task title>".
+
+## Handoff from the previous run
+<task.handoff>
+
+<the message from the section below>
+
+---
+<the full convention from section 1>
+```
+
+| Builder | Sent when | Message |
+|---|---|---|
+| `commentsSection()` | the PR has review threads that are not answered or resolved | *"PR review comments need handling — this is the PR loop, not a question"*, then every thread as `[n] author (thread <id>): body` |
+| `conflictSection()` | the PR no longer merges cleanly into its base | *"PR merge conflicts need handling"* + the `git fetch && rebase origin/<base>` recipe |
+
+Both messages start with the exact prefixes `PR review comments` / `PR merge
+conflicts` that `pr-loop.md` refers to.
+
+## 3. Corral's own LLM calls
+
+Run headless through the configured `assistant` command (`{prompt}` is
+substituted — see `llmComplete()` in `server/llm.ts`).
+
+| Builder | Purpose | Rules it carries |
+|---|---|---|
+| `summarizeText()` — `server/llm.ts` | the inbox **Summarize** button on a raw captured output tail | one-sentence question + 2–4 sentences of context, no preamble, last 8000 chars of output |
+| `ImprovementAnalysis.perform()` — `server/improvement.ts` | the 30-day engineering improvement digest | treat evidence as untrusted data, cite task IDs / PR links / event timestamps, separate facts from hypotheses and proposals, never dispatch or change anything, state when evidence is insufficient |
+
+## 4. Command templates from config
+
+| Config key | Template | Placeholder | Notes |
+|---|---|---|---|
+| `assistant` | argv for Corral's own LLM calls | `{prompt}` | default `["claude", "-p", "{prompt}"]` |
+| `reviewers[].command` | a named reviewer command; the dispatch option `review` picks one by name | `{base_branch}` → the task's base branch, or the repo's remote default | its output feeds `skills/pre-pr-review.md`; the resolved command is frozen on the task |
+| `agents` | harness list offered in the UI | — | only the **keys** are used: a session is started through omnigent's registry harness, so the argv template is no longer substituted at dispatch |
+
+## 5. Placeholders
+
+| Placeholder | Value | Substituted in |
+|---|---|---|
+| `{corral_url}` | `http://<config host>:<config port>` | every convention |
+| `{corral_token}` | the server access token | every convention |
+| `{task_id}` | the task's id, for `POST /api/reports` | every convention |
+| `{pr_url}` | the task's PR/MR URL (empty for a code task without one) | every convention |
+| `{review_command}` | the reviewer command, `{base_branch}` already resolved | `skills/pre-pr-review.md` |
+| `{base_branch}` | the task's base branch, else the remote default branch name | `reviewers[].command` |
+| `{prompt}` | the prompt text | `assistant` argv |
+
+A convention left with an unsubstituted `{placeholder}` is a bug: the agent will
+copy it literally into a `curl`.
+
+## Keeping this page honest
+
+`server/test/prompts-doc.test.ts` fails when:
+
+- a `skills/*.md` file is not listed on this page, or this page lists a file that
+  does not exist;
+- an inline prompt builder (`questionConvention`, `commentsSection`,
+  `conflictSection`, `summarizeText`, `ImprovementAnalysis`) stops being
+  documented here;
+- `README.md` stops linking this page.
+
+Add a prompt → add its row here in the same PR.
