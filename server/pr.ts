@@ -301,8 +301,9 @@ function commentsSection(pr: PrInfo): string {
   );
   return [
     "PR review comments need handling — this is the PR loop, not a question:",
-    "for each comment: fix the code (or reply on the thread if you disagree),",
-    "then resolve the thread:",
+    "for each comment: fix the code, or reply on the thread saying why not (one or two lines),",
+    "then resolve the threads you fixed — Corral counts your reply as an answer, so",
+    "leave a thread you only replied to unresolved:",
     "  gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"<thread id>\"}){thread{isResolved}}}'",
     "run your tests, commit and push. Do not ask for permission. Do not merge the PR.",
     "",
