@@ -34,7 +34,7 @@ const hub = {
   },
 };
 
-const capture = new CaptureEngine(db, backend, hub, cfg);
+const capture = new CaptureEngine(db, backend, hub, cfg, jira);
 const usage = new UsageScanner(defaultSources());
 const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt));
 const state: AppState = { db, cfg, backend, capture, jira, hub, usage, improvement };
@@ -47,7 +47,7 @@ setTimeout(() => void usage.refresh().catch(() => undefined), 5_000);
 const subscription = backend.onEvent((e) => void capture.handleEvent(e));
 
 // PR discovery + the PR loop: find review links, feed comments back to agents.
-setInterval(() => void syncAllPrs(db, hub, { backend, cfg }, 0).catch(() => undefined), 120_000);
+setInterval(() => void syncAllPrs(db, hub, { backend, cfg, jira }, 0).catch(() => undefined), 120_000);
 
 // Pull Requests page: refresh where the human is awaited (GitHub + GitLab).
 // Best effort; each refresh broadcasts "pulls.updated" so open pages reload.

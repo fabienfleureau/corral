@@ -10,6 +10,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
+import { JiraClient } from "./jira.ts";
+import { syncJiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 import { gitToplevel } from "./repos.ts";
 import type { WorkerBackend, WorkerSession } from "./worker.ts";
 import { taskLabel, type Task } from "./types.ts";
@@ -141,6 +143,8 @@ export async function dispatchTask(
     agent?: string | null;
     /** Reviewer name (from cfg.reviewers); resolved to its command and frozen on the task. */
     review?: string | null;
+    /** Jira gateway for the status sync (injected in tests; defaults to cfg.jira). */
+    jira?: JiraTransitionGateway | null;
   } = {},
 ): Promise<DispatchResult> {
   if (!task.repo_path?.trim()) {
@@ -246,6 +250,16 @@ export async function dispatchTask(
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
   });
+
+  // Implementation started: move the ticket to "In Progress". Best effort and
+  // never awaited — an unreachable Jira must not delay or fail a dispatch.
+  const dispatched = db.getTask(task.id) ?? task;
+  const jira = opts.jira ?? (cfg.jira ? new JiraClient(cfg.jira) : null);
+  if (jira && dispatched.jira_key && dispatched.kind !== "review") {
+    void syncJiraStage({ db, gateway: jira, statuses: cfg.jira?.statuses }, dispatched, "in_progress").catch(
+      () => undefined,
+    );
+  }
 
   return { address: session.address, worktreePath: session.cwd, branch: review ? "" : branch };
 }

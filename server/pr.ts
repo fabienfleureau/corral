@@ -12,6 +12,8 @@ import type { WorkerBackend } from "./worker.ts";
 import type { Hub } from "./capture.ts";
 import type { Item, Task } from "./types.ts";
 import { questionConvention, slugify } from "./dispatch.ts";
+import { JiraClient } from "./jira.ts";
+import { syncJiraStage, type JiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 
 export interface PrThread {
   /** Stable id (GraphQL thread id, or GitLab discussion id) for dedupe. */
@@ -452,6 +454,8 @@ const delivering = new Set<string>();
 export interface SyncOptions {
   backend?: WorkerBackend;
   cfg?: Config;
+  /** Jira status sync gateway (default: built from cfg.jira, null = disabled). */
+  jira?: JiraTransitionGateway | null;
   /** Injected for tests. */
   finder?: (repoPath: string, branch: string) => PrInfo | null | Promise<PrInfo | null>;
 }
@@ -488,6 +492,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   const existing = db.listItems({ kind: "pr" }).find((i) => i.task_id === task.id) ?? null;
   const shouldResolve = pr.state !== "OPEN";
   const merged = pr.state === "MERGED";
+  syncJiraPrStage(db, hub, task, pr, ready, merged, opts);
   if (merged && task.terminal_address && opts.backend?.archive) {
     await opts.backend.archive(task.terminal_address).catch(() => undefined);
   }
@@ -593,6 +598,35 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   }
   if (merged) resolveMergedTask(db, hub, task);
   return pr;
+}
+
+/** Mirror the PR lifecycle onto the task's Jira ticket: an open PR/MR is
+ *  "Code Review", a PR past the readiness gate is "Ready to merge", a merge
+ *  is "Done". A closed (unmerged) PR moves nothing. Never awaited: the sync is
+ *  serialized per ticket, so a slow Jira cannot delay the PR loop. */
+function syncJiraPrStage(
+  db: Db,
+  hub: Hub,
+  task: Task,
+  pr: PrInfo,
+  ready: boolean,
+  merged: boolean,
+  opts: SyncOptions,
+): void {
+  if (!task.jira_key) return;
+  const jira = opts.jira ?? (opts.cfg?.jira ? new JiraClient(opts.cfg.jira) : null);
+  if (!jira) return;
+  const stage: JiraStage | null = merged
+    ? "done"
+    : pr.state === "OPEN"
+      ? ready
+        ? "ready_to_merge"
+        : "code_review"
+      : null;
+  if (!stage) return;
+  void syncJiraStage({ db, hub, gateway: jira, statuses: opts.cfg?.jira?.statuses }, task, stage).catch(
+    () => undefined,
+  );
 }
 
 /** A merged PR completes the task and archives its inbox items. */

@@ -378,6 +378,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         reasoning: b.reasoning === undefined ? task.reasoning : b.reasoning,
         agent: b.agent === undefined ? task.agent ?? null : b.agent,
         review: b.review ?? null,
+        jira: state.jira ?? null,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
       json(res, 200, result);
@@ -410,7 +411,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (task.kind === "review") return json(res, 400, { error: "review tasks have no PR of their own" });
     if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
     try {
-      const pr = await syncTaskPr(state.db, state.hub, task, { backend: state.backend, cfg: state.cfg });
+      const pr = await syncTaskPr(state.db, state.hub, task, { backend: state.backend, cfg: state.cfg, jira: state.jira ?? null });
       json(res, 200, { pr, task: state.db.getTask(task.id) });
     } catch (err) {
       json(res, 500, { error: String(err) });
@@ -419,7 +420,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   // Inbox open: re-check PRs so merged ones are archived before the human looks.
   on("POST", "/api/prs/sync", (_req, res) => {
-    const pending = startSyncAllPrs(state.db, state.hub, { backend: state.backend, cfg: state.cfg, knownPrsOnly: true });
+    const pending = startSyncAllPrs(state.db, state.hub, { backend: state.backend, cfg: state.cfg, jira: state.jira ?? null, knownPrsOnly: true });
     if (pending) void pending.catch(() => undefined);
     json(res, 200, { ok: true, ran: pending !== null });
   });
@@ -629,6 +630,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
           jira_key: f.jira_key,
           jira_url: f.jira_url,
           jira_parent_key: f.jira_parent_key,
+          jira_status: f.jira_status,
           pr_url: null,
           pr_meta: null,
           status: "open",

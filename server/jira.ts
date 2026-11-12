@@ -17,7 +17,12 @@ export interface JiraIssue {
 export interface JiraTransition {
   id: string;
   name: string;
+  /** Status the transition lands in (Jira names the step, the status is what
+   *  the workflow shows — the status sync matches on this first). */
+  to?: { name?: string } | null;
 }
+
+const REQUEST_TIMEOUT_MS = 10_000;
 
 function authHeader(jira: JiraConfig): string {
   return "Basic " + Buffer.from(`${jira.email}:${jira.token}`).toString("base64");
@@ -81,6 +86,8 @@ export class JiraClient {
         "Content-Type": "application/json",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      // A wedged Jira must not stall a dispatch or a background PR sync.
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -145,24 +152,28 @@ export class JiraClient {
     return res.transitions ?? [];
   }
 
+  /** Apply one workflow transition by id. */
+  async transition(key: string, transitionId: string): Promise<void> {
+    await this.request("POST", `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
+      transition: { id: transitionId },
+    });
+  }
+
   /** Pick a done-ish transition if none is given. Returns the transition used. */
   async markDone(key: string, transitionId?: string): Promise<JiraTransition> {
-    let id = transitionId;
-    if (!id) {
-      const list = await this.transitions(key);
-      const done = list.find((t) => /done|résolu|resolved|finished|terminé|clos/i.test(t.name));
-      if (!done) {
-        throw new Error(
-          `no done-like transition available for ${key}; available: ${list.map((t) => `${t.id}=${t.name}`).join(", ")}`,
-        );
-      }
-      id = done.id;
+    if (transitionId) {
+      await this.transition(key, transitionId);
+      return { id: transitionId, name: "" };
     }
-    await this.request("POST", `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
-      transition: { id },
-    });
-    const used = { id, name: "" };
-    return used;
+    const list = await this.transitions(key);
+    const done = list.find((t) => /done|résolu|resolved|finished|terminé|clos/i.test(t.to?.name ?? t.name));
+    if (!done) {
+      throw new Error(
+        `no done-like transition available for ${key}; available: ${list.map((t) => `${t.id}=${t.to?.name ?? t.name}`).join(", ")}`,
+      );
+    }
+    await this.transition(key, done.id);
+    return done;
   }
 
   async addComment(key: string, text: string): Promise<void> {

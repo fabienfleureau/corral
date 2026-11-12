@@ -16,6 +16,9 @@ idea → Jira (clarify outside Corral) → task backlog → dispatch (worktree +
   **Jira** (one-way pull via JQL filter + manual search, deduped by issue key).
   Jira subtasks group under their parent; when all children resolve, the parent's
   **Mark done** CTA lights up (manual write CTAs only: mark done, add comment).
+  A task imported from Jira also drives its ticket's **status**, forward only:
+  dispatch → `In Progress`, PR/MR opened → `Code Review`, PR past the readiness
+  gate → `Ready to merge`, merged → `Done` (names configurable per workflow).
 - **Dispatch** — one click, with a suggested target (Claude/Codex/OpenCode).
   Each task gets a fresh **git worktree** (`~/.herdr/worktrees/<repo>/<branch>`)
   and an agent terminal managed by herdr-core. Opt out per task.
@@ -75,7 +78,7 @@ corral status
 | `herdrSocket` | `~/.local/state/herdr-core/default/default.sock` | herdr-core JSON-RPC socket |
 | `agents` | `claude`, `codex`, `opencode` | launch argv per target, `{prompt}` placeholder |
 | `assistant` | `["claude","-p","{prompt}"]` | Corral's own LLM calls (summarization) |
-| `jira` | `{baseUrl, email, token, jql}` | email + API token (Basic) |
+| `jira` | `{baseUrl, email, token, jql, statuses?}` | email + API token (Basic); `statuses` maps stage → Jira status name (`to_do`, `in_progress`, `code_review`, `ready_to_merge`, `done`), blank disables a stage |
 | `worktreesDir` | `~/.herdr/worktrees` | per-task worktrees |
 
 ## Architecture
@@ -89,6 +92,7 @@ server/       Node 22 (type-stripped TS), no runtime deps
   capture.ts  events → inbox items → auto-resolution (+ 30s reconcile)
   dispatch.ts worktree creation, prompt assembly, terminal.run
   jira.ts     REST v3 (search, transitions, ADF comments)
+  jira-status.ts  task lifecycle → Jira status (forward-only, walks missing stages)
   db.ts       SQLite (tasks, items, terminals, metrics_events)
   cli.ts      corral add / status / serve
 skills/       question-report.md (injected into agent prompts), clarify.md
@@ -104,7 +108,8 @@ Storage: `~/.local/share/corral/corral.db` (SQLite). The data model carries
 - **v3** — daily self-improvement analysis (propose + prepare, human approves
   everything), subscription usage page (live quota windows + history charts),
   routing suggestions (quota headroom + editable rules)
-- **later** — auto-dispatch queue, Jira two-way sync, agent-fed intake, remote machines
+- **later** — auto-dispatch queue, agent-fed intake, remote machines, fuller
+  Jira sync (pull status back, comments back)
 
 ## Tests
 
