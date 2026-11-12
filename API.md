@@ -67,7 +67,7 @@ type Item = {
 - `POST /api/items/:id/resolve` → `Item`
 - `POST /api/items/:id/archive` → `Item`
 - `POST /api/items/:id/snooze` `{until_ms?}` → `Item` (default +1h)
-- `POST /api/prs/sync` → `{ok, ran}` — starts a background re-check of every dispatched/done task with a known PR (throttled to once per 30s; `ran: false` when skipped). A merged PR completes the task and archives all its items; a closed one resolves the PR item. Updates are broadcast as PRs are re-checked.
+- `POST /api/prs/sync` → `{ok, ran}` — starts a background re-check of every dispatched/done task with a known PR (throttled to once per 30s; `ran: false` when skipped). A merged PR completes the task and archives all its items; a closed one resolves the PR item. Updates are broadcast as PRs are re-checked. Each successful check also stores the last observed state in the task's `pr_meta.pr` (`state`, `mergeable`, `checks`, unresolved `threads` ids/count, readiness `reasons`, `checked_ms`) without changing `updated_ms`; it is evidence for the improvement digest, not task activity.
 
 ### Tasks
 - `GET /api/harnesses` → `{harnesses, agents}` — available harness groups, their model catalogs (when supported by the worker), and the full worker agent registry. 504 when the worker backend does not answer within 6s (retry shortly).
@@ -111,7 +111,7 @@ a dispatch or a PR sync.
 ### Improvement analysis
 - `GET /api/improvement` → schedule, last attempt/success, error and running state.
 - `PUT /api/improvement` `{intervalDays: 0|1|7|30}` → updated state; 0 disables automatic runs.
-- `POST /api/improvement/run` → inbox digest after the configured assistant finishes. Concurrent requests share one run. The analysis sends up to 50 recent task snapshots, 200 inbox item metadata records, and 500 lifecycle events to the configured assistant; it does not dispatch work. Scheduled runs catch up after restart and failed runs retry after one hour.
+- `POST /api/improvement/run` → inbox digest after the configured assistant finishes. Concurrent requests share one run. The analysis sends a bounded evidence bundle to the configured assistant; it does not dispatch work. By default: 60 recent task snapshots plus up to 60 tasks linked from items or task events (so older items keep their task), 300 items, 1500 events with their payloads, persisted PR snapshots (checks, mergeability, unresolved thread counts and gate reasons) and API-equivalent usage cost/token attribution per task from local agent logs. It also includes derived `data_quality` flags (untitled tasks, done tasks without a PR, repeated dispatches, items resolved without a timestamp, duplicate PR items, orphan/malformed task ids, open PR items) and an explicit `gaps` list; caps are reported in `limits`/`truncated`. Production outcomes and review-thread bodies are still not recorded. Scheduled runs catch up after restart and failed runs retry after one hour.
 
 ### Misc
 - `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`. A `done` report on a review task creates a `digest` item (no PR gate); review tasks are never PR-synced

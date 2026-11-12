@@ -173,7 +173,17 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     routes.push({ method, pattern, keys, handler });
   };
 
-  const improvement = state.improvement ??= new ImprovementAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt));
+  const improvement = state.improvement ??= new ImprovementAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt), {
+    usage: async () => {
+      const scanner = (state.usage ??= new UsageScanner(defaultSources()));
+      await withDeadline(scanner.refresh(), 15_000, undefined);
+      return {
+        records: scanner.records(),
+        prices: { ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
+        scanning: !scanner.ready,
+      };
+    },
+  });
   on("GET", "/api/improvement", (_req, res) => json(res, 200, improvement.status()));
   on("PUT", "/api/improvement", (_req, res, { body }) => {
     const days = (body as { intervalDays?: unknown } | null)?.intervalDays;

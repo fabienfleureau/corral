@@ -15,7 +15,7 @@ import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Task } from "./types.ts";
+import { taskLabel, type Task } from "./types.ts";
 import { withDeadline } from "./deadline.ts";
 
 export type UsageAgent = "claude" | "codex" | "opencode-go";
@@ -680,5 +680,96 @@ export function buildReport(input: {
           tokens: t.tokens,
         })),
     },
+  };
+}
+
+/** Compact all-time-in-window usage for the improvement digest: totals plus
+ *  per-task attribution, without the chart timeline the Usage page needs. */
+export interface UsageEvidence {
+  since_ms: number;
+  generated_ms: number;
+  scanning: boolean;
+  totals: UsageTotals;
+  by_agent: ({ agent: UsageAgent } & UsageTotals)[];
+  by_model: ({ agent: UsageAgent; model: string; priced: boolean } & UsageTotals)[];
+  by_task: {
+    id: string;
+    title: string;
+    status: string;
+    agents: UsageAgent[];
+    models: string[];
+    cost_usd: number;
+    tokens: number;
+    unpriced_calls: number;
+  }[];
+  attributed_usd: number;
+  unattributed_usd: number;
+}
+
+export function buildUsageEvidence(input: {
+  records: UsageRecord[];
+  tasks: Task[];
+  prices: Record<string, ModelPrice>;
+  since_ms: number;
+  scanning?: boolean;
+  now?: number;
+}): UsageEvidence {
+  const totals = emptyTotals();
+  const byAgent = new Map<UsageAgent, UsageTotals>();
+  const byModel = new Map<string, { agent: UsageAgent; model: string; priced: boolean } & UsageTotals>();
+  const perTask = new Map<string, { task: Task; cost: number; tokens: number; unpriced: number; agents: Set<UsageAgent>; models: Set<string> }>();
+  const cwdTask = new Map<string, Task | null>();
+  let attributed = 0;
+  let unattributed = 0;
+
+  for (const r of input.records) {
+    if (r.ts < input.since_ms) continue;
+    const cost = recordCost(r, input.prices);
+    add(totals, r, cost);
+    let a = byAgent.get(r.agent);
+    if (!a) byAgent.set(r.agent, (a = emptyTotals()));
+    add(a, r, cost);
+    const mk = `${r.agent}\u0000${r.model}`;
+    let m = byModel.get(mk);
+    if (!m) byModel.set(mk, (m = { agent: r.agent, model: r.model, priced: cost !== null, ...emptyTotals() }));
+    add(m, r, cost);
+
+    if (!cwdTask.has(r.cwd)) cwdTask.set(r.cwd, r.cwd ? taskForCwd(r.cwd, input.tasks) : null);
+    const task = cwdTask.get(r.cwd) ?? null;
+    if (!task) {
+      unattributed += cost ?? 0;
+      continue;
+    }
+    let pt = perTask.get(task.id);
+    if (!pt) perTask.set(task.id, (pt = { task, cost: 0, tokens: 0, unpriced: 0, agents: new Set(), models: new Set() }));
+    pt.cost += cost ?? 0;
+    pt.tokens += tokensOf(r);
+    pt.agents.add(r.agent);
+    pt.models.add(r.model);
+    if (cost === null) pt.unpriced++;
+    attributed += cost ?? 0;
+  }
+
+  return {
+    since_ms: input.since_ms,
+    generated_ms: input.now ?? Date.now(),
+    scanning: input.scanning === true,
+    totals,
+    by_agent: [...byAgent.entries()].map(([agent, t]) => ({ agent, ...t })).sort((x, y) => y.cost_usd - x.cost_usd),
+    by_model: [...byModel.values()].sort((x, y) => y.cost_usd - x.cost_usd || y.output - x.output),
+    by_task: [...perTask.values()]
+      .sort((x, y) => y.cost - x.cost)
+      .map((t) => ({
+        id: t.task.id,
+        title: taskLabel(t.task),
+        status: t.task.status,
+        agents: [...t.agents],
+        models: [...t.models],
+        cost_usd: t.cost,
+        tokens: t.tokens,
+        unpriced_calls: t.unpriced,
+      })),
+    attributed_usd: attributed,
+    unattributed_usd: unattributed,
   };
 }

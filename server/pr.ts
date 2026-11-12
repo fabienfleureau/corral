@@ -443,11 +443,29 @@ async function deliverWork(
   }
 }
 
+/** Last observed PR/MR state. Persisted so later analyses can explain why the
+ *  readiness gate kept failing (checks, threads, mergeability) instead of only
+ *  seeing repeated "ready for review" events. */
+export interface PrSnapshot {
+  url: string;
+  state: string;
+  mergeable: string | null;
+  checks: { total: number; failed: number; pending: boolean };
+  threads: { unresolved: number; ids: string[]; known: boolean };
+  ready: boolean;
+  reasons: string[];
+  review_decision: string | null;
+  base_ref: string | null;
+  checked_ms: number;
+}
+
 interface PrMeta {
   /** Thread signature last pushed to the agent. */
   pushed?: string;
   /** Set once conflicts were pushed; cleared when the PR merges cleanly again. */
   conflict?: boolean;
+  /** Last observed state; see PrSnapshot. */
+  pr?: PrSnapshot;
 }
 
 function readMeta(raw: string | null): PrMeta {
@@ -458,10 +476,25 @@ function readMeta(raw: string | null): PrMeta {
   }
 }
 
-function patchMeta(db: Db, taskId: string, patch: PrMeta): void {
+function patchMeta(db: Db, taskId: string, patch: PrMeta, touch = true): void {
   const meta = { ...readMeta(db.getTask(taskId)?.pr_meta ?? null), ...patch };
   if (meta.conflict === false) delete meta.conflict;
-  db.updateTask(taskId, { pr_meta: JSON.stringify(meta) });
+  db.updateTask(taskId, { pr_meta: JSON.stringify(meta) }, touch);
+}
+
+function snapshotPr(pr: PrInfo, ready: boolean, reasons: string[], checkedMs: number): PrSnapshot {
+  return {
+    url: pr.url,
+    state: pr.state,
+    mergeable: pr.mergeable,
+    checks: pr.checks,
+    threads: { unresolved: pr.threads.length, ids: pr.threads.map((t) => t.id).slice(0, 50), known: pr.threads_known !== false },
+    ready,
+    reasons,
+    review_decision: pr.review_decision,
+    base_ref: pr.base_ref,
+    checked_ms: checkedMs,
+  };
 }
 
 /** The agent has this task's PR item in flight: the item waits under
@@ -543,6 +576,10 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   // The loop: comments and merge conflicts go back to the agent —
   // automatically, once per comment set / conflict episode, in one message.
   const meta = readMeta(task.pr_meta);
+  // Persist what the gate saw, without bumping updated_ms: this is evidence
+  // for the activity digest, not task activity.
+  const snapshot = snapshotPr(pr, ready, reasons, Date.now());
+  if (JSON.stringify(meta.pr) !== JSON.stringify(snapshot)) patchMeta(db, task.id, { pr: snapshot }, false);
   const conflicting = !shouldResolve && pr.mergeable === "CONFLICTING";
   // End the episode only on confirmed mergeability or closure: GitHub reports
   // UNKNOWN while recalculating after a push.

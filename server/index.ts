@@ -11,9 +11,10 @@ import { refreshPulls } from "./pulls.ts";
 import { createHttpServer, type AppState } from "./api.ts";
 import { SessionFacts } from "./session-facts.ts";
 import type { ServerResponse } from "node:http";
-import { UsageScanner, defaultSources } from "./usage.ts";
+import { DEFAULT_PRICES, UsageScanner, defaultSources } from "./usage.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { llmComplete } from "./llm.ts";
+import { withDeadline } from "./deadline.ts";
 
 const cfg = loadConfig();
 const db = new Db(join(cfg.dataDir, "corral.db"));
@@ -37,7 +38,18 @@ const hub = {
 
 const capture = new CaptureEngine(db, backend, hub, cfg, jira);
 const usage = new UsageScanner(defaultSources());
-const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt));
+const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt), {
+  usage: async () => {
+    // A first scan of large logs can take a while: the digest still gets the
+    // records indexed so far and marks the snapshot as scanning.
+    await withDeadline(usage.refresh(), 15_000, undefined);
+    return {
+      records: usage.records(),
+      prices: { ...DEFAULT_PRICES, ...(cfg.usage?.prices ?? {}) },
+      scanning: !usage.ready,
+    };
+  },
+});
 const sessionFacts = new SessionFacts(backend);
 const state: AppState = { db, cfg, backend, capture, jira, hub, usage, improvement, sessionFacts };
 setTimeout(() => void improvement.runIfDue().catch(() => undefined), 10_000);
