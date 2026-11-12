@@ -51,7 +51,9 @@ What each one is for:
 - **`pr-loop.md`** — the PR loop: comparable before/after screenshots for UI
   changes, keeping the PR/MR title and description current after every push
   (Corral renders that description at the top of the inbox item), handling
-  review comments (reply *or* fix, then resolve the thread), merge conflicts
+  review comments (fix, or reply with *what changed and where, or why not* —
+  then resolve only the threads you fixed, since a reply already answers the
+  review), merge conflicts
   (`rebase`, `--force-with-lease`), and the rule to never merge.
 - **`pre-pr-review.md`** — runs the task's configured reviewer command on the
   diff before the PR opens; two rounds max, and the outcome goes in the PR body.

@@ -53,13 +53,17 @@ them into your terminal as a message starting with **"PR review comments"**.
 
 When you receive one, run the loop — **automatically, without asking**:
 
-1. For **each** comment: fix the code as suggested, or — if you disagree — write
-   a short justification as a reply on that thread (`gh pr comment` /
-   `glab mr note`). Never silently skip one.
-2. **Resolve the thread** you just handled — a reply alone does not resolve it
-   on GitHub:
+1. For **each** comment: fix the code as suggested, or — if you disagree — reply
+   on that thread saying why not (`gh pr comment` / `glab mr note`). One or two
+   lines: what changed and where, or why not. No apology, no restating the
+   comment. Never silently skip one.
+2. **Resolve the thread you fixed** — a reply alone does not resolve it on
+   GitHub:
    `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"<id>"}){thread{isResolved}}}'`
-   (the message Corral sends you carries each thread's id).
+   (the message Corral sends you carries each thread's id). Do **not** resolve a
+   thread you only replied to: Corral counts the reply as an answer, so the gate
+   clears without it, and resolving a human's thread you disagree with silences
+   the disagreement instead of settling it.
 3. Run the tests you touched. They must pass.
 4. Commit and push. The PR updates itself.
 5. Done. Corral re-checks the PR and flips it to "PR ready for review" once all
