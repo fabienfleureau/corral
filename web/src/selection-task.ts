@@ -1,6 +1,9 @@
-// Turn a text selection into a task: select a passage (in the inbox, typically)
-// and the app offers to open the Tasks page with the prompt already filled.
-// Pure helpers so the URL contract is testable without a browser.
+// Turn something picked elsewhere into a task: select a passage (in the inbox,
+// typically) and the app offers to open the Tasks page with the prompt already
+// filled; the Pull Requests page opens it on a review of one PR/MR.
+// Pure helpers so the URL contract is testable without a browser. They stay
+// dependency-free: Node loads this module from the tests, and the web build
+// resolves imports differently.
 
 /** A stray word or two is a slip, not something worth dispatching. */
 export const MIN_SELECTION_CHARS = 3;
@@ -25,13 +28,44 @@ export function selectionTaskHash(prompt: string): string {
   return `#/tasks?${new URLSearchParams({ prompt: promptFromSelection(prompt) }).toString()}`;
 }
 
-/** Read a prefilled prompt out of a hash route; null for any other route. */
-export function promptFromHash(hash: string): string | null {
+/** Tasks-page route that opens the form on a review of one PR/MR. */
+export function reviewTaskHash(prUrl: string): string {
+  return `#/tasks?${new URLSearchParams({ review: prUrl.trim() }).toString()}`;
+}
+
+/** What a Tasks deep link prefills: a prompt to work from, or a PR/MR to review. */
+export interface TaskPrefill {
+  text?: string;
+  prUrl?: string;
+}
+
+/** The query of a `#/tasks?…` route, or null for any other route. */
+function tasksQuery(hash: string): URLSearchParams | null {
   const route = hash.replace(/^#\/?/, "").replace(/^\//, "");
   const queryAt = route.indexOf("?");
   if (queryAt === -1) return null;
   if (route.slice(0, queryAt) !== "tasks") return null;
-  const prompt = new URLSearchParams(route.slice(queryAt + 1)).get("prompt");
+  return new URLSearchParams(route.slice(queryAt + 1));
+}
+
+/** Read a prefilled prompt out of a hash route; null for any other route. */
+export function promptFromHash(hash: string): string | null {
+  const prompt = tasksQuery(hash)?.get("prompt");
   const text = prompt ? promptFromSelection(prompt) : "";
   return text ? text : null;
+}
+
+/** Read a prefilled PR/MR URL out of a hash route; null when absent. The form
+ *  checks the shape itself, so a bad link shows the same error as a typed one. */
+export function reviewFromHash(hash: string): string | null {
+  const url = tasksQuery(hash)?.get("review")?.trim() ?? "";
+  return /^https?:\/\/\S+$/.test(url) ? url : null;
+}
+
+/** Everything a Tasks deep link can prefill, or null when there is nothing. */
+export function taskPrefillFromHash(hash: string): TaskPrefill | null {
+  const text = promptFromHash(hash);
+  if (text) return { text };
+  const prUrl = reviewFromHash(hash);
+  return prUrl ? { prUrl } : null;
 }

@@ -9,7 +9,10 @@ import {
   isTaskSelection,
   promptFromHash,
   promptFromSelection,
+  reviewFromHash,
+  reviewTaskHash,
   selectionTaskHash,
+  taskPrefillFromHash,
 } from '../../web/src/selection-task.ts';
 
 test('a selection becomes a trimmed prompt', () => {
@@ -54,4 +57,22 @@ test('only the tasks route carries a prompt', () => {
 
 test('prefilled prompts are normalized like a selection', () => {
   assert.equal(promptFromHash('#/tasks?prompt=%20hello%20%20'), 'hello');
+});
+
+test('a review deep link carries the PR/MR URL verbatim', () => {
+  const url = 'https://gitlab.com/group/sub/project/-/merge_requests/12?tab=notes';
+  const hash = reviewTaskHash(url);
+  assert.ok(hash.startsWith('#/tasks?review='));
+  assert.equal(reviewFromHash(hash), url);
+  assert.deepEqual(taskPrefillFromHash(hash), { prUrl: url });
+  assert.deepEqual(taskPrefillFromHash(selectionTaskHash('Fix the retry loop')), { text: 'Fix the retry loop' });
+});
+
+test('only a tasks deep link prefills anything, and only a URL prefills a review', () => {
+  assert.equal(reviewFromHash('#/tasks?review='), null);
+  assert.equal(reviewFromHash('#/tasks?review=not-a-url'), null);
+  assert.equal(reviewFromHash('#/tasks?prompt=hello'), null);
+  assert.equal(reviewFromHash('#/pulls?review=https%3A%2F%2Fgithub.com%2Fa%2Fb%2Fpull%2F1'), null);
+  assert.equal(reviewFromHash(''), null);
+  assert.equal(taskPrefillFromHash('#/tasks'), null);
 });

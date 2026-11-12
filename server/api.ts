@@ -584,11 +584,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, { providers: Object.fromEntries(entries) });
   });
 
-  // ---- pull requests (where the human is awaited) ----
+  // ---- pull requests (where the human is awaited, plus colleagues' PRs) ----
   on("GET", "/api/pulls", (_req, res) => json(res, 200, cachedPulls()));
 
   on("POST", "/api/pulls/refresh", async (_req, res) => {
-    await refreshPulls(state.hub);
+    await refreshPulls(state.hub, { repoPaths: state.db.listRepos().map((repo) => repo.path), db: state.db });
     json(res, 200, cachedPulls());
   });
 

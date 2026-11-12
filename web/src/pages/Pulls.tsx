@@ -1,11 +1,13 @@
-// Pull Requests — where the human is awaited: review requested, or authored by
-// them (how agent-created PRs show up). Color is the review signal.
+// Pull Requests — where the human is awaited (review requested, or authored by
+// them, how agent-created PRs show up) plus colleagues' open PRs in the repos
+// they can push to. Color is the review signal; Review opens a review task.
 // Sorts/filters live in the URL query so filtered views are shareable links.
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { Pull, PullColor } from "../types";
-import { errText, formatTs, timeAgo } from "../util";
+import { errText, formatTs, prLabel, timeAgo } from "../util";
+import { reviewTaskHash } from "../selection-task";
 import { ExternalLinkIcon, Spinner } from "../ui";
 
 const COLOR_LABEL: Record<PullColor, string> = {
@@ -226,7 +228,7 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
         ) : visible.length === 0 ? (
           <div className="pane-note">
             {pulls.length === 0
-              ? "Nothing awaits you. PRs where you are reviewer or author appear here."
+              ? "Nothing here yet. Your review requests, your own PRs and your colleagues' open PRs appear here."
               : "No PRs match these filters."}
           </div>
         ) : (
@@ -247,6 +249,7 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
                     </a>
                     {p.state === "draft" ? <span className="badge badge-wait">draft</span> : <span className="badge">open</span>}
                     {p.isMine ? <span className="badge badge-mine">you are author</span> : <span className="badge badge-mute">author: {p.author}</span>}
+                    {!p.isMine && p.awaitingMe ? <span className="badge badge-wait" title="Your review is requested">review requested</span> : null}
                   </div>
                   <div className="pull-sub">
                     <span className="mono muted">{p.repo}</span>
@@ -256,6 +259,9 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
                     </span>
                   </div>
                 </div>
+                <a className="btn pull-review" href={reviewTaskHash(p.url)} title={`Dispatch a review of ${prLabel(p.url)}`}>
+                  Review
+                </a>
               </div>
             ))}
           </div>

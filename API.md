@@ -131,6 +131,15 @@ a dispatch or a PR sync.
 
 - `GET /api/errors` → current background synchronization errors (`source`, `message`, `updated_ms`); cleared when the operation succeeds.
 
+### Pull requests
+
+- `GET /api/pulls` → `{pulls: Pull[], fetched_ms}` — the last listing, from memory or from the one saved at the previous shutdown (never waits on GitHub/GitLab).
+- `POST /api/pulls/refresh` → the same shape, after querying both platforms. Single-flight: concurrent calls share one refresh. A platform that fails keeps its last listing (and reports itself in `GET /api/errors`); it never empties the page.
+- `Pull` is `{id, host: "github"|"gitlab", number, title, url, repo, state: "open"|"draft", author, isMine, awaitingMe, color: "green"|"orange"|"red", reason, updated_ms}`.
+- `awaitingMe` marks the human as the one awaited (a requested review, or their own PR); colleagues' PRs are listed with `awaitingMe: false` and sort after those.
+- Discovery: review requests and the human's own open PRs/MRs on both platforms, plus the open PRs/MRs of colleagues in the repos Corral knows where the human can push (GitHub `permissions.push`, GitLab Developer and up) — 5 most recently updated per repo, 30 in total, push access re-probed every 6 h. Upstream projects the human merely cloned contribute nothing.
+- `color`: `red` failing checks or changes requested, `orange` draft, checks running, unresolved threads, or no signals yet (a fresh PR is orange until automated reviews pass), `green` checks green and reviewed with nothing unresolved.
+
 ### Benchmarks
 
 - `GET /api/benchmarks` returns the last persisted snapshot as `{ fetched_ms, results, manual }`, or an empty snapshot before the first sync.

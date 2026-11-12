@@ -136,7 +136,7 @@ export function App() {
             errors: syncErrors.length,
             inbox: 0,
             tasks: tasks.length,
-            pulls: pullsRes.pulls.filter((p) => p.color !== "green").length,
+            pulls: pullsRes.pulls.filter((p) => p.awaitingMe && p.color !== "green").length,
             sessions: sessions.filter((s) => s.state === "live").length,
           });
         }
