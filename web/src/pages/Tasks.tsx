@@ -206,6 +206,7 @@ function TaskRow({
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     setShowDispatch(task.status === "open" || (task.status === "dispatched" && !task.terminal_address));
@@ -276,6 +277,27 @@ function TaskRow({
     await run("comment", () => api.jiraComment(task.id, commentText), "Comment added.");
     setCommentText("");
     setShowComment(false);
+  };
+
+  const copyDescription = async () => {
+    const text = task.prompt;
+    if (!text.trim()) return;
+    let ok = false;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) ok = copyWithExecCommand(text);
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } else {
+      setError("Copy failed");
+    }
   };
 
   return (
@@ -446,6 +468,12 @@ function TaskRow({
       </div>
 
       <div className="task-actions">
+        <span className="visually-hidden" aria-live="polite">
+          {copied ? "Description copied" : ""}
+        </span>
+        <button className="btn" onClick={() => void copyDescription()} disabled={busy !== null || !task.prompt.trim()} title="Copy the task description as markdown">
+          {copied ? "Copied" : "Copy description"}
+        </button>
         {task.status === "open" ? <button className="btn" disabled={busy !== null} onClick={() => void run("cancel", () => api.patchTask(task.id, { status: "archived" }))}>Cancel task</button> : null}
         {task.status === "dispatched" && !!task.terminal_address ? <button
           className="btn"
@@ -482,6 +510,24 @@ function FavoritesTitle({ context }: { context: Context | null }) {
 
 function firstLine(text: string): string {
   return text.trim().split("\n")[0].slice(0, 120);
+}
+
+/** Legacy clipboard fallback for contexts without the async Clipboard API. */
+function copyWithExecCommand(text: string): boolean {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  try {
+    ta.select();
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    ta.remove();
+  }
 }
 
 // No title (omnigent names the session) and no target (picked at dispatch).
