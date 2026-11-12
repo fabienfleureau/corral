@@ -182,6 +182,9 @@ export class SessionFacts {
       // A fact or a "no session here" both mean the backend is up.
       answered++;
       if (result.kind === "missing") {
+        // The session is gone: a model we read while it was live is no longer
+        // this address's model, so do not keep showing it.
+        this.live.delete(address);
         retry.push(address);
         return;
       }

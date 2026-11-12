@@ -187,6 +187,17 @@ test("a long outage does not write the queue off as unknown", async () => {
   assert.equal(size, 3, "the queue recovers once the backend answers again");
 });
 
+test("a live session that disappears stops reporting its old model", async () => {
+  let gone = false;
+  const counts = fakeBackend(() => (gone ? null : { ...live, model: "m", reasoning: null }));
+  const facts = new SessionFacts(counts.backend, { retryMs: 0 });
+  const tasks = [done("deleted")];
+
+  assert.equal((await facts.forTasks(tasks)).get("deleted")?.model, "m");
+  gone = true;
+  assert.equal((await facts.forTasks(tasks)).has("deleted"), false, "a deleted session has no model to report");
+});
+
 test("a single missing session does not back off the healthy ones", async () => {
   // A status-filtered page can hold one task whose session is gone. The backend
   // answered ("no session here"), so that is not an outage: the next request for
