@@ -113,6 +113,7 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
 
   const visible = useMemo(() => {
     const rank: Record<PullColor, number> = { red: 0, orange: 1, green: 2 };
+    const q = filters.q.trim().toLowerCase();
     const out = pulls.filter((p) => {
       if (filters.color !== "all" && p.color !== filters.color) return false;
       if (filters.state !== "all" && p.state !== filters.state) return false;
@@ -120,7 +121,7 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
       if (filters.author === "others" && p.isMine) return false;
       if (filters.host !== "all" && p.host !== filters.host) return false;
       if (filters.repo !== "all" && p.repo !== filters.repo) return false;
-      if (filters.q && !(p.title + " " + p.repo + " " + p.number).toLowerCase().includes(filters.q.toLowerCase())) return false;
+      if (q && !`${p.title} ${p.repo} ${p.number} ${p.author}`.toLowerCase().includes(q)) return false;
       return true;
     });
     const cmp: Record<SortKey, (a: Pull, b: Pull) => number> = {
@@ -131,6 +132,25 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
     };
     return [...out].sort(cmp[filters.sort]);
   }, [pulls, filters]);
+
+  // Group by repo (the project); groups with the most severe PR come first
+  // unless sorting by repo. Rows inside keep the chosen sort.
+  const groups = useMemo(() => {
+    const rank: Record<PullColor, number> = { red: 0, orange: 1, green: 2 };
+    const map = new Map<string, Pull[]>();
+    for (const p of visible) {
+      const key = p.repo || "(no repo)";
+      const list = map.get(key);
+      if (list) list.push(p);
+      else map.set(key, [p]);
+    }
+    const out = [...map.entries()].map(([repo, items]) => ({ repo, items }));
+    const worst = (g: { items: Pull[] }) => Math.min(...g.items.map((p) => rank[p.color]));
+    if (filters.sort === "repo") out.sort((a, b) => a.repo.localeCompare(b.repo));
+    else if (filters.sort === "color") out.sort((a, b) => worst(a) - worst(b) || a.repo.localeCompare(b.repo));
+    else out.sort((a, b) => b.items[0].updated_ms - a.items[0].updated_ms);
+    return out;
+  }, [visible, filters.sort]);
 
   return (
     <div className="page pulls-page">
@@ -214,7 +234,8 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
           </label>
           <input
             className="pull-search"
-            placeholder="Search title or repo…"
+            placeholder="Search title, repo or author…"
+            aria-label="Search pull requests by title, repo or author"
             value={filters.q}
             onChange={(e) => set("q", e.target.value)}
           />
@@ -232,37 +253,52 @@ export function PullsPage({ eventVersion }: { eventVersion: number }) {
               : "No PRs match these filters."}
           </div>
         ) : (
-          <div className="pull-list">
-            {visible.map((p) => (
-              <div key={p.id} className={`pull-row pull-${p.color}`}>
-                <span className={`dot dot-${p.color}`} title={p.reason} />
-                <div className="pull-main">
-                  <div className="pull-title">
-                    <span className={`badge badge-${p.host === "github" ? "mute" : "target"}`}>{p.host}</span>
-                    <span className="pull-number mono" title={`${p.host} number`}>
-                      {p.host === "gitlab" ? "!" : "#"}
-                      {p.number}
-                    </span>
-                    <a href={p.url} target="_blank" rel="noreferrer" className="pull-link">
-                      {p.title}
-                      <ExternalLinkIcon />
+          <div className="pull-groups">
+            {groups.map((g) => (
+              <details key={g.repo} className="pull-group" open>
+                <summary>
+                  <span className="pull-group-name">{g.repo}</span>
+                  <span className="pull-group-count">{g.items.length}</span>
+                  <span className="pull-group-dots" aria-hidden="true">
+                    {(["red", "orange", "green"] as PullColor[]).map((c) =>
+                      g.items.some((p) => p.color === c) ? <span key={c} className={`dot dot-${c}`} /> : null,
+                    )}
+                  </span>
+                </summary>
+                <div className="pull-list">
+                  {g.items.map((p) => (
+                  <div key={p.id} className={`pull-row pull-${p.color}`}>
+                    <span className={`dot dot-${p.color}`} title={p.reason} />
+                    <div className="pull-main">
+                      <div className="pull-title">
+                        <span className={`badge badge-${p.host === "github" ? "mute" : "target"}`}>{p.host}</span>
+                        <span className="pull-number mono" title={`${p.host} number`}>
+                          {p.host === "gitlab" ? "!" : "#"}
+                          {p.number}
+                        </span>
+                        <a href={p.url} target="_blank" rel="noreferrer" className="pull-link">
+                          {p.title}
+                          <ExternalLinkIcon />
+                        </a>
+                        {p.state === "draft" ? <span className="badge badge-wait">draft</span> : <span className="badge">open</span>}
+                        {p.isMine ? <span className="badge badge-mine">you are author</span> : <span className="badge badge-mute">author: {p.author}</span>}
+                        {!p.isMine && p.awaitingMe ? <span className="badge badge-wait" title="Your review is requested">review requested</span> : null}
+                      </div>
+                      <div className="pull-sub">
+                        <span className="mono muted">{p.repo}</span>
+                        <span className={`pull-status pull-${p.color}`}>{COLOR_LABEL[p.color]} — {p.reason}</span>
+                        <span className="time muted" title={formatTs(p.updated_ms)}>
+                          updated {timeAgo(p.updated_ms)}
+                        </span>
+                      </div>
+                    </div>
+                    <a className="btn pull-review" href={reviewTaskHash(p.url)} title={`Dispatch a review of ${prLabel(p.url)}`}>
+                      Review
                     </a>
-                    {p.state === "draft" ? <span className="badge badge-wait">draft</span> : <span className="badge">open</span>}
-                    {p.isMine ? <span className="badge badge-mine">you are author</span> : <span className="badge badge-mute">author: {p.author}</span>}
-                    {!p.isMine && p.awaitingMe ? <span className="badge badge-wait" title="Your review is requested">review requested</span> : null}
                   </div>
-                  <div className="pull-sub">
-                    <span className="mono muted">{p.repo}</span>
-                    <span className={`pull-status pull-${p.color}`}>{COLOR_LABEL[p.color]} — {p.reason}</span>
-                    <span className="time muted" title={formatTs(p.updated_ms)}>
-                      updated {timeAgo(p.updated_ms)}
-                    </span>
-                  </div>
+                  ))}
                 </div>
-                <a className="btn pull-review" href={reviewTaskHash(p.url)} title={`Dispatch a review of ${prLabel(p.url)}`}>
-                  Review
-                </a>
-              </div>
+              </details>
             ))}
           </div>
         )}
