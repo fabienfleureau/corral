@@ -51,7 +51,7 @@ type Item = {
   body: string;      // raw tail / structured body — shown when summary is empty
   source_ref: string | null;   // herdr terminal address for question items
   task_id: string | null;
-  structured: number;          // 1 = agent reported it, 0 = blocked-status fallback
+  structured: number;          // 1 = agent reported it, 0 = fallback: the session blocked, or its run ended (idle/error) with no report
   ready: number;               // pr items: 1 = review gate passes (threads resolved, checks green)
   handling: number;            // pr items: 1 = the agent has the PR work in flight
   created_ms: number; updated_ms: number;

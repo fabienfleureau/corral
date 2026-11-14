@@ -19,6 +19,7 @@ import type {
   WorkerStart,
   WorkerModel,
   WorkerQuestion,
+  WorkerRunOutcome,
   ModelAvailability,
 } from "./worker.ts";
 
@@ -543,6 +544,23 @@ export class OmnigentBackend implements WorkerBackend {
     if (!Array.isArray(content)) return null;
     const text = content.map((part) => part?.type === "input_text" ? str(part.text) : null).filter(Boolean).join("\n");
     return text || null;
+  }
+
+  async lastRunOutcome(address: string): Promise<WorkerRunOutcome | null> {
+    // Newest first: sessions outgrow one page, and only the tail says how the run ended.
+    const res = await this.request<Record<string, unknown>>("GET", `/v1/sessions/${address}/items?limit=8&order=desc`);
+    const items = (res.data ?? res.items ?? []) as Record<string, unknown>[];
+    const last = items.find((item) => item.type !== "resource_event" && item.type !== "reasoning");
+    if (!last) return null;
+    if (last.type === "error") {
+      const text = str(last.message) ?? str(last.code);
+      return text ? { kind: "error", text } : null;
+    }
+    if (last.type === "message" && last.role === "assistant" && Array.isArray(last.content)) {
+      const text = last.content.map((part) => str(part?.text)).filter(Boolean).join("\n").trim();
+      return text ? { kind: "message", text } : null;
+    }
+    return null; // the human spoke last, or the run stopped between tool calls
   }
 
   async read(address: string, lines: number): Promise<string> {

@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { JiraTransitionGateway } from "./jira-status.ts";
-import type { WorkerBackend, WorkerElicitation, WorkerEvent } from "./worker.ts";
+import type { WorkerBackend, WorkerElicitation, WorkerEvent, WorkerRunOutcome } from "./worker.ts";
 import { clearItemHandling, syncTaskPr } from "./pr.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { planMarkdown } from "./multi-repo.ts";
@@ -23,6 +23,7 @@ import type { Item, TaskSpec } from "./types.ts";
 export type Hub = { broadcast: (type: string, data: unknown) => void };
 
 const TAIL_LINES = 40;
+const STOPPED_TEXT_MAX = 6000;
 
 export class CaptureEngine {
   private db: Db;
@@ -32,6 +33,8 @@ export class CaptureEngine {
   /** Jira status sync for PR-stage transitions (null = build one from cfg). */
   private jira: JiraTransitionGateway | null;
   private retrying = new Set<string>();
+  /** Sessions that stopped but whose last run could not be read: retried on the next idle poll. */
+  private unreadStops = new Set<string>();
 
   constructor(db: Db, backend: WorkerBackend, hub: Hub, cfg: Config | null = null, jira: JiraTransitionGateway | null = null) {
     this.db = db;
@@ -88,37 +91,82 @@ export class CaptureEngine {
       this.hub.broadcast("session.updated", { address: e.address, task_id: taskId, status: e.status ?? null });
     }
 
-    if (["idle", "done", "error"].includes(e.status ?? "")) await this.retryInitialFailure(e.address, taskId);
+    // A failed lookup must not abort the rest of the handler: the stop below would be lost.
+    const retried = ["idle", "done", "error"].includes(e.status ?? "")
+      ? await this.retryInitialFailure(e.address, taskId).catch((err) => {
+        console.error("corral: initial-failure check failed", err);
+        return false;
+      })
+      : false;
     if (runEnded && taskId) clearItemHandling(this.db, this.hub, taskId);
 
     if (blocked) {
       await this.ensureQuestionItem(e, taskId);
-    } else if (wasBlocked) {
-      this.resolveOpenQuestion(e.address, "auto");
+    } else {
+      if (wasBlocked) this.resolveOpenQuestion(e.address, "auto");
+      // A run ended (a status change into idle/error), or first sight of an idle
+      // session whose task nobody has heard about: tell the human it stopped.
+      const stopped = status === "idle" || status === "error";
+      if (!stopped) this.unreadStops.delete(e.address);
+      const ended = tracked?.last_status !== status || this.unreadStops.has(e.address) ||
+        (e.type === "created" && !this.db.questionItemForTerminal(e.address));
+      if (stopped && ended && !retried && taskId) await this.reportStoppedRun(e, taskId);
     }
   }
 
-  private async retryInitialFailure(address: string, taskId: string | null): Promise<void> {
+  /** The agent's turn ended and nothing in the inbox says why: no report, no
+   *  question. Without this the task reads "in progress" forever. The agent
+   *  prompt promises it ("Corral's fallback capture will pick you up when you
+   *  go idle"). Nothing is closed on the agent's behalf; the human decides. */
+  private async reportStoppedRun(e: WorkerEvent, taskId: string): Promise<void> {
+    this.unreadStops.delete(e.address);
+    if (!this.backend.lastRunOutcome || !this.awaitingNobody(e.address, taskId)) return;
+    let outcome: WorkerRunOutcome | null;
+    try {
+      outcome = await this.backend.lastRunOutcome(e.address);
+    } catch {
+      this.unreadStops.add(e.address); // the stop is not consumed: look again on the next idle poll
+      return;
+    }
+    // While the session was being read the agent may have reported, or started a new run.
+    if (!outcome || !this.awaitingNobody(e.address, taskId) || this.db.getTerminal(e.address)?.last_status !== e.status) return;
+    const task = this.db.getTask(taskId);
+    const label = task?.title.trim();
+    const text = outcome.text.length > STOPPED_TEXT_MAX ? `${outcome.text.slice(0, STOPPED_TEXT_MAX)}…` : outcome.text;
+    await this.ensureQuestionItem(e, taskId, outcome.kind === "error"
+      ? { title: label ? `${label} — run failed` : "Agent run failed", body: `**The run failed.** Fix the cause, then reply to resume it, or mark the task done.\n\n${text}` }
+      : { title: label ? `${label} — stopped without reporting` : "Agent stopped without reporting", body: `**The agent stopped without reporting.** Reply to continue it, or mark the task done.\n\n${text}` });
+  }
+
+  /** True while the task is in flight on this session and no open item asks the human anything. */
+  private awaitingNobody(address: string, taskId: string): boolean {
+    const task = this.db.getTask(taskId);
+    if (!task || task.status !== "dispatched" || task.terminal_address !== address) return false;
+    return !this.db.raw.prepare("SELECT 1 FROM items WHERE status = 'open' AND (source_ref = ? OR task_id = ?) LIMIT 1").get(address, taskId);
+  }
+
+  private async retryInitialFailure(address: string, taskId: string | null): Promise<boolean> {
     const task = taskId ? this.db.getTask(taskId) : null;
     if (!task || task.status !== "dispatched" || task.terminal_address !== address ||
         Date.now() - task.updated_ms > 10 * 60_000 ||
         !this.backend.initialFailurePrompt || this.retrying.has(address) ||
-        this.db.raw.prepare("SELECT 1 FROM metrics_events WHERE name = ? AND ref = ? LIMIT 1").get("task.initial_retry", address)) return;
+        this.db.raw.prepare("SELECT 1 FROM metrics_events WHERE name = ? AND ref = ? LIMIT 1").get("task.initial_retry", address)) return false;
     this.retrying.add(address);
     try {
       const prompt = await this.backend.initialFailurePrompt(address);
       const current = this.db.getTask(task.id);
-      if (!prompt || current?.status !== "dispatched" || current.terminal_address !== address) return;
+      if (!prompt || current?.status !== "dispatched" || current.terminal_address !== address) return false;
       // Claim before sending: an uncertain delivery must never trigger duplicates.
       this.db.recordMetric("task.initial_retry", address, { task_id: task.id });
       await this.backend.send(address, prompt);
       logTaskEvent(this.db, task.id, "prompt", "Initial prompt re-sent (the run failed to start)", promptData(prompt, { source: "retry", session: address }));
+      return true;
     } finally {
       this.retrying.delete(address);
     }
   }
 
-  private async ensureQuestionItem(e: WorkerEvent, taskId: string | null): Promise<Item | null> {
+  private async ensureQuestionItem(e: WorkerEvent, taskId: string | null, stopped?: { title: string; body: string }): Promise<Item | null> {
     const existing = this.db.openQuestionItemForTerminal(e.address);
     if (existing) {
       const first = e.elicitations?.[0];
@@ -163,6 +211,8 @@ export class CaptureEngine {
         .join("\n\n---\n\n");
       if (first.choices.length > 0) options = JSON.stringify(first.choices.slice(0, 8));
       elicitation = JSON.stringify({ id: first.id, kind: first.kind, field: first.field ?? null, ...(first.questions ? { questions: first.questions } : {}), ...(first.persistPattern ? { persistPattern: first.persistPattern } : {}) });
+    } else if (stopped) {
+      ({ title, body } = stopped);
     } else {
       try {
         body = (await this.backend.read(e.address, TAIL_LINES)) || "(output unavailable)";
@@ -183,6 +233,7 @@ export class CaptureEngine {
       return updated;
     }
 
+    const capture = elicitations.length > 0 ? "elicitation" : stopped ? "idle-fallback" : "blocked-fallback";
     const item: Item = {
       id: randomUUID(),
       kind: "question",
@@ -205,13 +256,13 @@ export class CaptureEngine {
     this.db.insertItem(item);
     this.db.recordMetric("item.created", item.id, {
       kind: "question",
-      capture: elicitations.length > 0 ? "elicitation" : "blocked-fallback",
+      capture,
       task_id: taskId,
     });
     if (taskId) {
       logTaskEvent(this.db, taskId, "question", `Agent asked: ${oneLine(title, 110)}`, {
         item_id: item.id,
-        capture: structured ? "elicitation" : "blocked-fallback",
+        capture,
       });
     }
     this.hub.broadcast("item.created", item);
