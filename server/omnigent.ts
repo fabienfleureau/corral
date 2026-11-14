@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import type { OmnigentConfig } from "./config.ts";
 import { LocalModelProbe } from "./model-probe.ts";
 import type {
+  WorkerAttachment,
   WorkerBackend,
   WorkerElicitation,
   WorkerEvent,
@@ -401,7 +402,11 @@ export class OmnigentBackend implements WorkerBackend {
     if (start.taskId) this.taskIds.set(session.address, start.taskId);
     // The prompt must be delivered as an event to actually start the turn.
     try {
-      await this.send(session.address, start.prompt);
+      // Files are session resources: upload each one, then reference it from
+      // the message (the same two steps omnigent's own composer takes).
+      const files: Record<string, unknown>[] = [];
+      for (const file of start.attachments ?? []) files.push(await this.uploadAttachment(session.address, file));
+      await this.sendContent(session.address, [...files, { type: "input_text", text: start.prompt }]);
     } catch (err) {
       throw new Error(`session created (${session.address}) but prompt delivery failed: ${err}`);
     }
@@ -547,10 +552,37 @@ export class OmnigentBackend implements WorkerBackend {
   }
 
   async send(address: string, text: string): Promise<void> {
+    await this.sendContent(address, [{ type: "input_text", text }]);
+  }
+
+  private async sendContent(address: string, content: Record<string, unknown>[]): Promise<void> {
     await this.request("POST", `/v1/sessions/${address}/events`, {
       type: "message",
-      data: { role: "user", content: [{ type: "input_text", text }] },
+      data: { role: "user", content },
     });
+  }
+
+  /** Store a file in the session and return the message part that points at it. */
+  private async uploadAttachment(address: string, file: WorkerAttachment): Promise<Record<string, unknown>> {
+    const path = `/v1/sessions/${encodeURIComponent(address)}/resources/files`;
+    const form = new FormData();
+    form.append("file", new Blob([file.data], { type: file.contentType }), file.filename);
+    // No Content-Type: fetch adds the multipart boundary itself.
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (this.cfg.token) headers.Authorization = `Bearer ${this.cfg.token}`;
+    const res = await fetch(new URL(path, this.cfg.baseUrl), { method: "POST", headers, body: form });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`omnigent POST ${path} -> ${res.status} (${file.filename}): ${text.slice(0, 300)}`);
+    }
+    const stored = (await res.json()) as { id?: unknown; name?: unknown; metadata?: { filename?: unknown } };
+    const id = str(stored.id);
+    if (!id) throw new Error(`omnigent stored ${file.filename} without returning a file id`);
+    return {
+      type: file.contentType.startsWith("image/") ? "input_image" : "input_file",
+      file_id: id,
+      filename: str(stored.metadata?.filename) ?? str(stored.name) ?? file.filename,
+    };
   }
 
   async resolveElicitation(

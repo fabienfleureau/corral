@@ -16,6 +16,7 @@ import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { dispatchTask } from "./dispatch.ts";
+import { checkAttachments, MAX_TASK_BODY_BYTES } from "./attachments.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
@@ -76,13 +77,15 @@ function json(res: ServerResponse, status: number, data: unknown): void {
   res.end(body);
 }
 
-function readBody(req: IncomingMessage): Promise<unknown> {
+const DEFAULT_BODY_LIMIT = 2 * 1024 * 1024;
+
+function readBody(req: IncomingMessage, limit = DEFAULT_BODY_LIMIT): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on("data", (c: Buffer) => {
       size += c.length;
-      if (size > 2 * 1024 * 1024) {
+      if (size > limit) {
         reject(new Error("body too large"));
         req.destroy();
         return;
@@ -159,9 +162,10 @@ const BACKEND_LIST_MS = 4000;
 const BACKEND_HARNESSES_MS = 6000;
 
 export function createHttpServer(state: AppState): ReturnType<typeof createServer> {
-  const routes: { method: string; pattern: RegExp; keys: string[]; handler: Handler }[] = [];
+  const routes: { method: string; pattern: RegExp; keys: string[]; handler: Handler; bodyLimit: number }[] = [];
 
-  const on = (method: string, path: string, handler: Handler) => {
+  /** `bodyLimit` raises the request size cap for the few routes that carry files. */
+  const on = (method: string, path: string, handler: Handler, bodyLimit = DEFAULT_BODY_LIMIT) => {
     const keys: string[] = [];
     const pattern = new RegExp(
       "^" +
@@ -171,7 +175,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         }) +
         "$",
     );
-    routes.push({ method, pattern, keys, handler });
+    routes.push({ method, pattern, keys, handler, bodyLimit });
   };
 
   const improvement = state.improvement ??= new ImprovementAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt), {
@@ -298,14 +302,20 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const status = url.searchParams.get("status") ?? undefined;
     const tasks = state.db.listTasks(status as never);
     const facts = await taskSessionFacts(state, tasks);
+    const attachments = state.db.attachmentCounts();
     json(res, 200, tasks.map((task) => {
       const fact = task.terminal_address ? facts.get(task.terminal_address) : undefined;
-      return { ...task, session_model: fact?.model ?? null, session_reasoning: fact?.reasoning ?? null };
+      return {
+        ...task,
+        session_model: fact?.model ?? null,
+        session_reasoning: fact?.reasoning ?? null,
+        attachment_count: attachments.get(task.id) ?? 0,
+      };
     }));
   });
 
   on("POST", "/api/tasks", (req, res, { body }) => {
-    const b = body as Partial<Task>;
+    const b = body as Partial<Task> & { attachments?: unknown };
     const kind = b?.kind ?? "code";
     if (kind !== "code" && kind !== "review" && kind !== "spec") return json(res, 400, { error: "kind must be code, review or spec" });
     if (kind === "spec") {
@@ -317,6 +327,9 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       return json(res, 400, { error: "review tasks need a GitHub PR or GitLab MR URL" });
     }
     if (kind !== "review" && !b?.title?.trim() && !b?.prompt?.trim()) return json(res, 400, { error: "title or prompt required" });
+    // Checked before anything is stored: a bad file must not leave a task behind.
+    const attached = checkAttachments(b?.attachments);
+    if (!attached.ok) return json(res, attached.status, { error: attached.error });
     const now = Date.now();
     const task: Task = {
       id: randomUUID(),
@@ -344,7 +357,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       created_ms: now,
       updated_ms: now,
     };
-    state.db.insertTask(task);
+    state.db.insertTaskWithAttachments(task, attached.files);
     state.db.recordMetric("task.created", task.id, { source: b.jira_key ? "jira" : "manual" });
     logTaskEvent(state.db, task.id, "created", kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : "Task created", {
       source: b.jira_key ? "jira" : "manual",
@@ -352,9 +365,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       repo: task.repo_path || null,
       target: task.target || null,
       pr: task.pr_url,
+      attachments: attached.files.length || undefined,
     });
     state.hub.broadcast("task.updated", task);
     json(res, 200, task);
+  }, MAX_TASK_BODY_BYTES);
+
+  on("GET", "/api/tasks/:id/attachments", (_req, res, { params }) => {
+    if (!state.db.getTask(params.id)) return json(res, 404, { error: "task not found" });
+    json(res, 200, state.db.listTaskAttachments(params.id));
   });
 
   on("PATCH", "/api/tasks/:id", (req, res, { body, params }) => {
@@ -908,7 +927,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       let body: unknown;
       if (req.method === "POST" || req.method === "PUT" || req.method === "PATCH") {
         try {
-          body = await readBody(req);
+          body = await readBody(req, route.bodyLimit);
         } catch (err) {
           json(res, 400, { error: String(err) });
           return;

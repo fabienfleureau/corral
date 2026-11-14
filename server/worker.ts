@@ -3,6 +3,15 @@
 // foundation. Everything above this line is Corral's domain: the inbox, Jira,
 // the PR loop, confs/rules.
 
+/** A file that goes to the agent with the first prompt (an image, a PDF, a
+ *  text or code file). The backend decides how to deliver it. */
+export interface WorkerAttachment {
+  filename: string;
+  /** MIME type, already checked against the supported set (see attachments.ts). */
+  contentType: string;
+  data: Uint8Array;
+}
+
 export interface WorkerStart {
   taskId: string | null;
   /** Display name of the task group, when available. */
@@ -17,6 +26,8 @@ export interface WorkerStart {
    *  existingWorktree: repoPath IS the worktree already (bind mode). */
   git: { branch: string; base: string | null; existingWorktree?: boolean } | null;
   prompt: string;
+  /** Files delivered with the prompt. Absent = text only. */
+  attachments?: WorkerAttachment[];
   /** Harness id: "claude" | "codex" | "opencode" | … (bare harness by default). */
   harness: string;
   /** Explicit agent choice (omnigent registry name/id) — null = bare harness. */

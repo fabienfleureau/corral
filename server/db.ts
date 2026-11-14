@@ -1,8 +1,9 @@
 // SQLite storage. One file at <dataDir>/corral.db.
 
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
-import type { Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskStatus, TrackedTerminal } from "./types.ts";
+import type { Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
 import { logTaskChanges, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
@@ -92,6 +93,19 @@ CREATE TABLE IF NOT EXISTS task_events (
   data TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, ts);
+
+-- Files dropped on a task's prompt. The bytes wait here until dispatch hands
+-- them to the worker backend (see attachments.ts).
+CREATE TABLE IF NOT EXISTS task_attachments (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  created_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_attachments_task ON task_attachments(task_id, created_ms);
 `;
 
 export class Db {
@@ -197,6 +211,46 @@ export class Db {
     if (touch) this.stmt(`UPDATE tasks SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
     else this.stmt(`UPDATE tasks SET ${sets} WHERE id = ?`).run(...values, id);
     if (before) logTaskChanges(this, before, patch);
+  }
+
+  /** Create a task and its attachments together: a task never exists without
+   *  the files it was created with. */
+  insertTaskWithAttachments(t: Task, files: { filename: string; content_type: string; data: Uint8Array }[]): void {
+    this.raw.exec("BEGIN");
+    try {
+      this.insertTask(t);
+      files.forEach((f, i) => {
+        this.raw
+          .prepare(`INSERT INTO task_attachments (id, task_id, filename, content_type, bytes, data, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          // created_ms + index keeps the order the files were dropped in.
+          .run(randomUUID(), t.id, f.filename, f.content_type, f.data.length, f.data, t.created_ms + i);
+      });
+      this.raw.exec("COMMIT");
+    } catch (err) {
+      this.raw.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  /** Attachment metadata of one task, in drop order. */
+  listTaskAttachments(taskId: string): TaskAttachment[] {
+    return this.stmt(
+      `SELECT id, task_id, filename, content_type, bytes, created_ms FROM task_attachments WHERE task_id = ? ORDER BY created_ms, rowid`,
+    ).all(taskId) as unknown as TaskAttachment[];
+  }
+
+  /** Attachments with their bytes, for dispatch. */
+  taskAttachmentFiles(taskId: string): { filename: string; contentType: string; data: Uint8Array }[] {
+    const rows = this.stmt(
+      `SELECT filename, content_type, data FROM task_attachments WHERE task_id = ? ORDER BY created_ms, rowid`,
+    ).all(taskId) as unknown as { filename: string; content_type: string; data: Uint8Array }[];
+    return rows.map((r) => ({ filename: r.filename, contentType: r.content_type, data: r.data }));
+  }
+
+  /** How many files each task carries (tasks without any are absent). */
+  attachmentCounts(): Map<string, number> {
+    const rows = this.stmt(`SELECT task_id, COUNT(*) AS n FROM task_attachments GROUP BY task_id`).all() as unknown as { task_id: string; n: number }[];
+    return new Map(rows.map((r) => [r.task_id, Number(r.n)]));
   }
 
   getTask(id: string): Task | null {
