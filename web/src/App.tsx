@@ -11,6 +11,10 @@ import { Spinner } from "./ui";
 import { SelectionToTask } from "./SelectionToTask";
 import { openInboxItems } from "./inbox-selection";
 import { rememberInboxItems, unseenInboxItems } from "./inbox-seen";
+import { NavIcon } from "./nav-icons";
+import { ResizeHandle } from "./ResizeHandle";
+import { usePaneFlag, usePaneWidth } from "./use-pane-size";
+import type { PaneLimits } from "./pane-size";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
 import { SessionsPage } from "./pages/Sessions";
@@ -31,6 +35,11 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 type Counts = { inbox: number; tasks: number; pulls: number; sessions: number; errors: number };
+
+const SIDEBAR_LIMITS: PaneLimits = { min: 160, max: 360 };
+const SIDEBAR_DEFAULT_WIDTH = 200;
+/** The page next to the sidebar never gets squeezed below this. */
+const CONTENT_MIN_WIDTH = 480;
 
 function tabFromHash(): Tab {
   const h = window.location.hash.replace(/^#\/?/, "").split("?")[0];
@@ -63,6 +72,8 @@ export function App() {
   const [errors, setErrors] = useState<{ source: string; message: string; updated_ms: number }[]>([]);
   const [bootError, setBootError] = useState<string | null>(null);
   const [omnigentUrl, setOmnigentUrl] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = usePaneFlag("corral.sidebarCollapsed");
+  const sidebarSize = usePaneWidth("corral.sidebarWidth", SIDEBAR_DEFAULT_WIDTH, SIDEBAR_LIMITS);
 
   const refresh = useCallback(() => setEventVersion((v) => v + 1), []);
 
@@ -177,36 +188,75 @@ export function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <aside
+        className={`sidebar ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
+        style={sidebarCollapsed ? undefined : { width: sidebarSize.width }}
+      >
         <div className="brand">
           <span className="brand-mark">C</span>
           <span className="brand-name">Corral</span>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label="Show navigation labels"
+            aria-pressed={!sidebarCollapsed}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <path d="M9 4v16" />
+            </svg>
+          </button>
         </div>
-        <nav className="nav">
-          {TABS.map((t) => t.key === "sessions" && omnigentUrl ? (
-            <a key={t.key} className="nav-item" href={omnigentUrl} target="_blank" rel="noreferrer" aria-label="Sessions (opens Omnigent in a new tab)" title="Open Omnigent in a new tab">
-              <span className="nav-label">{t.label}<svg className="nav-external-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 3h4v4M13 3 7 9" /><path d="M12 9v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" /></svg></span>
-              <span className="nav-count">
-                {counts.sessions}
-              </span>
-            </a>
-          ) : (
-            <button
-              key={t.key}
-              className={`nav-item ${tab === t.key ? "nav-active" : ""}`}
-              onClick={() => selectTab(t.key)}
-            >
-              <span>{t.label}</span>
-              {t.key !== "settings" && t.key !== "usage" ? (
-                <span className={`nav-count ${t.key !== "sessions" && counts[t.key as keyof Counts] > 0 ? "nav-count-hot" : ""}`}>
-                  {counts[t.key as keyof Counts]}
-                </span>
-              ) : null}
-            </button>
-          ))}
+        <nav className="nav" aria-label="Primary">
+          {TABS.map((t) => {
+            const count = counts[t.key as keyof Counts];
+            const hasCount = t.key !== "settings" && t.key !== "usage";
+            const countClass = `nav-count ${t.key !== "sessions" && count > 0 ? "nav-count-hot" : ""} ${count > 0 ? "" : "nav-count-zero"}`;
+            return t.key === "sessions" && omnigentUrl ? (
+              <a key={t.key} className="nav-item" href={omnigentUrl} target="_blank" rel="noreferrer" aria-label="Sessions (opens Omnigent in a new tab)" title="Open Omnigent in a new tab">
+                <NavIcon name={t.key} />
+                <span className="nav-label">{t.label}<svg className="nav-external-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 3h4v4M13 3 7 9" /><path d="M12 9v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" /></svg></span>
+                <span className={`nav-count ${counts.sessions > 0 ? "" : "nav-count-zero"}`}>{counts.sessions}</span>
+              </a>
+            ) : (
+              <button
+                key={t.key}
+                className={`nav-item ${tab === t.key ? "nav-active" : ""}`}
+                aria-current={tab === t.key ? "page" : undefined}
+                title={sidebarCollapsed ? t.label : undefined}
+                onClick={() => selectTab(t.key)}
+              >
+                <NavIcon name={t.key} />
+                <span className="nav-label">{t.label}</span>
+                {hasCount ? <span className={countClass}>{count}</span> : null}
+              </button>
+            );
+          })}
         </nav>
-        {bootError ? <div className="sidebar-foot inline-error">{bootError}</div> : <div className="sidebar-foot muted">live</div>}
+        {bootError ? (
+          <div className="sidebar-foot sidebar-foot-error inline-error" title={bootError}>
+            <span className="status-dot" aria-hidden="true" />
+            <span className="sidebar-foot-text">{bootError}</span>
+          </div>
+        ) : (
+          <div className="sidebar-foot muted" title="Live: connected to the Corral server">
+            <span className="status-dot" aria-hidden="true" />
+            <span className="sidebar-foot-text">live</span>
+          </div>
+        )}
       </aside>
+      {sidebarCollapsed ? null : (
+        <ResizeHandle
+          label="Resize sidebar"
+          width={sidebarSize.width}
+          limits={SIDEBAR_LIMITS}
+          reserve={CONTENT_MIN_WIDTH}
+          onChange={sidebarSize.setWidth}
+          onReset={sidebarSize.reset}
+        />
+      )}
       <main className="content">
         {!online || stale ? (
           <div className="offline-banner">

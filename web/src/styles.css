@@ -134,7 +134,11 @@ button {
 }
 
 .sidebar {
+  /* Expanded width; the user's dragged width is an inline style. A saved
+     width never starves the page: it yields once the window gets narrow
+     (SIDEBAR_LIMITS.min and CONTENT_MIN_WIDTH in App.tsx). */
   width: 200px;
+  max-width: max(160px, calc(100% - 480px));
   flex: none;
   background: var(--bg);
   border-right: 1px solid var(--border);
@@ -170,6 +174,32 @@ button {
   font-weight: 600;
 }
 
+.sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-inline-start: auto;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.sidebar-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
 .nav {
   display: flex;
   flex-direction: column;
@@ -192,11 +222,20 @@ button {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  gap: 8px;
+}
+
+.nav-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 
 .nav-label {
   display: inline-flex;
   align-items: center;
+  flex: 1;
+  min-width: 0;
   gap: 5px;
 }
 
@@ -236,9 +275,136 @@ button {
 }
 
 .sidebar-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-top: auto;
   padding: 8px 10px 2px;
   font-size: 11px;
+}
+
+.sidebar-foot-text {
+  min-width: 0;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--sig-green);
+}
+
+.sidebar-foot-error .status-dot {
+  background: var(--danger-ink);
+}
+
+/* Collapsed sidebar: an icon rail. Labels stay in the DOM (visually hidden)
+   so every item keeps its accessible name. */
+.sidebar-collapsed {
+  width: 56px;
+  padding-inline: 8px;
+}
+
+.sidebar-collapsed .brand {
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+}
+
+.sidebar-collapsed .brand-name {
+  display: none;
+}
+
+.sidebar-collapsed .sidebar-toggle {
+  margin-inline-start: 0;
+}
+
+.sidebar-collapsed .nav-item {
+  position: relative;
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed .sidebar-foot-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.sidebar-collapsed .nav-count {
+  position: absolute;
+  top: 1px;
+  inset-inline-end: 1px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--chip-bg);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.sidebar-collapsed .nav-count-hot {
+  background: var(--accent-soft);
+}
+
+.sidebar-collapsed .nav-count-zero {
+  display: none;
+}
+
+.sidebar-collapsed .sidebar-foot {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* ---------- column resize handle ---------- */
+
+/* A flex sibling of the pane it resizes: 9px grab area, no layout width, so
+   the pane's own overflow never clips it. */
+.resize-handle {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  width: 9px;
+  /* -4 + -5: the 9px grab area adds no layout width. */
+  margin-inline: -4px -5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline: 3px;
+  background: transparent;
+}
+
+.resize-handle:hover::after,
+.resize-handle:focus-visible::after,
+.resize-handle-active::after {
+  background: var(--accent);
+}
+
+.resize-handle:focus-visible {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .resize-handle::after {
+    transition: background-color 0.15s;
+  }
+}
+
+/* One cursor for the whole page during a drag; no text selection. */
+html.is-resizing,
+html.is-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .content {
@@ -745,7 +911,11 @@ select:focus {
 /* ---------- inbox ---------- */
 
 .list-pane {
+  /* Default width; the user's dragged width is an inline style. The detail
+     pane keeps its minimum after the window shrinks, but never at the cost of
+     the list going below its own minimum (LIST_LIMITS.min in pages/Inbox.tsx). */
   width: 380px;
+  max-width: max(260px, calc(100% - 320px));
   flex: none;
   background: var(--bg);
   border-right: 1px solid var(--border);
