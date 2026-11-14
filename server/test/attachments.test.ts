@@ -12,7 +12,7 @@ import { dispatchTask } from "../dispatch.ts";
 import type { Config } from "../config.ts";
 import { createHttpServer, type AppState } from "../api.ts";
 import { OmnigentBackend } from "../omnigent.ts";
-import { ATTACHMENT_LIMITS, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES, checkAttachments, classifyAttachment, formatBytes, safeFilename } from "../attachments.ts";
+import { ATTACHMENT_LIMITS, IMAGE_TYPES, MAX_ATTACHMENTS, TEXT_EXTENSIONS, TEXT_LIKE_APPLICATION, MAX_ATTACHMENT_TOTAL_BYTES, checkAttachments, classifyAttachment, formatBytes, safeFilename } from "../attachments.ts";
 import * as web from "../../web/src/attachments.ts";
 import type { WorkerBackend, WorkerSession, WorkerStart } from "../worker.ts";
 import type { Task } from "../types.ts";
@@ -42,6 +42,10 @@ test("the web copy of the rules agrees with the server", () => {
   assert.deepEqual(web.ATTACHMENT_LIMITS, ATTACHMENT_LIMITS);
   assert.equal(web.MAX_ATTACHMENTS, MAX_ATTACHMENTS);
   assert.equal(web.MAX_ATTACHMENT_TOTAL_BYTES, MAX_ATTACHMENT_TOTAL_BYTES);
+  // The tables themselves, so a type added to one copy cannot go unnoticed.
+  assert.deepEqual([...web.IMAGE_TYPES].sort(), [...IMAGE_TYPES].sort());
+  assert.deepEqual([...web.TEXT_LIKE_APPLICATION].sort(), [...TEXT_LIKE_APPLICATION].sort());
+  assert.deepEqual([...web.TEXT_EXTENSIONS].sort(), [...TEXT_EXTENSIONS].sort());
   const samples: [string, string][] = [
     ["shot.png", "image/png"], ["", "image/webp"], ["scan.PDF", ""], ["scan", "application/pdf"], ["notes.txt", "text/plain"],
     ["data.json", "application/json"], ["nb.ipynb", "application/x-ipynb+json"], ["main.ts", "video/mp2t"], ["lib.rs", ""],
@@ -57,6 +61,10 @@ test("safeFilename drops directories and the characters omnigent's marker regex 
   assert.equal(safeFilename("C:\\Users\\me\\shot.png"), "shot.png");
   assert.equal(safeFilename("a[1]\n.png"), "a_1__.png");
   assert.equal(safeFilename(".."), "file");
+  // A long name loses part of its stem, never its extension.
+  const long = safeFilename(`${"a".repeat(300)}.ts`);
+  assert.equal(long.length, 200);
+  assert.ok(long.endsWith(".ts"));
   assert.equal(safeFilename(""), "file");
 });
 
@@ -67,6 +75,9 @@ test("checkAttachments decodes valid files and normalizes mislabelled text", () 
     ["a.png", "image/png", "png-bytes"],
     ["main.ts", "text/plain", "let x = 1;"],
   ]);
+  // The extension is what rescues this file, so a long name must keep it.
+  const longTs = checkAttachments([file(`${"n".repeat(250)}.ts`, "video/mp2t", "let y = 2;")]);
+  assert.ok(longTs.ok, "a long .ts name is still text");
   const svg = checkAttachments([file("logo.svg", "image/svg+xml", "<svg/>")]);
   assert.ok(svg.ok);
   assert.equal(svg.files[0].content_type, "text/plain", "an SVG is delivered as text");

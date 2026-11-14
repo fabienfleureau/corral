@@ -28,9 +28,9 @@ export const MAX_TASK_BODY_BYTES = Math.ceil((MAX_ATTACHMENT_TOTAL_BYTES * 4) / 
 
 /** The image types every model provider reads. Anything else (HEIC, TIFF, BMP)
  *  would be stored and then rejected by the model mid-turn. */
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+export const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const TEXT_LIKE_APPLICATION = new Set([
+export const TEXT_LIKE_APPLICATION = new Set([
   "application/json",
   "application/javascript",
   "application/jsonl",
@@ -40,7 +40,7 @@ const TEXT_LIKE_APPLICATION = new Set([
 
 /** Text/code extensions whose browser MIME is often empty or wrong (`.ts`
  *  reports video/mp2t). Same list as omnigent. */
-const TEXT_EXTENSIONS = new Set([
+export const TEXT_EXTENSIONS = new Set([
   ".txt", ".log", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".yaml", ".yml",
   ".toml", ".ini", ".cfg", ".env", ".lock", ".proto", ".graphql", ".gql", ".html", ".htm", ".xml",
   ".css", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".py", ".rb", ".go", ".rs", ".java", ".kt",
@@ -73,8 +73,19 @@ export function classifyAttachment(filename: string, contentType: string): Attac
  *  no brackets (omnigent matches `[Attached: name]` markers by regex). */
 export function safeFilename(raw: string): string {
   const base = raw.split(/[\\/]/).pop() ?? "";
-  const cleaned = base.replace(/[\u0000-\u001f\u007f[\]]/g, "_").trim().slice(0, 200);
+  const cleaned = clipName(base.replace(/[\u0000-\u001f\u007f[\]]/g, "_").trim());
   return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : "file";
+}
+
+const MAX_NAME_CHARS = 200;
+
+/** Shorten a long name by cutting its stem: the extension decides how a text
+ *  file is read, so it must survive. */
+function clipName(name: string): string {
+  if (name.length <= MAX_NAME_CHARS) return name;
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 && name.length - dot <= 20 ? name.slice(dot) : "";
+  return name.slice(0, MAX_NAME_CHARS - ext.length) + ext;
 }
 
 export function formatBytes(bytes: number): string {

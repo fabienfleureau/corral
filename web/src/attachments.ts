@@ -20,9 +20,9 @@ export type AttachmentInput = { filename: string; content_type: string; data: st
 
 /** The image types every model provider reads. Anything else (HEIC, TIFF, BMP)
  *  would be stored and then rejected by the model mid-turn. */
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+export const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const TEXT_LIKE_APPLICATION = new Set([
+export const TEXT_LIKE_APPLICATION = new Set([
   "application/json",
   "application/javascript",
   "application/jsonl",
@@ -30,7 +30,7 @@ const TEXT_LIKE_APPLICATION = new Set([
   "application/x-ipynb+json",
 ]);
 
-const TEXT_EXTENSIONS = new Set([
+export const TEXT_EXTENSIONS = new Set([
   ".txt", ".log", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".ndjson", ".yaml", ".yml",
   ".toml", ".ini", ".cfg", ".env", ".lock", ".proto", ".graphql", ".gql", ".html", ".htm", ".xml",
   ".css", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".py", ".rb", ".go", ".rs", ".java", ".kt",
