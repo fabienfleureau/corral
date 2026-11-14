@@ -43,16 +43,22 @@ function setup(outcome: WorkerRunOutcome | null, task: Partial<Task> = {}, lastS
   db.upsertTerminal({ address: "s1", task_id: "task-1", name: null, agent: "claude", last_status: lastStatus, last_turn: 0, updated_ms: Date.now() });
   let calls = 0;
   let current = outcome;
+  const hooks: { fail: boolean; gate: Promise<void> | null } = { fail: false, gate: null };
   const sent: string[] = [];
   const backend = {
     name: "fake",
     read: async () => "tail",
     send: async (_a: string, text: string) => { sent.push(text); },
-    lastRunOutcome: async () => { calls++; return current; },
+    lastRunOutcome: async () => {
+      calls++;
+      if (hooks.gate) await hooks.gate;
+      if (hooks.fail) throw new Error("omnigent unreachable");
+      return current;
+    },
   } as unknown as WorkerBackend;
   const capture = new CaptureEngine(db, backend, { broadcast() {} });
   const status = (s: string, type: WorkerEvent["type"] = "status") => capture.handleEvent({ type, address: "s1", task_id: "task-1", status: s });
-  return { db, capture, status, calls: () => calls, sent, set: (o: WorkerRunOutcome | null) => { current = o; } };
+  return { db, capture, status, hooks, calls: () => calls, sent, set: (o: WorkerRunOutcome | null) => { current = o; } };
 }
 
 const said: WorkerRunOutcome = { kind: "message", text: "Committed locally, but the push was refused." };
@@ -106,6 +112,33 @@ test("a human reply that is followed by another silent run reopens the same item
     assert.equal(again?.id, first.id);
     assert.match(again!.body, /push was refused/);
     assert.match(again!.body, /here is the PR link/);
+  } finally { db.close(); }
+});
+
+test("a failed read of the session is retried on the next idle poll", async () => {
+  const { db, status, hooks, calls } = setup(said);
+  try {
+    hooks.fail = true;
+    await status("idle");
+    assert.equal(db.openQuestionItemForTerminal("s1"), null);
+    hooks.fail = false;
+    await status("idle");
+    assert.ok(db.openQuestionItemForTerminal("s1"), "one transient failure must not hide the stop for good");
+    await status("idle");
+    assert.equal(calls(), 2, "and a success ends the retrying");
+  } finally { db.close(); }
+});
+
+test("a run that resumes while the session is being read leaves no stale item", async () => {
+  const { db, status, hooks } = setup(said);
+  try {
+    let release!: () => void;
+    hooks.gate = new Promise<void>((resolve) => { release = resolve; });
+    const idle = status("idle"); // parked on the read
+    await status("working");
+    release();
+    await idle;
+    assert.equal(db.openQuestionItemForTerminal("s1"), null, "the agent is running again");
   } finally { db.close(); }
 });
 

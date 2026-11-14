@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { JiraTransitionGateway } from "./jira-status.ts";
-import type { WorkerBackend, WorkerElicitation, WorkerEvent } from "./worker.ts";
+import type { WorkerBackend, WorkerElicitation, WorkerEvent, WorkerRunOutcome } from "./worker.ts";
 import { clearItemHandling, syncTaskPr } from "./pr.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { planMarkdown } from "./multi-repo.ts";
@@ -33,6 +33,8 @@ export class CaptureEngine {
   /** Jira status sync for PR-stage transitions (null = build one from cfg). */
   private jira: JiraTransitionGateway | null;
   private retrying = new Set<string>();
+  /** Sessions that stopped but whose last run could not be read: retried on the next idle poll. */
+  private unreadStops = new Set<string>();
 
   constructor(db: Db, backend: WorkerBackend, hub: Hub, cfg: Config | null = null, jira: JiraTransitionGateway | null = null) {
     this.db = db;
@@ -99,7 +101,9 @@ export class CaptureEngine {
       // A run ended (a status change into idle/error), or first sight of an idle
       // session whose task nobody has heard about: tell the human it stopped.
       const stopped = status === "idle" || status === "error";
-      const ended = tracked?.last_status !== status || (e.type === "created" && !this.db.questionItemForTerminal(e.address));
+      if (!stopped) this.unreadStops.delete(e.address);
+      const ended = tracked?.last_status !== status || this.unreadStops.has(e.address) ||
+        (e.type === "created" && !this.db.questionItemForTerminal(e.address));
       if (stopped && ended && !retried && taskId) await this.reportStoppedRun(e, taskId);
     }
   }
@@ -109,10 +113,17 @@ export class CaptureEngine {
    *  prompt promises it ("Corral's fallback capture will pick you up when you
    *  go idle"). Nothing is closed on the agent's behalf; the human decides. */
   private async reportStoppedRun(e: WorkerEvent, taskId: string): Promise<void> {
+    this.unreadStops.delete(e.address);
     if (!this.backend.lastRunOutcome || !this.awaitingNobody(e.address, taskId)) return;
-    const outcome = await this.backend.lastRunOutcome(e.address).catch(() => null);
-    // The agent's own report may have landed while the session was being read.
-    if (!outcome || !this.awaitingNobody(e.address, taskId)) return;
+    let outcome: WorkerRunOutcome | null;
+    try {
+      outcome = await this.backend.lastRunOutcome(e.address);
+    } catch {
+      this.unreadStops.add(e.address); // the stop is not consumed: look again on the next idle poll
+      return;
+    }
+    // While the session was being read the agent may have reported, or started a new run.
+    if (!outcome || !this.awaitingNobody(e.address, taskId) || this.db.getTerminal(e.address)?.last_status !== e.status) return;
     const task = this.db.getTask(taskId);
     const label = task?.title.trim();
     const text = outcome.text.length > STOPPED_TEXT_MAX ? `${outcome.text.slice(0, STOPPED_TEXT_MAX)}…` : outcome.text;
