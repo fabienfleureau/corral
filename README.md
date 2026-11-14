@@ -1,6 +1,6 @@
 # Corral
 
-The work layer over [omnigent](https://github.com/) agents — Claude Code, Codex,
+The work layer over omnigent agents — Claude Code, Codex,
 OpenCode. Feed it tasks, then answer what needs you from one mail-style inbox.
 No conversation details in the app: **summary + link out** to the omnigent session.
 
