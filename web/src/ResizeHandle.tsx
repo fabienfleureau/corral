@@ -33,11 +33,19 @@ export function ResizeHandle({ label, width, limits, reserve, onChange, onReset 
 
   const currentLimits = () => effectiveLimits(limits, ref.current?.parentElement?.clientWidth ?? 0, reserve);
 
+  // What is on screen, not the stored width: a CSS max-width can hold the pane
+  // narrower than the stored value, and the divider must follow the pointer
+  // from where it really is.
+  const renderedWidth = () => {
+    const pane = ref.current?.previousElementSibling;
+    return pane ? Math.round(pane.getBoundingClientRect().width) : width;
+  };
+
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { startX: event.clientX, startWidth: width, limits: currentLimits() };
+    drag.current = { startX: event.clientX, startWidth: renderedWidth(), limits: currentLimits() };
     setDragging(true);
   };
 
@@ -60,7 +68,7 @@ export function ResizeHandle({ label, width, limits, reserve, onChange, onReset 
       onReset();
       return;
     }
-    const next = keyboardWidth(event.key, width, currentLimits(), event.shiftKey);
+    const next = keyboardWidth(event.key, renderedWidth(), currentLimits(), event.shiftKey);
     if (next === null) return;
     event.preventDefault();
     onChange(next);

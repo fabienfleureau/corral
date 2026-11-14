@@ -909,9 +909,10 @@ select:focus {
 
 .list-pane {
   /* Default width; the user's dragged width is an inline style. The detail
-     pane always keeps its minimum, even after the window shrinks. */
+     pane keeps its minimum after the window shrinks, but never at the cost of
+     the list going below its own minimum (LIST_LIMITS.min in pages/Inbox.tsx). */
   width: 380px;
-  max-width: calc(100% - 320px);
+  max-width: max(260px, calc(100% - 320px));
   flex: none;
   background: var(--bg);
   border-right: 1px solid var(--border);
