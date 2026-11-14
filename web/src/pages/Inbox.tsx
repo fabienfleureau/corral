@@ -321,7 +321,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             <div className="pane-note">{statusFilter === "open" ? "Nothing needs you." : "Nothing here."}</div>
           ) : (
             items.map((item) => {
-              const needsYou = item.status === "open" && item.kind === "question";
+              const needsYou = item.status === "open" && (item.kind === "question" || item.kind === "plan");
               const snoozed = item.snooze_until_ms !== null && item.snooze_until_ms > Date.now();
               const rowTask = item.task_id ? tasksById[item.task_id] : undefined;
               const rowPr = itemPrUrl(item.body, rowTask?.pr_url);
@@ -500,6 +500,17 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   <button className="btn btn-primary" onClick={() => void openConversation()} disabled={openBusy}>
                     {openBusy ? <Spinner /> : null}
                     {openBusy ? "Opening…" : "Open conversation"}
+                  </button>
+                ) : null}
+                {selected.kind === "plan" && selected.status === "open" && linkedTask?.kind === "spec" ? (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => void runAction(async () => { await api.approvePlan(linkedTask.id); return api.resolveItem(selected.id); })}
+                    disabled={actionBusy}
+                    title="Create one task per sub-project, each carrying the contract"
+                  >
+                    {actionBusy ? <Spinner /> : null}
+                    Approve plan
                   </button>
                 ) : null}
                 {selected.kind === "pr" && linkedTask?.branch ? <ForcePrRefresh task={linkedTask} onChecked={refresh} /> : null}

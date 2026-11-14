@@ -277,7 +277,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     const flags: string[] = [];
     if (!task.title.trim()) flags.push("untitled");
     if (!task.model) flags.push("no_pinned_model");
-    if (task.status === "done" && task.kind !== "review" && !task.pr_url) flags.push("done_without_pr");
+    if (task.status === "done" && task.kind !== "review" && task.kind !== "spec" && !task.pr_url) flags.push("done_without_pr");
     if (task.kind === "review" && task.pr_url) flags.push("review_task_stores_reviewed_pr");
     if ((dispatchAgg?.count ?? 0) > 1) flags.push("dispatched_multiple_times");
     if (task.pr_url && !readPrSnapshot(task.pr_meta)) flags.push("no_pr_snapshot");

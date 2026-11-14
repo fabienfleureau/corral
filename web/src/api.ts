@@ -161,7 +161,7 @@ export type NewTaskInput = {
   /** Omit to let omnigent title the session after dispatch. */
   title?: string;
   prompt?: string;
-  kind?: "code" | "review";
+  kind?: "code" | "review" | "spec";
   /** Required for kind "review": the PR/MR to review. */
   pr_url?: string;
   repo_path?: string;
@@ -203,6 +203,7 @@ export const api = {
   listTasks: (status?: Task["status"]): Promise<Task[]> =>
     get<Task[]>(`/api/tasks${query({ status })}`),
   createTask: (input: NewTaskInput): Promise<Task> => post<Task>("/api/tasks", input),
+  approvePlan: (taskId: string): Promise<{ children: Task[] }> => post<{ children: Task[] }>(`/api/tasks/${taskId}/approve-plan`),
   patchTask: (id: string, input: Partial<Task>): Promise<Task> => patch<Task>(`/api/tasks/${id}`, input),
   archiveTaskSession: (id: string): Promise<Task> => post<Task>(`/api/tasks/${id}/archive-session`),
   dispatchTask: (

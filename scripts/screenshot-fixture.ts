@@ -31,12 +31,36 @@ export function seedScreenshotData(db: Db): void {
     jira_url: row.jira_url ?? null, jira_parent_key: null, pr_url: row.pr_url ?? null, pr_meta: null, terminal_address: null,
     exit_code: null, created_ms: now - index * 60000, updated_ms: now - index * 60000,
   }));
+  seedMultiRepo(db, now);
   db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
   db.insertRepo({ id: "sample-home", name: "side-project", path: "/sample/side-project", jira_prefix: null, context: "personal", source: "manual", created_ms: now });
   seedInboxItems(db, now);
   seedBenchmarks(db);
   seedTaskHistory(db, now);
   seedPulls(db, now);
+}
+
+/** A multi-repo spec with its plan waiting for approval, and a code task a
+ *  previous plan created. */
+export function seedMultiRepo(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
+  const contract = "`POST /v1/widgets` accepts `{size: \"s\" | \"m\" | \"l\"}` and returns it unchanged.\n\nDelivery order: `api-spec` first, then `core`.";
+  const subtasks = [
+    { repo: "api-spec", title: "Add `size` to the Widget schema", prompt: "Add the `size` enum to `openapi.yaml` and bump the spec version." },
+    { repo: "core", title: "Persist and return `size`", prompt: "Store `size` on widgets and return it from `POST /v1/widgets`." },
+  ];
+  const base = {
+    prompt: "Add a size to widgets", repo_path: "/sample/workspace", target: "claude", target_state: "confirmed" as const, base_branch: null,
+    branch: null, worktree_path: null, assignee: null, jira_key: null, jira_url: null, jira_parent_key: null, pr_url: null, pr_meta: null,
+    terminal_address: null, exit_code: null, created_ms: now - 2 * 60_000, updated_ms: now - 2 * 60_000,
+  };
+  db.insertTask({ ...base, id: "sample-spec", title: "Add a size to widgets", kind: "spec", status: "dispatched", model: null, reasoning: null, spec: JSON.stringify({ contract, subtasks }) });
+  db.insertTask({ ...base, id: "sample-child", title: "Expose widget colors", kind: "code", status: "open", repo_path: "/sample/workspace/core", model: null, reasoning: null, parent_task_id: "sample-spec", created_ms: now - 3 * 60_000, updated_ms: now - 3 * 60_000 });
+  const body = ["## Contract", "", contract, "", "## Sub-tasks", "", ...subtasks.flatMap((s, i) => [`### ${i + 1}. ${s.title} — \`${s.repo}\``, "", s.prompt, ""])].join("\n").trimEnd();
+  db.insertItem({
+    id: "sample-plan", kind: "plan", status: "open", title: "Add a size to widgets", summary: body, body, context: "", options: null,
+    ready: 1, handling: 0, source_ref: null, task_id: "sample-spec", structured: 1,
+    created_ms: now - 90_000, updated_ms: now - 90_000, resolved_ms: null, snooze_until_ms: null,
+  });
 }
 
 /** The Pull Requests listing: what awaits the human (their own PRs, a requested

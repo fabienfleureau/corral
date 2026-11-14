@@ -17,7 +17,8 @@ import type { JiraTransitionGateway } from "./jira-status.ts";
 import type { WorkerBackend, WorkerElicitation, WorkerEvent } from "./worker.ts";
 import { clearItemHandling, syncTaskPr } from "./pr.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
-import type { Item } from "./types.ts";
+import { planMarkdown } from "./multi-repo.ts";
+import type { Item, TaskSpec } from "./types.ts";
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
 
@@ -263,7 +264,8 @@ export class CaptureEngine {
     const isDone = opts.kind === "done" || opts.kind === "pr";
     const taskId = opts.taskId ?? null;
     // A finished review has no PR of its own to gate: report it as information.
-    const review = taskId ? this.db.getTask(taskId)?.kind === "review" : false;
+    const taskKind = taskId ? this.db.getTask(taskId)?.kind : undefined;
+    const review = taskKind === "review" || taskKind === "spec";
     const itemKind: Item["kind"] = isDone ? (review ? "digest" : "pr") : "question";
     const address =
       opts.terminal ??
@@ -367,6 +369,49 @@ export class CaptureEngine {
     this.db.recordMetric("item.created", item.id, { kind: itemKind, capture: "structured", task_id: taskId });
     this.hub.broadcast("item.created", item);
     if (itemKind === "pr" && taskId) this.syncPrSoon(taskId);
+    return item;
+  }
+
+  /** Called from POST /api/reports with kind "plan": a spec task's contract and
+   *  proposed sub-tasks (already validated). Stored on the task; one open plan
+   *  item per task, replaced when the agent reports a revised plan. */
+  async createPlan(taskId: string, title: string, spec: TaskSpec): Promise<Item> {
+    const task = this.db.getTask(taskId);
+    if (!task) throw new Error("task not found");
+    this.db.updateTask(taskId, { spec: JSON.stringify(spec) });
+    logTaskEvent(this.db, taskId, "session", `Agent proposed a plan: ${spec.subtasks.length} sub-tasks`, {
+      repos: spec.subtasks.map((s) => s.repo),
+    });
+    const body = planMarkdown(spec);
+    const existing = this.db.listItems({ kind: "plan" }).find((i) => i.task_id === taskId && i.status === "open");
+    if (existing) {
+      this.db.updateItem(existing.id, { title, summary: body, body, updated_ms: Date.now() });
+      const updated = this.db.getItem(existing.id)!;
+      this.hub.broadcast("item.updated", updated);
+      return updated;
+    }
+    const item: Item = {
+      id: randomUUID(),
+      kind: "plan",
+      status: "open",
+      title,
+      summary: body,
+      body,
+      context: "",
+      options: null,
+      ready: 1,
+      handling: 0,
+      source_ref: task.terminal_address,
+      task_id: taskId,
+      structured: 1,
+      created_ms: Date.now(),
+      updated_ms: Date.now(),
+      resolved_ms: null,
+      snooze_until_ms: null,
+    };
+    this.db.insertItem(item);
+    this.db.recordMetric("item.created", item.id, { kind: "plan", capture: "structured", task_id: taskId });
+    this.hub.broadcast("item.created", item);
     return item;
   }
 

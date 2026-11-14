@@ -146,6 +146,8 @@ export class Db {
     if (!taskNames.has("handoff")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN handoff TEXT`);
     if (!taskNames.has("kind")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'code'`);
     if (!taskNames.has("review")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN review TEXT`);
+    if (!taskNames.has("parent_task_id")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT`);
+    if (!taskNames.has("spec")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN spec TEXT`);
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
     const repoCols = this.raw.prepare("PRAGMA table_info(repos)").all() as { name: string }[];
     if (!repoCols.some((c) => c.name === "context")) this.raw.exec(`ALTER TABLE repos ADD COLUMN context TEXT`);
@@ -172,14 +174,14 @@ export class Db {
       .prepare(
         `INSERT INTO tasks (id, title, prompt, repo_path, target, target_state, base_branch, branch,
           worktree_path, assignee, jira_key, jira_url, jira_parent_key, jira_status, pr_url, pr_meta, handoff, status, terminal_address,
-          exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review, parent_task_id, spec)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         t.id, t.title, t.prompt, t.repo_path, t.target, t.target_state, t.base_branch, t.branch,
         t.worktree_path, t.assignee, t.jira_key, t.jira_url, t.jira_parent_key, t.jira_status ?? null, t.pr_url, t.pr_meta ?? null,
         t.handoff ?? null, t.status, t.terminal_address, t.exit_code, t.created_ms, t.updated_ms, t.model ?? null, t.reasoning ?? null, t.agent ?? null,
-        t.kind ?? "code", t.review ?? null,
+        t.kind ?? "code", t.review ?? null, t.parent_task_id ?? null, t.spec ?? null,
       );
   }
 

@@ -6,8 +6,27 @@ export type AgentTarget = "claude" | "codex" | "opencode" | string;
 export type TaskStatus = "open" | "dispatched" | "done" | "archived";
 export type TargetState = "suggested" | "confirmed";
 /** code: the agent changes code and opens a PR. review: the agent reviews an
- *  existing PR/MR (pr_url) and posts comments only after the human approves. */
-export type TaskKind = "code" | "review";
+ *  existing PR/MR (pr_url) and posts comments only after the human approves.
+ *  spec: multi-repo step one — the agent works in a folder of sub-projects (not
+ *  a git repo), writes the contract between them and proposes one code task per
+ *  sub-project; no branch, no PR. */
+export type TaskKind = "code" | "review" | "spec";
+
+/** One sub-task a spec proposes. `repo` is a directory relative to the spec task's folder. */
+export interface PlanSubtask {
+  repo: string;
+  title: string;
+  prompt: string;
+}
+
+/** What a spec task stores (JSON in `tasks.spec`): the contract between the
+ *  sub-projects and the sub-tasks waiting for the human's approval. */
+export interface TaskSpec {
+  contract: string;
+  subtasks: PlanSubtask[];
+  /** Set once approved: the ids of the code tasks created from `subtasks`. */
+  children?: string[];
+}
 
 /** Matches a GitHub pull request or GitLab merge request URL. */
 export const PR_URL_RE = /^https?:\/\/[^\s/]+\/[^\s]+?(?:\/pull\/|\/-\/merge_requests\/)\d+\/?$/;
@@ -41,6 +60,10 @@ export interface Task {
   pr_meta: string | null;
   /** Handoff document from the last completed run — injected into follow-up sessions. */
   handoff?: string | null;
+  /** The spec task that created this one (multi-repo): its contract is injected at dispatch. */
+  parent_task_id?: string | null;
+  /** Spec tasks only: JSON {@link TaskSpec}. */
+  spec?: string | null;
   status: TaskStatus;
   terminal_address: string | null;
   exit_code: number | null;
@@ -54,7 +77,7 @@ export function taskLabel(task: Pick<Task, "title" | "prompt">): string {
   return task.title.trim() || task.prompt.trim().split("\n")[0].slice(0, 80) || "Untitled task";
 }
 
-export type ItemKind = "question" | "pr" | "digest";
+export type ItemKind = "question" | "pr" | "digest" | "plan";
 export type ItemStatus = "open" | "resolved" | "archived";
 
 export interface Item {

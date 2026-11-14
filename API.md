@@ -26,7 +26,9 @@ endpoint instead of returning HTML the client would fail to parse.
 ```ts
 type Task = {
   id: string; title: string; prompt: string; repo_path: string;
-  kind: "code" | "review";    // review: review pr_url, no branch, no PR loop
+  kind: "code" | "review" | "spec"; // review: review pr_url, no branch, no PR loop; spec: multi-repo step one (repo_path is a folder of sub-projects)
+  parent_task_id: string | null; // the spec task a code task was created from; its contract is appended to the prompt at dispatch
+  spec: string | null;        // spec tasks: JSON {contract, subtasks:[{repo,title,prompt}], children?}
   pr_url: string | null;      // the task's PR, or the reviewed PR/MR for kind "review"
   review: string | null;      // resolved review command, frozen at dispatch (code tasks)
   target: string;             // "", "claude", "codex", "opencode"
@@ -42,7 +44,7 @@ type Task = {
 
 type Item = {
   id: string;
-  kind: "question" | "pr" | "digest";
+  kind: "question" | "pr" | "digest" | "plan";
   status: "open" | "resolved" | "archived";
   title: string;
   summary: string;   // structured summary ("" until summarized)
@@ -61,7 +63,7 @@ type Item = {
 ## Endpoints
 
 ### Inbox
-- `GET /api/items?status=open|resolved|archived&kind=question|pr|digest` → `Item[]` (newest first)
+- `GET /api/items?status=open|resolved|archived&kind=question|pr|digest|plan` → `Item[]` (newest first)
 - `POST /api/items/:id/reply` `{text}`, `{permission}`, or `{content}` → `{ok, sent_to}` — replies to the agent and resolves the item. For structured question batches, `content` maps each question ID to a string (single choice/custom answer) or nonempty string array (multiple selections); every question must be answered. Single-choice questions also accept `{text}`. Permission choices are `approve`, `reject`, `session`, or `always`; scoped choices require an offered pattern. 400 for invalid/incomplete answers; 409 if no terminal is linked or the elicitation item is not open.
 - `POST /api/items/:id/summarize` → `Item` — LLM summary of `body` into `summary` (async, may take ~10s)
 - `POST /api/items/:id/resolve` → `Item`
@@ -72,7 +74,8 @@ type Item = {
 ### Tasks
 - `GET /api/harnesses` → `{harnesses, agents}` — available harness groups, their model catalogs (when supported by the worker), and the full worker agent registry. 504 when the worker backend does not answer within 6s (retry shortly).
 - `GET /api/tasks?status=open|dispatched|done|archived` → `(Task & {session_model: string | null, session_reasoning: string | null})[]` — linked session settings reported by the worker, or null when unavailable. A session the worker reports as `finished` is read once and kept (see `server/session-facts.ts`); live sessions — including a `done` task whose session is still running — are refreshed through one shared pass per burst of requests, so a queue of a few hundred tasks answers in milliseconds instead of one round trip per task
-- `POST /api/tasks` `{title?, prompt?, kind?, pr_url?, repo_path?, target?, model?, reasoning?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch. `kind: "review"` requires `pr_url` (GitHub pull or GitLab MR URL); the title defaults to `Review <pr_url>`
+- `POST /api/tasks` `{title?, prompt?, kind?, pr_url?, repo_path?, target?, model?, reasoning?, base_branch?, assignee?, jira_key?, jira_url?, jira_parent_key?}` → `Task` — title or prompt required; an empty title is filled from the omnigent session title after dispatch. `kind: "review"` requires `pr_url` (GitHub pull or GitLab MR URL); the title defaults to `Review <pr_url>`. `kind: "spec"` (multi-repo) requires a prompt and `repo_path` = an existing folder (not a git repo) holding the sub-projects
+- `POST /api/tasks/:id/approve-plan` → `{children: Task[]}` — approves a spec task's plan: creates one `code` task per sub-task (`repo_path` = the sub-repo, registered if unknown, `parent_task_id` = the spec task, target copied), marks the spec task done and resolves its `plan` item. 400 if the task is not a spec, has no plan, was already approved, or a sub-task repo no longer validates
 - `PATCH /api/tasks/:id` partial task → `Task` — `kind` is fixed at creation and ignored
 - `POST /api/tasks/:id/archive-session` → `Task` — archives the session and then the dispatched task; leaves the task unchanged if session archiving fails
 - `POST /api/tasks/:id/dispatch` `{target?, use_worktree?, agent?, model?, reasoning?, review?}` → `{address, worktreePath, branch}` — uses saved model and reasoning when omitted; creates worktree + starts the agent (409 if already dispatched, 400 if no target). `review` is a reviewer name from `GET /api/config` `reviewers`; its command (with `{base_branch}` replaced by the task's base branch or the repo's default) is appended to the prompt and frozen on the task. A review task runs on `claude` only (400 otherwise), in `repo_path` with no worktree and no branch (`branch: ""`), with the `skills/review.md` convention: drafts first, publish after the human approves in the inbox. Best effort, never fails or delays the dispatch: a `code` task linked to a Jira ticket (`jira_key`) moves that ticket to "In Progress"
@@ -116,7 +119,7 @@ a dispatch or a PR sync.
 - `POST /api/improvement/run` → inbox digest after the configured assistant finishes. Concurrent requests share one run. The analysis sends a bounded evidence bundle to the configured assistant; it does not dispatch work. By default: 60 recent task snapshots plus up to 60 tasks linked from items or task events (so older items keep their task), 300 items, 1500 events with their payloads, persisted PR snapshots (checks, mergeability, unresolved thread counts and gate reasons) and API-equivalent usage cost/token attribution per task from local agent logs. It also includes derived `data_quality` flags (untitled tasks, done tasks without a PR, repeated dispatches, items resolved without a timestamp, duplicate PR items, orphan/malformed task ids, open PR items) and an explicit `gaps` list; caps are reported in `limits`/`truncated`. Production outcomes and review-thread bodies are still not recorded. Scheduled runs catch up after restart and failed runs retry after one hour.
 
 ### Misc
-- `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`. A `done` report on a review task creates a `digest` item (no PR gate); review tasks are never PR-synced
+- `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`. A `plan` report (`{task_id, kind:"plan", title, contract, subtasks:[{repo,title,prompt}]}`, spec tasks only) stores the contract on the task and creates (or refreshes) one open `plan` item; every `repo` must be a git repository root inside the task folder (relative, no `..`, no symlink out; ≤12, no duplicates) or the report is refused with 400. A spec task is dispatched with `skills/spec.md` in `repo_path` itself, no worktree, no branch, no PR sync. A `done` report on a review task creates a `digest` item (no PR gate); review tasks are never PR-synced
 - `GET /api/metrics/summary` → `{by_name: [{name, count, last_ms}], recent: [{id, ts, name, ref, data}]}`
 - `GET /api/terminals` → tracked terminals `[{address, task_id, name, agent, last_status, last_turn, updated_ms}]`
 - `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, favorites: Favorite[], reviewers: Reviewer[], models: {[modelId]: ModelFacts}, token /* masked */}` — `models` holds only the user's overrides, not the shipped defaults.
