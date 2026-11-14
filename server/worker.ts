@@ -113,6 +113,13 @@ export interface ModelAvailability {
   models: string[];
 }
 
+/** How the session's last run ended, for a run that stopped without a report. */
+export interface WorkerRunOutcome {
+  /** message: the agent's closing words. error: the run died on a backend error. */
+  kind: "message" | "error";
+  text: string;
+}
+
 export interface WorkerBackend {
   name: string;
 
@@ -122,6 +129,9 @@ export interface WorkerBackend {
   get(address: string): Promise<WorkerSession | null>;
   /** Original prompt if the first turn failed before the worker started. */
   initialFailurePrompt?(address: string): Promise<string | null>;
+  /** The newest thing in the session when it is the agent's (closing message or
+   *  error). null = the human spoke last, or the run stopped mid-work. */
+  lastRunOutcome?(address: string): Promise<WorkerRunOutcome | null>;
   /** Recent output (screen + history) as plain text. */
   read(address: string, lines: number): Promise<string>;
   /** Deliver input to a live session (reply to a question). */
