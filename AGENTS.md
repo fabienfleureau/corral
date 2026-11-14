@@ -89,6 +89,24 @@ saved description contains both labeled image links. If capture or upload fails,
 record the specific failure in the PR. Delete the temporary directory when done;
 never commit screenshots or generated fixture data.
 
+### README demo GIF
+
+`docs/demo.gif` is the one committed capture. `scripts/record-demo.ts` records
+it from the same fixture: a scripted tour (inbox, task history, plan, PRs, new
+task, pull requests) with a drawn pointer and captions, encoded by `ffmpeg`.
+A `.gif` output switches the capture script to that tour:
+
+```sh
+npm run build
+mv docs/demo.gif "$shot_dir/old-demo.gif"   # the script refuses to overwrite
+scripts/capture-screenshot.sh "$PWD" "$PWD/docs/demo.gif"
+```
+
+Regenerate it when a toured page changes visibly. The tour only selects,
+types and filters; keep it that way (no dispatch, answer, summarize or Jira
+import). On failure the last frame is saved next to the output as
+`.failed.png`.
+
 ## Code conventions
 
 - TypeScript: **erasable syntax only** (no enums, no parameter properties) —

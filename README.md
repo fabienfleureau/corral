@@ -4,6 +4,8 @@ The work layer over omnigent agents — Claude Code, Codex,
 OpenCode. Feed it tasks, then answer what needs you from one mail-style inbox.
 No conversation details in the app: **summary + link out** to the omnigent session.
 
+![Corral demo: the inbox, task history, a plan, PRs, a new task and the pull request list](docs/demo.gif)
+
 ```
 idea → Jira (clarify outside Corral) → task backlog → dispatch (worktree + agent)
      → agent asks a question / opens a PR → inbox item → you answer or review
