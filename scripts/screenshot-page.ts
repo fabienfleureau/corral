@@ -1,7 +1,7 @@
 // Capture one page from the screenshot fixture through the Chrome DevTools
 // Protocol. `chrome --screenshot` fires as soon as the page has loaded, which
-// races pages that fetch after mount (benchmarks waits for the harness
-// catalog), so this waits for an optional settle expression instead.
+// races pages that fetch after mount, so this waits for an optional settle
+// expression instead.
 // An optional prepare expression puts the page into the state to capture
 // (selecting text, opening a panel) before that wait starts.
 

@@ -54,9 +54,8 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
 - **Usage** — Claude Code, Codex and OpenCode Go spend and quota from local
   session data, cost per done task, PR additions, and GitHub/GitLab API rate
   limits for the PR loop.
-- **Benchmarks and model facts** — a shipped catalog of model facts (retention,
-  quota, cost, benchmark scores) shows indicators on the task form; SWE-bench and
-  Terminal-Bench results sync on demand and manual scores persist.
+- **Model facts** — a shipped catalog of model facts (retention, quota, cost,
+  benchmark scores) shows indicators on the task form.
 - **Improvement analysis** — on demand or on a schedule, the configured assistant
   reviews recent task and PR activity and posts a digest to the inbox. It never
   dispatches work.
@@ -68,7 +67,7 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   offline banner shows when you are disconnected.
 
 Pages are hash-routed: `#/inbox`, `#/tasks`, `#/pulls`, `#/sessions`, `#/usage`,
-`#/benchmarks`, `#/settings`, `#/errors`.
+`#/settings`, `#/errors`.
 
 ## Quickstart
 

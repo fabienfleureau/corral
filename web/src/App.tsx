@@ -16,10 +16,9 @@ import { TasksPage } from "./pages/Tasks";
 import { SessionsPage } from "./pages/Sessions";
 import { PullsPage } from "./pages/Pulls";
 import { SettingsPage } from "./pages/Settings";
-import { BenchmarksPage } from "./pages/Benchmarks";
 import { UsagePage } from "./pages/Usage";
 
-type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "benchmarks" | "settings" | "errors";
+type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "settings" | "errors";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
@@ -27,7 +26,6 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "pulls", label: "Pull Requests" },
   { key: "sessions", label: "Sessions" },
   { key: "usage", label: "Usage" },
-  { key: "benchmarks", label: "Benchmarks" },
   { key: "settings", label: "Settings" },
   { key: "errors", label: "Errors" },
 ];
@@ -199,7 +197,7 @@ export function App() {
               onClick={() => selectTab(t.key)}
             >
               <span>{t.label}</span>
-              {t.key !== "settings" && t.key !== "usage" && t.key !== "benchmarks" ? (
+              {t.key !== "settings" && t.key !== "usage" ? (
                 <span className={`nav-count ${t.key !== "sessions" && counts[t.key as keyof Counts] > 0 ? "nav-count-hot" : ""}`}>
                   {counts[t.key as keyof Counts]}
                 </span>
@@ -220,7 +218,6 @@ export function App() {
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
-        {tab === "benchmarks" ? <BenchmarksPage /> : null}
         {tab === "usage" ? <UsagePage /> : null}
         {tab === "settings" ? <SettingsPage /> : null}
         {tab === "errors" ? <section><h1>Error center</h1><p className="muted">Current background synchronization errors. Errors clear after a successful refresh.</p>{errors.length === 0 ? <p>No current errors.</p> : errors.map((error) => <div className="inline-error" key={error.source}><strong>{error.source}</strong><p>{error.message}</p><small>{new Date(error.updated_ms).toLocaleString()}</small></div>)}</section> : null}
