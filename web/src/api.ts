@@ -1,5 +1,4 @@
 type ImprovementStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
-import type { BenchmarkSnapshot } from "./types";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
@@ -265,10 +264,6 @@ export const api = {
   getRateLimits: (refresh = false): Promise<{ limits: PlatformRateLimit[]; fetched_ms: number }> =>
     get<{ limits: PlatformRateLimit[]; fetched_ms: number }>(`/api/rate-limits${refresh ? "?refresh=1" : ""}`),
 
-  getBenchmarks: (): Promise<BenchmarkSnapshot> => get<BenchmarkSnapshot>("/api/benchmarks"),
-  saveManualBenchmark: (value: { model: string; benchmark: string; score: number }): Promise<BenchmarkSnapshot> => post<BenchmarkSnapshot>("/api/benchmarks/manual", value),
-  deleteManualBenchmark: (model: string, benchmark: string): Promise<BenchmarkSnapshot> => post<BenchmarkSnapshot>("/api/benchmarks/manual/delete", { model, benchmark }),
-  syncBenchmarks: (): Promise<BenchmarkSnapshot> => post<BenchmarkSnapshot>("/api/benchmarks/sync"),
   improvementStatus: (): Promise<ImprovementStatus> => get<ImprovementStatus>("/api/improvement"),
   setImprovementSchedule: (intervalDays: number): Promise<ImprovementStatus> => put<ImprovementStatus>("/api/improvement", { intervalDays }),
   runImprovement: (): Promise<Item> => post<Item>("/api/improvement/run"),

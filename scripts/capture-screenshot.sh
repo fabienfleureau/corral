@@ -18,10 +18,8 @@ case "$output" in /*) ;; *) echo "Use an absolute output path outside the checko
 if [ -e "$output" ]; then echo "Output already exists: $output" >&2; exit 2; fi
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/corral-screenshot.XXXXXX")
 server_pid=
-stub_pid=
 cleanup() {
   if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; fi
-  if [ -n "$stub_pid" ]; then kill "$stub_pid" 2>/dev/null || true; wait "$stub_pid" 2>/dev/null || true; fi
   rm -rf "$scratch"
 }
 trap cleanup EXIT
@@ -50,20 +48,7 @@ fi
 exit 1
 SH
 chmod +x "$scratch/bin/glab"
-# Pages that read the harness catalog (benchmarks) can point at a synthetic
-# catalog instead of the unreachable backend: CORRAL_FIXTURE_HARNESSES=1.
 omnigent_url=http://127.0.0.1:1
-if [ "${CORRAL_FIXTURE_HARNESSES:-}" = "1" ]; then
-  stub_port=$(node -e 'const s=require("node:net").createServer(); s.listen(0,"127.0.0.1",()=>{console.log(s.address().port); s.close()})')
-  node "$fixture_root/scripts/omnigent-stub.ts" "$stub_port" > "$scratch/stub.log" 2>&1 &
-  stub_pid=$!
-  for _ in {1..100}; do
-    if curl -fs "http://127.0.0.1:$stub_port/v1/agents" > /dev/null; then break; fi
-    if ! kill -0 "$stub_pid" 2>/dev/null; then cat "$scratch/stub.log" >&2; exit 1; fi
-    sleep 0.1
-  done
-  omnigent_url="http://127.0.0.1:$stub_port"
-fi
 printf '{"omnigent":{"baseUrl":"%s"},"workspaceRoots":[]}\n' "$omnigent_url" > "$scratch/home/.config/corral/config.json"
 node "$fixture_root/scripts/screenshot-fixture.ts" "$scratch/data/corral.db" "$scratch/home/.config/corral/config.json"
 port=$(node -e 'const s=require("node:net").createServer(); s.listen(0,"127.0.0.1",()=>{console.log(s.address().port); s.close()})')
@@ -84,12 +69,9 @@ if [ "$ready" != true ] || ! grep -q 'sample-open' "$scratch/tasks.json"; then
   echo "Fixture server did not become ready." >&2
   exit 1
 fi
-# Wait for the page's own post-mount fetches before capturing (the benchmark
-# matrix waits for the harness catalog). Pages without data settle immediately.
-case "$route" in
-  /benchmarks*) settle="!document.body.innerText.includes('Loading models from your harnesses')" ;;
-  *) settle="true" ;;
-esac
+# Capture once the page has loaded; CORRAL_FIXTURE_SETTLE waits for a page's
+# own post-mount fetches first.
+settle="true"
 settle=${CORRAL_FIXTURE_SETTLE:-$settle}
 # An optional prepare expression runs before that wait: it puts the page into
 # the state to capture when a plain navigation cannot (a text selection).

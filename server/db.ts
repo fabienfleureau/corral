@@ -122,8 +122,6 @@ export class Db {
 
   /** Migrate databases created by older versions. */
   private migrate(): void {
-    this.raw.exec("CREATE TABLE IF NOT EXISTS benchmark_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), fetched_ms INTEGER NOT NULL, results TEXT NOT NULL)");
-    this.raw.exec("CREATE TABLE IF NOT EXISTS benchmark_manual (model TEXT NOT NULL, benchmark TEXT NOT NULL, score REAL NOT NULL, PRIMARY KEY (model, benchmark))");
     // Last Pull Requests page listing: the page shows it instead of nothing while
     // the first platform refresh runs after a restart.
     this.raw.exec("CREATE TABLE IF NOT EXISTS pull_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), fetched_ms INTEGER NOT NULL, pulls TEXT NOT NULL)");

@@ -143,9 +143,3 @@ a dispatch or a PR sync.
 - `awaitingMe` marks the human as the one awaited (a requested review, or their own PR); colleagues' PRs are listed with `awaitingMe: false` and sort after those.
 - Discovery: review requests and the human's own open PRs/MRs on both platforms, plus the open PRs/MRs of colleagues in the repos Corral knows where the human can push (GitHub `permissions.push`, GitLab Developer and up) — 5 most recently updated per repo, 30 in total, push access re-probed every 6 h. Upstream projects the human merely cloned contribute nothing.
 - `color`: `red` failing checks or changes requested, `orange` draft, checks running, unresolved threads, or no signals yet (a fresh PR is orange until automated reviews pass), `green` checks green and reviewed with nothing unresolved.
-
-### Benchmarks
-
-- `GET /api/benchmarks` returns the last persisted snapshot as `{ fetched_ms, results, manual }`, or an empty snapshot before the first sync.
-- `POST /api/benchmarks/manual` saves `{ model, benchmark, score }` (score 0–100); `POST /api/benchmarks/manual/delete` removes it using `{ model, benchmark }`. Manual scores persist across syncs.
-- `POST /api/benchmarks/sync` fetches published SWE-bench and Terminal-Bench 4.0 results and replaces the snapshot only after both sources succeed. Results identify their source and report the publisher's agent, model, reasoning level (when disclosed), score and date.
