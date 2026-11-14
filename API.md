@@ -128,6 +128,7 @@ a dispatch or a PR sync.
   - **Usage, last 90 days:** counted only from structured invocations: the Claude `Skill` tool, Claude slash commands that match an installed skill, and Codex reads of a `…/skills/<name>/SKILL.md`. The skill listings embedded in transcripts are never counted. Per skill: uses in 30 days and in the window, sessions, last use. Invocations that match no installed skill are listed as `unlisted_invocations`. OpenCode sessions are not scanned.
   - **Coverage:** `coverage_start_ms` is the earliest moment the logs are known to cover; the prompt tells the assistant to say "unused since" that date, since logs get pruned.
   - **Prompts:** the first human message of up to 120 recent sessions, deduplicated, truncated to 280 chars, with Corral's dispatch boilerplate cut and bearer tokens, API keys, URL credentials and long hex strings redacted.
+  - **Corral's own runs are excluded:** summaries and both digests run the `assistant` command (`claude -p`), which logs like any session. Sessions whose first prompt opens with one of Corral's prompts (`server/assistant-prompts.ts`) are dropped, prompt and invocations, and counted in `logs.corral_assistant_runs_excluded`. Other headless runs still count.
   The same evidence is stored in the item's `context` (shown under "Analysis evidence"). Scheduled runs catch up after restart and failed runs retry after one hour.
 
 ### Misc

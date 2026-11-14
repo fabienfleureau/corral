@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ASSISTANT_PROMPT_OPENERS } from "../assistant-prompts.ts";
+import { buildSkillsPrompt } from "../skills-analysis.ts";
+import { IMPROVEMENT_OPENER, SKILLS_OPENER, SUMMARIZE_OPENER } from "../assistant-prompts.ts";
+import { summarizeText } from "../llm.ts";
 import {
   SkillSessionScanner,
   buildSkillsEvidence,
@@ -244,4 +248,28 @@ test("scanner reads recent logs, caches by size and mtime, and flags older logs"
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("Corral's own assistant runs are not the human's sessions", () => {
+  const inventory = [skill({ name: "brainstorming" })];
+  const headless = (prompt: string, id: string) => session({ session: id, prompt, invocations: [{ skill: "brainstorming", plugin: null, ms: NOW - DAY, via: "tool" }] });
+  const sessions = [
+    ...ASSISTANT_PROMPT_OPENERS.map((opener, i) => headless(`${opener} More text.`, `assistant-${i}`)),
+    session({ session: "human", prompt: "Refactor the billing module", invocations: [{ skill: "brainstorming", plugin: null, ms: NOW - 2 * DAY, via: "tool" }] }),
+    // Headless but not Corral's: genuine automation that uses a skill still counts.
+    headless("Use the pr-description skill. Draft the MR", "other-headless"),
+  ];
+  const evidence = buildSkillsEvidence({ inventory, sessions, hasOlderLogs: false, now: NOW });
+  assert.equal(evidence.skills[0].uses_window, 2, "the human session and the unrelated headless run");
+  assert.equal(evidence.logs.corral_assistant_runs_excluded, 3);
+  assert.deepEqual(evidence.prompts.map((p) => p.text).sort(), ["Refactor the billing module", "Use the pr-description skill. Draft the MR"]);
+});
+
+test("each Corral prompt builder starts with its opener, so the filter cannot drift", async () => {
+  // `echo` as the assistant returns the prompt it was given.
+  const sent = await summarizeText({ assistant: ["echo", "{prompt}"] } as never, "some output", "A task");
+  assert.ok(sent.startsWith(SUMMARIZE_OPENER));
+  const evidence = buildSkillsEvidence({ inventory: [], sessions: [], hasOlderLogs: false, now: NOW });
+  assert.ok(buildSkillsPrompt(evidence).startsWith(SKILLS_OPENER));
+  assert.equal(new Set([SUMMARIZE_OPENER, IMPROVEMENT_OPENER, SKILLS_OPENER]).size, 3);
 });

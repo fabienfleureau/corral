@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Db } from "./db.ts";
+import { isAssistantPrompt } from "./assistant-prompts.ts";
 
 const DAY = 86_400_000;
 
@@ -450,7 +451,7 @@ export interface SkillsEvidence {
    *  only hold from here on. */
   coverage_start_ms: number | null;
   /** Sessions scanned are those with activity in the window; some started before it. */
-  logs: { sessions_scanned: number; sessions_started_in_window: number; scanning: boolean };
+  logs: { sessions_scanned: number; sessions_started_in_window: number; corral_assistant_runs_excluded: number; scanning: boolean };
   skills: SkillEvidenceRow[];
   /** Skills invoked in the window that match no inventoried skill: removed
    *  skills, built-in commands or a source this scan does not read. */
@@ -473,7 +474,12 @@ export interface EvidenceInput {
 const ORIGIN_RANK: Record<SkillOrigin, number> = { user: 0, project: 1, plugin: 2 };
 
 export function buildSkillsEvidence(input: EvidenceInput): SkillsEvidence {
-  const { inventory, sessions, now } = input;
+  const { inventory, now } = input;
+  // Corral's own assistant calls (summaries, the two digests) land in the same
+  // logs. They are not the human's work: their prompts and any skill the
+  // headless run invoked would skew both usage and the recurring-work signal.
+  const sessions = input.sessions.filter((s) => !isAssistantPrompt(s.prompt));
+  const assistantRuns = input.sessions.length - sessions.length;
   const days = input.days ?? SKILLS_WINDOW_DAYS;
   const since = now - days * DAY;
   const since30 = now - 30 * DAY;
@@ -554,7 +560,7 @@ export function buildSkillsEvidence(input: EvidenceInput): SkillsEvidence {
     window_days: days,
     window_start_ms: since,
     coverage_start_ms: coverage,
-    logs: { sessions_scanned: sessions.length, sessions_started_in_window: startedInWindow, scanning: input.scanning ?? false },
+    logs: { sessions_scanned: sessions.length, sessions_started_in_window: startedInWindow, corral_assistant_runs_excluded: assistantRuns, scanning: input.scanning ?? false },
     skills: [...rows(owned, MAX_USER_SKILLS), ...rows(plugin, MAX_PLUGIN_SKILLS)],
     unlisted_invocations: unlistedRows.slice(0, MAX_UNLISTED),
     prompts: prompts.slice(0, MAX_PROMPTS).map((s) => ({ ms: s.first_ms, agent: s.agent, project: s.project, text: s.prompt })),

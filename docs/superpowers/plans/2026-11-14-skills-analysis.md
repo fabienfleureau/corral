@@ -8,6 +8,7 @@
 - Usage comes only from structured invocations (Claude `Skill` tool and slash commands, Codex `SKILL.md` reads). Transcripts embed the whole skill listing, so a name match would count every skill as used.
 - "Obsolete" is bounded by log coverage: the prompt says "unused since <date>", never "never used". Plugin skills are advice to disable the plugin, not to delete.
 - Session prompts leave the machine through the assistant command: only the first message of each session, cleaned of Corral boilerplate (which carries the API token), redacted, truncated and capped at about 110 KB, because the prompt travels as one process argument.
+- Corral's own assistant calls (`claude -p`) are logged like sessions. They are dropped by the opening sentence of each Corral prompt, kept in `server/assistant-prompts.ts` so the filter follows the prompts. `entrypoint: "sdk-cli"` is not used: other headless runs, such as MR drafting with a skill, are real usage.
 - Both analyses share one persisted-schedule helper (`server/analysis-schedule.ts`), each with its own settings row.
 
 **Steps:**

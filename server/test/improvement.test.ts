@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Db } from "../db.ts";
 import { ImprovementAnalysis } from "../improvement.ts";
+import { IMPROVEMENT_OPENER } from "../assistant-prompts.ts";
 
 test("manual analysis creates a digest using bounded evidence and never dispatches", async () => {
   const db = new Db(":memory:");
@@ -13,6 +14,7 @@ test("manual analysis creates a digest using bounded evidence and never dispatch
   assert.match(item.body, /examine review delays/);
   assert.match(prompt, /evidence/i);
   assert.match(prompt, /do not invent/i);
+  assert.ok(prompt.startsWith(IMPROVEMENT_OPENER), "the skills analysis recognizes this run by its opener");
   assert.equal(db.listItems().length, 1);
   db.close();
 });
