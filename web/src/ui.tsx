@@ -28,6 +28,15 @@ const iconPaths: Record<Item["kind"], ReactNode> = {
       <path d="M15 6h1a2 2 0 0 1 2 2v7.5" />
     </>
   ),
+  plan: (
+    <>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <circle cx="12" cy="18" r="2.5" />
+      <path d="M6 8.5v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-2" />
+      <path d="M12 13.5v2" />
+    </>
+  ),
   digest: (
     <>
       <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />

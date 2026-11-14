@@ -22,6 +22,7 @@ import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
 import { cachedPulls, platformRateLimits, refreshPulls } from "./pulls.ts";
 import type { Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
+import { PlanError, approvePlan, isDirectory, validateSubtasks } from "./multi-repo.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type UsageRange } from "./usage.ts";
 import { getBenchmarks, syncBenchmarks, saveManualBenchmark, deleteManualBenchmark } from "./benchmarks.ts";
 import { SHIPPED_CATALOG, mergeCatalog, parseCatalog } from "./model-catalog.ts";
@@ -307,12 +308,16 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/tasks", (req, res, { body }) => {
     const b = body as Partial<Task>;
     const kind = b?.kind ?? "code";
-    if (kind !== "code" && kind !== "review") return json(res, 400, { error: "kind must be code or review" });
+    if (kind !== "code" && kind !== "review" && kind !== "spec") return json(res, 400, { error: "kind must be code, review or spec" });
+    if (kind === "spec") {
+      if (!b?.prompt?.trim()) return json(res, 400, { error: "spec tasks need a prompt" });
+      if (!b.repo_path?.trim() || !isDirectory(b.repo_path)) return json(res, 400, { error: "spec tasks need an existing folder in repo_path" });
+    }
     const prUrl = b?.pr_url?.trim() || null;
     if (kind === "review" && (!prUrl || !PR_URL_RE.test(prUrl))) {
       return json(res, 400, { error: "review tasks need a GitHub PR or GitLab MR URL" });
     }
-    if (kind === "code" && !b?.title?.trim() && !b?.prompt?.trim()) return json(res, 400, { error: "title or prompt required" });
+    if (kind !== "review" && !b?.title?.trim() && !b?.prompt?.trim()) return json(res, 400, { error: "title or prompt required" });
     const now = Date.now();
     const task: Task = {
       id: randomUUID(),
@@ -342,7 +347,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     };
     state.db.insertTask(task);
     state.db.recordMetric("task.created", task.id, { source: b.jira_key ? "jira" : "manual" });
-    logTaskEvent(state.db, task.id, "created", kind === "review" ? "Review task created" : "Task created", {
+    logTaskEvent(state.db, task.id, "created", kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : "Task created", {
       source: b.jira_key ? "jira" : "manual",
       kind,
       repo: task.repo_path || null,
@@ -438,6 +443,18 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
   });
 
+  on("POST", "/api/tasks/:id/approve-plan", (_req, res, { params }) => {
+    const task = state.db.getTask(params.id);
+    if (!task) return json(res, 404, { error: "task not found" });
+    try {
+      const children = approvePlan(state.db, state.hub, task);
+      json(res, 200, { children });
+    } catch (err) {
+      if (err instanceof PlanError) return json(res, 400, { error: err.message });
+      json(res, 500, { error: String(err) });
+    }
+  });
+
   on("POST", "/api/tasks/:id/cleanup", async (req, res, { params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
@@ -463,6 +480,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
     if (task.kind === "review") return json(res, 400, { error: "review tasks have no PR of their own" });
+    if (task.kind === "spec") return json(res, 400, { error: "spec tasks have no PR of their own" });
     if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
     const force = (body as { force?: unknown } | undefined)?.force === true;
     const report: { delivered: PrDelivery | null } = { delivered: null };
@@ -496,7 +514,23 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       title?: string;
       body?: string;
       options?: string[];
+      contract?: string;
+      subtasks?: unknown;
     };
+    if (b.kind === "plan") {
+      const planBody = body as { subtasks?: unknown; contract?: string };
+      const task = b.task_id ? state.db.getTask(b.task_id) : null;
+      if (!task || task.kind !== "spec") return json(res, 400, { error: "a plan report needs the task_id of a spec task" });
+      if (!b.title || !planBody.contract?.trim()) return json(res, 400, { error: "title and contract required" });
+      try {
+        const subtasks = validateSubtasks(task.repo_path, planBody.subtasks);
+        const item = await state.capture.createPlan(task.id, b.title, { contract: planBody.contract, subtasks });
+        return json(res, 200, item);
+      } catch (err) {
+        if (err instanceof PlanError) return json(res, 400, { error: err.message });
+        throw err;
+      }
+    }
     if (!b?.title || !b?.body) return json(res, 400, { error: "title and body required" });
     const item = await state.capture.createStructuredQuestion({
       kind: b.kind ?? "question",

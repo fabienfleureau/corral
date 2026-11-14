@@ -5,7 +5,9 @@ export type Task = {
   title: string;
   prompt: string;
   /** "review": review the existing PR/MR in pr_url; no branch, no PR. */
-  kind?: "code" | "review";
+  kind?: "code" | "review" | "spec";
+  /** The spec task a code task was created from (multi-repo). */
+  parent_task_id?: string | null;
   repo_path: string;
   target: string; // "", "claude", "codex", "opencode"
   target_state: "suggested" | "confirmed";
@@ -33,7 +35,7 @@ export type Task = {
 
 export type Item = {
   id: string;
-  kind: "question" | "pr" | "digest";
+  kind: "question" | "pr" | "digest" | "plan";
   status: "open" | "resolved" | "archived";
   title: string;
   summary: string; // structured summary ("" until summarized)

@@ -13,6 +13,7 @@ import type { Db } from "./db.ts";
 import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 import { gitToplevel } from "./repos.ts";
+import { contractBlock, isDirectory } from "./multi-repo.ts";
 import { logTaskEvent, promptData } from "./task-events.ts";
 import type { WorkerBackend, WorkerSession } from "./worker.ts";
 import { taskLabel, type Task } from "./types.ts";
@@ -55,13 +56,16 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
   };
   // A review must not commit, push or open a PR: its convention replaces both
   // the finish flow of question-report.md and the PR loop.
+  // A spec task never commits or opens a PR: it reports a plan instead.
   const parts = task.kind === "review"
     ? [read("review.md", "Review the PR/MR. Do not change code. Ask before posting any comment.")]
+    : task.kind === "spec"
+    ? [read("spec.md", "Write the contract between the sub-projects and report it as a plan. Do not change code.")]
     : [
       read("question-report.md", "When you need the human, ask clearly and wait. Do not guess."),
       read("pr-loop.md", ""),
     ];
-  if (task.kind !== "review" && reviewCommand) {
+  if (task.kind !== "review" && task.kind !== "spec" && reviewCommand) {
     // A callback replacement, not a string: review commands legitimately contain
     // `$` sequences ($$, $&, $') that replaceAll would otherwise expand.
     parts.push(read("pre-pr-review.md", "").replaceAll("{review_command}", () => reviewCommand));
@@ -166,10 +170,16 @@ export async function dispatchTask(
   if (!task.repo_path?.trim()) {
     throw new Error("task has no repo assigned — assign one before dispatching");
   }
-  try {
-    gitToplevel(task.repo_path);
-  } catch {
-    throw new Error(`not a git repository: ${task.repo_path}`);
+  const spec = task.kind === "spec";
+  if (spec) {
+    // The folder holds the sub-projects; it is not a repository itself.
+    if (!isDirectory(task.repo_path)) throw new Error(`not a directory: ${task.repo_path}`);
+  } else {
+    try {
+      gitToplevel(task.repo_path);
+    } catch {
+      throw new Error(`not a git repository: ${task.repo_path}`);
+    }
   }
 
   const review = task.kind === "review";
@@ -178,7 +188,7 @@ export async function dispatchTask(
     if (!task.pr_url) throw new Error("review task has no PR/MR URL");
   }
   // A review reads the MR head without checking it out: no worktree, no branch.
-  const useWorktree = !review && opts.useWorktree !== false;
+  const useWorktree = !review && !spec && opts.useWorktree !== false;
   const originalBranch = task.branch ?? `${slugify(taskLabel(task), 32)}-${task.id.slice(0, 6)}`;
   let branch = originalBranch;
 
@@ -189,14 +199,14 @@ export async function dispatchTask(
   if (review) taskContext.push(`Review this PR/MR: ${task.pr_url}`);
   // A Jira-imported task's title and description are the ticket's own text:
   // frame the block as data before the conventions, which are Corral's rules.
-  const taskText = [task.jira_url ? DATA_NOT_INSTRUCTIONS : "", taskContext.join("\n\n")]
+  const taskText = [task.jira_url ? DATA_NOT_INSTRUCTIONS : "", taskContext.join("\n\n"), contractBlock(db, task)]
     .filter(Boolean)
     .join("\n\n");
 
   // Resolve the reviewer before building the prompt: {base_branch} needs the
   // task's pinned branch, or the remote default when the task did not pin one.
   let reviewCommand: string | null = null;
-  if (!review && opts.review) {
+  if (!review && !spec && opts.review) {
     const reviewer = (cfg.reviewers ?? []).find((r) => r.name === opts.review);
     if (!reviewer) throw new Error(`unknown reviewer: ${opts.review}`);
     const baseBranch = task.base_branch?.trim() || await defaultBranchName(task.repo_path);
@@ -250,7 +260,7 @@ export async function dispatchTask(
     target_state: "confirmed",
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
-    branch: review ? null : branch,
+    branch: review || spec ? null : branch,
     worktree_path: useWorktree && session.cwd ? session.cwd : null,
     terminal_address: session.address,
     review: reviewCommand,
@@ -276,11 +286,11 @@ export async function dispatchTask(
   logTaskEvent(db, task.id, "prompt", `Initial prompt sent to ${target}`, promptData(fullPrompt, {
     source: "dispatch",
     harness: target,
-    kind: review ? "review" : "code",
+    kind: review ? "review" : spec ? "spec" : "code",
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
     agent: opts.agent ?? null,
-    branch: review ? null : branch,
+    branch: review || spec ? null : branch,
     worktree: useWorktree && session.cwd ? session.cwd : null,
     session: session.address,
   }));
@@ -289,11 +299,11 @@ export async function dispatchTask(
   // never awaited — an unreachable Jira must not delay or fail a dispatch.
   const dispatched = db.getTask(task.id) ?? task;
   const jira = opts.jira ?? (cfg.jira ? new JiraClient(cfg.jira) : null);
-  if (jira && dispatched.jira_key && dispatched.kind !== "review") {
+  if (jira && dispatched.jira_key && dispatched.kind !== "review" && dispatched.kind !== "spec") {
     void syncJiraStage({ db, gateway: jira, statuses: cfg.jira?.statuses }, dispatched, "in_progress").catch(
       () => undefined,
     );
   }
 
-  return { address: session.address, worktreePath: session.cwd, branch: review ? "" : branch };
+  return { address: session.address, worktreePath: session.cwd, branch: review || spec ? "" : branch };
 }

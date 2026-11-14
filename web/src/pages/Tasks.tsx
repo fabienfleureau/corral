@@ -150,7 +150,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} version={eventVersion} refresh={refresh} />
+              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} version={eventVersion} refresh={refresh} parentTitle={task.parent_task_id ? parentLabel(tasks, task.parent_task_id) : null} />
             ))}
           </div>
         ) : null}
@@ -219,8 +219,11 @@ function TaskRow({
   reviewers,
   version,
   refresh,
+  parentTitle,
 }: {
   task: Task;
+  /** Title of the spec task this one was created from (multi-repo), or null. */
+  parentTitle: string | null;
   repos: Repo[];
   targets: string[];
   quotas: AgentQuota[];
@@ -272,6 +275,9 @@ function TaskRow({
   };
 
   const review = task.kind === "review";
+  const spec = task.kind === "spec";
+  // A review or a spec runs in place: no worktree, no branch, no base branch.
+  const inPlace = review || spec;
   const rowTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
   const selectedTarget = rowTargets.includes(target) ? target : rowTargets[0] ?? "";
 
@@ -282,14 +288,14 @@ function TaskRow({
     setMsg(null);
     try {
       const base = baseBranch.trim() || null;
-      if (!review && base !== task.base_branch) await api.patchTask(task.id, { base_branch: base });
+      if (!inPlace && base !== task.base_branch) await api.patchTask(task.id, { base_branch: base });
       const result = await api.dispatchTask(task.id, {
         target: selectedTarget,
-        use_worktree: review ? false : useWorktree,
+        use_worktree: inPlace ? false : useWorktree,
         agent: agent || null,
         model: model.trim() || null,
         reasoning: reasoning.trim() || null,
-        review: review ? null : reviewName || null,
+        review: inPlace ? null : reviewName || null,
       });
       setDispatchResult(result);
       setShowDispatch(false);
@@ -365,6 +371,8 @@ function TaskRow({
         <div className="task-sub">
           <span className={`badge status-${task.status}`} title={task.worktree_path ? `Worktree: ${task.worktree_path}` : undefined}>{task.status}</span>
           {review ? <span className="badge badge-review" title="Reviews the linked PR/MR; comments are published after your approval">review</span> : null}
+          {spec ? <span className="badge badge-review" title="Writes the contract between the sub-projects in repo_path; approving its plan in the inbox creates one task per sub-project">multi-repo spec</span> : null}
+          {parentTitle ? <span className="badge badge-review" title="Created from a multi-repo plan; the contract is appended to this task's prompt">from {parentTitle}</span> : null}
           {task.target ? <span className="badge badge-target">{task.target}</span> : null}
           {task.terminal_address ? <>
             <span className="muted">Model: {task.session_model || "Unknown"}</span>
@@ -464,7 +472,7 @@ function TaskRow({
                 ))}
               </select>
             </label>
-            {review ? null : <label className="field-inline">
+            {inPlace ? null : <label className="field-inline">
               <span>Reviewer</span>
               <select value={reviewName} onChange={(e) => setReviewName(e.target.value)}>
                 <option value="">— none —</option>
@@ -481,7 +489,7 @@ function TaskRow({
               context: repoContext(repos, task.repo_path),
               providers: providerModels,
             })} />
-            {review ? null : <>
+            {inPlace ? null : <>
             <label className="field-inline">
               <span>Base branch (optional)</span>
               <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="Default branch" disabled={busy !== null} />
@@ -612,6 +620,11 @@ function FavoriteChip({ favorite, disabled, report, onPick }: { favorite: Favori
 
 // ---- new task form ----
 
+function parentLabel(tasks: Task[], id: string): string {
+  const parent = tasks.find((t) => t.id === id);
+  return parent ? (parent.title.trim() || firstLine(parent.prompt) || "spec") : "plan";
+}
+
 function firstLine(text: string): string {
   return text.trim().split("\n")[0].slice(0, 120);
 }
@@ -638,7 +651,7 @@ function copyWithExecCommand(text: string): boolean {
 function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, reviewers, prefill, onPrefillHandled, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; reviewers: Reviewer[]; prefill: TaskPrefill | null; onPrefillHandled: () => void; onDone: () => void }) {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   useEffect(() => { api.getConfig().then((cfg) => setFavorites(cfg.favorites ?? [])).catch(() => undefined); }, []);
-  const [kind, setKind] = useState<"code" | "review">("code");
+  const [kind, setKind] = useState<"code" | "review" | "spec">("code");
   const [prUrl, setPrUrl] = useState("");
   const [prompt, setPrompt] = useState(prefill?.text ?? "");
   const [repoChoice, setRepoChoice] = useState("");
@@ -693,6 +706,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const formContext = repoContext(repos, selectedRepo);
   const shownFavorites = favoritesFor(favorites, formContext);
   const review = kind === "review";
+  const spec = kind === "spec";
   const formTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
   const selectedTarget = formTargets.includes(target) ? target : formTargets[0] ?? "";
   const prUrlValid = isPrUrl(prUrl);
@@ -707,20 +721,20 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
     setError(null);
     try {
       const input: NewTaskInput = {
-        ...(review ? { kind, pr_url: prUrl.trim(), title: `Review ${prLabel(prUrl.trim())}` } : {}),
+        ...(review ? { kind, pr_url: prUrl.trim(), title: `Review ${prLabel(prUrl.trim())}` } : spec ? { kind } : {}),
         prompt,
         target: selectedTarget,
         model: selectedSettings.model.trim() || null,
         reasoning: selectedSettings.reasoning.trim() || null,
-        repo_path: selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo,
-        base_branch: review ? null : baseBranch.trim() || null,
+        repo_path: spec ? repoPath.trim() : selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo,
+        base_branch: review || spec ? null : baseBranch.trim() || null,
       };
       const task = await api.createTask(input);
       clear();
       onDone();
       if (dispatch) {
         try {
-          await api.dispatchTask(task.id, { target: selectedTarget, use_worktree: !review, agent: agent || null, review: review ? null : reviewName || null });
+          await api.dispatchTask(task.id, { target: selectedTarget, use_worktree: !review && !spec, agent: agent || null, review: review || spec ? null : reviewName || null });
           onDone();
         } catch (err) {
           setError(`Task created, but dispatch failed: ${errText(err)}`);
@@ -744,8 +758,9 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
         </p>
       ) : null}
       <div className="seg" role="radiogroup" aria-label="Task type">
-        <button type="button" role="radio" aria-checked={!review} className={`seg-btn${review ? "" : " active"}`} onClick={() => setKind("code")}>Code change</button>
+        <button type="button" role="radio" aria-checked={!review && !spec} className={`seg-btn${review || spec ? "" : " active"}`} onClick={() => setKind("code")}>Code change</button>
         <button type="button" role="radio" aria-checked={review} className={`seg-btn${review ? " active" : ""}`} onClick={() => setKind("review")}>Review a PR/MR</button>
+        <button type="button" role="radio" aria-checked={spec} className={`seg-btn${spec ? " active" : ""}`} onClick={() => setKind("spec")}>Multi-repo</button>
       </div>
       {review ? (
         <>
@@ -755,6 +770,15 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           </label>
           {prUrl.trim() && !prUrlValid ? <div className="inline-error">Paste a GitHub pull request or GitLab merge request URL.</div> : null}
           <p className="muted form-hint">The agent reviews with the fabien-reviewer skill and posts comments as drafts. Nothing is published until you approve the list in the inbox. No branch, no code changes.</p>
+        </>
+      ) : null}
+      {spec ? (
+        <>
+          <label className="field">
+            <span>Folder of sub-projects</span>
+            <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/folder (one git repo per directory)" />
+          </label>
+          <p className="muted form-hint">Step one: the agent reads the sub-projects and writes the contract between them, then proposes one task per sub-project. Nothing is created until you approve the plan in the inbox. No branch, no code changes. Name any system map or architecture doc in the prompt.</p>
         </>
       ) : null}
       <label className="field">
@@ -767,7 +791,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           placeholder={review ? "Anything to look at in particular?" : "What should the agent do?"}
         />
       </label>
-      <div className="field-row">
+      {spec ? null : <div className="field-row">
         <label className="field">
           <span>Repo</span>
           <select value={selectedRepo} onChange={(e) => { setRepoTouched(true); setRepoChoice(e.target.value); }}>
@@ -792,7 +816,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
             <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
           </label>
         )}
-      </div>
+      </div>}
       {favorites.length > 0 ? <div className="field"><FavoritesTitle context={formContext} /><div className="chip-row">{shownFavorites.length === 0 ? <span className="muted">No {formContext} favorites</span> : null}{shownFavorites.map((f, i) => (
         <FavoriteChip
           key={i}
@@ -813,7 +837,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           {(agentOptions[selectedTarget] ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select></label>
       </div>
-      {review ? null : <div className="field-row">
+      {review || spec ? null : <div className="field-row">
         <label className="field"><span>Reviewer</span><select value={reviewName} onChange={(e) => setReviewName(e.target.value)}>
           <option value="">— none —</option>
           {reviewName && !reviewers.some((r) => r.name === reviewName) ? <option value={reviewName}>{reviewName} (unavailable)</option> : null}
@@ -833,10 +857,10 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
       })} />
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
-        <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !hasContent || !selectedTarget || (!!agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent)) || !(selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
+        <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !hasContent || !selectedTarget || (!!agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent)) || !(spec || selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
           Create and dispatch
         </button>
-        <button className="btn" onClick={() => void submit(false)} disabled={busy || !hasContent}>
+        <button className="btn" onClick={() => void submit(false)} disabled={busy || !hasContent || (spec && !repoPath.trim())}>
           {busy ? <Spinner /> : null}
           {busy ? "Creating…" : "Create task"}
         </button>

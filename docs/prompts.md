@@ -31,13 +31,15 @@ Assembled by `questionConvention()` in `server/dispatch.ts` and joined with
 <task description>
 Jira: <task jira url>            # only when the task came from Jira
 Review this PR/MR: <pr url>      # only for a review task
+## Multi-repo contract ...         # only for a task created from a plan (parent_task_id)
 ---
 <conventions below>
 ```
 
 | File | Sent when | Placeholders | Behaviour if the file is missing |
 |---|---|---|---|
-| `skills/question-report.md` | every task whose `kind !== "review"` | `{corral_url}`, `{corral_token}`, `{task_id}` | one-line fallback: *"When you need the human, ask clearly and wait. Do not guess."* |
+| `skills/question-report.md` | every `code` task (neither `review` nor `spec`) | `{corral_url}`, `{corral_token}`, `{task_id}` | one-line fallback: *"When you need the human, ask clearly and wait. Do not guess."* |
+| `skills/spec.md` | **replaces** `question-report.md` and `pr-loop.md` when `task.kind === "spec"` (multi-repo step one) — a spec reads the sub-projects, reports a `plan` and never commits | `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Write the contract between the sub-projects and report it as a plan. Do not change code."* |
 | `skills/pr-loop.md` | same tasks, right after `question-report.md` | — | dropped (empty string is filtered out) |
 | `skills/pre-pr-review.md` | non-review task dispatched **with a reviewer** (`review` in the dispatch options) | `{review_command}` | dropped |
 | `skills/review.md` | **replaces** the two files above when `task.kind === "review"` — a review must not commit, push or open a PR | `{pr_url}`, `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Review the PR/MR. Do not change code. Ask before posting any comment."* |
@@ -60,6 +62,11 @@ What each one is for:
 - **`review.md`** — reviewing someone else's PR/MR: read-only, post **drafts**
   only (`glab .../draft_notes`, one pending GitHub review), ask the human which
   comments to publish, then publish or delete the rest.
+- **`spec.md`** — multi-repo step one: read-only in a folder of sub-projects,
+  write the contract between them (owner and consumers of every interface), one
+  self-contained sub-task per touched repo and the delivery order, then POST
+  `kind: "plan"`. Corral validates each `repo` and the human approves in the inbox.
+  A child code task later gets the contract appended to its prompt (see below).
 - **`clarify.md`** — ticket → subtasks breakdown, outside Corral.
 
 ### Where the text is read from
