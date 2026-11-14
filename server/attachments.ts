@@ -77,15 +77,25 @@ export function safeFilename(raw: string): string {
   return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : "file";
 }
 
-const MAX_NAME_CHARS = 200;
+/** Longest stored name, in UTF-8 bytes: filesystems limit bytes, not characters,
+ *  and omnigent appends a digest when two files share a name. */
+const MAX_NAME_BYTES = 200;
 
 /** Shorten a long name by cutting its stem: the extension decides how a text
  *  file is read, so it must survive. */
 function clipName(name: string): string {
-  if (name.length <= MAX_NAME_CHARS) return name;
+  if (Buffer.byteLength(name) <= MAX_NAME_BYTES) return name;
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 && name.length - dot <= 20 ? name.slice(dot) : "";
-  return name.slice(0, MAX_NAME_CHARS - ext.length) + ext;
+  const budget = MAX_NAME_BYTES - Buffer.byteLength(ext);
+  let stem = "";
+  let bytes = 0;
+  for (const ch of name.slice(0, name.length - ext.length)) {
+    bytes += Buffer.byteLength(ch);
+    if (bytes > budget) break;
+    stem += ch;
+  }
+  return stem + ext;
 }
 
 export function formatBytes(bytes: number): string {

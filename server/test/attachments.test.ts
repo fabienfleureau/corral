@@ -65,6 +65,11 @@ test("safeFilename drops directories and the characters omnigent's marker regex 
   const long = safeFilename(`${"a".repeat(300)}.ts`);
   assert.equal(long.length, 200);
   assert.ok(long.endsWith(".ts"));
+  // Filesystems limit bytes: a CJK name of 104 characters is 312 bytes.
+  const cjk = safeFilename(`${"界".repeat(100)}.txt`);
+  assert.ok(Buffer.byteLength(cjk) <= 200, `${Buffer.byteLength(cjk)} bytes`);
+  assert.ok(cjk.endsWith(".txt"));
+  assert.equal(safeFilename("naïve résumé.md"), "naïve résumé.md");
   assert.equal(safeFilename(""), "file");
 });
 
@@ -234,71 +239,68 @@ test("dispatch without attachments sends none", () =>
 
 // ---- omnigent delivery ----
 
-test("omnigent uploads each file to the session, then sends one message that references them", async () => {
-  const backend = new OmnigentBackend({ baseUrl: "http://omnigent.test", token: "secret", hostId: "", agents: {} });
+/** Stands in for the omnigent HTTP API: only `fetch` is replaced, so the real
+ *  request path (auth, multipart headers, error formatting) runs. */
+function fakeOmnigent(uploadStatus = 201) {
   const calls: string[] = [];
-  let message: { data: { role: string; content: Record<string, unknown>[] } } | null = null;
-  const internals = backend as unknown as {
-    request: (m: string, p: string, body?: unknown) => Promise<unknown>;
-    ensureHarnessAgent: () => Promise<string>;
-  };
-  internals.ensureHarnessAgent = async () => "agent-1";
-  internals.request = async (method, path, body) => {
-    calls.push(`${method} ${path}`);
-    if (method === "POST" && path === "/v1/sessions") return { id: "sess-1" };
-    if (method === "GET" && path === "/v1/sessions/sess-1") return { id: "sess-1" };
-    if (path === "/v1/sessions/sess-1/events") {
-      message = body as typeof message;
-      return {};
-    }
-    throw new Error(`unexpected ${method} ${path}`);
-  };
-
-  const uploads: { url: string; auth: string | null; ctype: string | null; name: string; type: string; text: string }[] = [];
+  const uploads: { auth: string | null; contentType: string | null; name: string; type: string; text: string }[] = [];
+  const state: { message: { data: { content: Record<string, unknown>[] } } | null } = { message: null };
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const form = init?.body as FormData;
-    const upload = form.get("file") as File;
+    const url = new URL(String(input));
+    const method = init?.method ?? "GET";
     const headers = new Headers(init?.headers);
-    calls.push(`UPLOAD ${new URL(String(input)).pathname}`);
-    uploads.push({
-      url: String(input),
-      auth: headers.get("authorization"),
-      ctype: headers.get("content-type"),
-      name: upload.name,
-      type: upload.type,
-      text: await upload.text(),
-    });
-    const id = `file-${uploads.length}`;
-    return new Response(JSON.stringify({ id, name: upload.name, metadata: { filename: upload.name } }), { status: 201 });
+    calls.push(`${method} ${url.pathname}`);
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+    if (method === "POST" && url.pathname === "/v1/sessions") return json({ id: "sess-1" }, 201);
+    if (method === "GET" && url.pathname === "/v1/sessions/sess-1") return json({ id: "sess-1" });
+    if (method === "POST" && url.pathname === "/v1/sessions/sess-1/resources/files") {
+      if (uploadStatus !== 201) return new Response("Unsupported attachment type", { status: uploadStatus });
+      const upload = (init?.body as FormData).get("file") as File;
+      uploads.push({ auth: headers.get("authorization"), contentType: headers.get("content-type"), name: upload.name, type: upload.type, text: await upload.text() });
+      return json({ id: `file-${uploads.length}`, name: upload.name, metadata: { filename: upload.name } }, 201);
+    }
+    if (method === "POST" && url.pathname === "/v1/sessions/sess-1/events") {
+      state.message = JSON.parse(String(init?.body));
+      return json({});
+    }
+    throw new Error(`unexpected ${method} ${url.pathname}`);
   }) as typeof fetch;
+  const backend = new OmnigentBackend({ baseUrl: "http://omnigent.test", token: "secret", hostId: "", agents: {} });
+  (backend as unknown as { ensureHarnessAgent: () => Promise<string> }).ensureHarnessAgent = async () => "agent-1";
+  return { backend, calls, uploads, state, restore: () => { globalThis.fetch = realFetch; } };
+}
+
+const startOptions = { taskId: "t1", name: null, repoPath: "/tmp/repo", git: null, harness: "codex", model: null, reasoning: null } as const;
+
+test("omnigent uploads each file to the session, then sends one message that references them", async () => {
+  const omnigent = fakeOmnigent();
   try {
-    await backend.start({
-      taskId: "t1", name: null, repoPath: "/tmp/repo", git: null, prompt: "look at these", harness: "codex",
-      model: null, reasoning: null,
+    await omnigent.backend.start({
+      ...startOptions,
+      prompt: "look at these",
       attachments: [
         { filename: "shot.png", contentType: "image/png", data: Buffer.from("png-bytes") },
         { filename: "report.pdf", contentType: "application/pdf", data: Buffer.from("pdf-bytes") },
       ],
     });
   } finally {
-    globalThis.fetch = realFetch;
+    omnigent.restore();
   }
-
-  assert.deepEqual(calls, [
+  assert.deepEqual(omnigent.calls, [
     "POST /v1/sessions",
     "GET /v1/sessions/sess-1",
-    "UPLOAD /v1/sessions/sess-1/resources/files",
-    "UPLOAD /v1/sessions/sess-1/resources/files",
+    "POST /v1/sessions/sess-1/resources/files",
+    "POST /v1/sessions/sess-1/resources/files",
     "POST /v1/sessions/sess-1/events",
   ]);
-  assert.deepEqual(uploads.map((u) => [u.name, u.type, u.text, u.auth]), [
+  assert.deepEqual(omnigent.uploads.map((u) => [u.name, u.type, u.text, u.auth]), [
     ["shot.png", "image/png", "png-bytes", "Bearer secret"],
     ["report.pdf", "application/pdf", "pdf-bytes", "Bearer secret"],
   ]);
-  // fetch must set the multipart boundary itself.
-  assert.ok(uploads.every((u) => u.ctype === null));
-  assert.deepEqual(message!.data.content, [
+  // The multipart boundary is fetch's to set: a JSON content type would break the upload.
+  assert.ok(omnigent.uploads.every((u) => u.contentType === null));
+  assert.deepEqual(omnigent.state.message?.data.content, [
     { type: "input_image", file_id: "file-1", filename: "shot.png" },
     { type: "input_file", file_id: "file-2", filename: "report.pdf" },
     { type: "input_text", text: "look at these" },
@@ -306,46 +308,25 @@ test("omnigent uploads each file to the session, then sends one message that ref
 });
 
 test("omnigent: an upload failure fails the dispatch and sends no prompt", async () => {
-  const backend = new OmnigentBackend({ baseUrl: "http://omnigent.test", token: "", hostId: "", agents: {} });
-  let sentEvent = false;
-  const internals = backend as unknown as {
-    request: (m: string, p: string) => Promise<unknown>;
-    ensureHarnessAgent: () => Promise<string>;
-  };
-  internals.ensureHarnessAgent = async () => "agent-1";
-  internals.request = async (method, path) => {
-    if (method === "POST" && path === "/v1/sessions") return { id: "sess-1" };
-    if (path.endsWith("/events")) sentEvent = true;
-    return { id: "sess-1" };
-  };
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response("Unsupported attachment type", { status: 415 })) as typeof fetch;
+  const omnigent = fakeOmnigent(415);
   try {
     await assert.rejects(
-      backend.start({
-        taskId: "t1", name: null, repoPath: "/tmp/repo", git: null, prompt: "p", harness: "codex", model: null, reasoning: null,
-        attachments: [{ filename: "a.png", contentType: "image/png", data: Buffer.from("x") }],
-      }),
-      /prompt delivery failed.*415.*a\.png/,
+      omnigent.backend.start({ ...startOptions, prompt: "p", attachments: [{ filename: "a.png", contentType: "image/png", data: Buffer.from("x") }] }),
+      /prompt delivery failed.*a\.png.*415/,
     );
   } finally {
-    globalThis.fetch = realFetch;
+    omnigent.restore();
   }
-  assert.equal(sentEvent, false);
+  assert.ok(!omnigent.calls.includes("POST /v1/sessions/sess-1/events"), "no prompt reaches a session whose files failed");
 });
 
 test("omnigent: a start without attachments sends the prompt as plain text, as before", async () => {
-  const backend = new OmnigentBackend({ baseUrl: "http://omnigent.test", token: "", hostId: "", agents: {} });
-  let content: unknown = null;
-  const internals = backend as unknown as {
-    request: (m: string, p: string, body?: unknown) => Promise<unknown>;
-    ensureHarnessAgent: () => Promise<string>;
-  };
-  internals.ensureHarnessAgent = async () => "agent-1";
-  internals.request = async (method, path, body) => {
-    if (path.endsWith("/events")) content = (body as { data: { content: unknown } }).data.content;
-    return { id: "sess-1" };
-  };
-  await backend.start({ taskId: "t1", name: null, repoPath: "/tmp/repo", git: null, prompt: "just text", harness: "codex", model: null, reasoning: null });
-  assert.deepEqual(content, [{ type: "input_text", text: "just text" }]);
+  const omnigent = fakeOmnigent();
+  try {
+    await omnigent.backend.start({ ...startOptions, prompt: "just text" });
+  } finally {
+    omnigent.restore();
+  }
+  assert.deepEqual(omnigent.state.message?.data.content, [{ type: "input_text", text: "just text" }]);
+  assert.ok(!omnigent.calls.some((c) => c.includes("resources/files")));
 });

@@ -191,11 +191,13 @@ export class OmnigentBackend implements WorkerBackend {
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" };
     if (this.cfg.token) headers.Authorization = `Bearer ${this.cfg.token}`;
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+    // A FormData body sets its own multipart Content-Type, boundary included.
+    const multipart = body instanceof FormData;
+    if (body !== undefined && !multipart) headers["Content-Type"] = "application/json";
     const res = await fetch(new URL(path, this.cfg.baseUrl), {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : multipart ? body : JSON.stringify(body),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -564,18 +566,14 @@ export class OmnigentBackend implements WorkerBackend {
 
   /** Store a file in the session and return the message part that points at it. */
   private async uploadAttachment(address: string, file: WorkerAttachment): Promise<Record<string, unknown>> {
-    const path = `/v1/sessions/${encodeURIComponent(address)}/resources/files`;
     const form = new FormData();
     form.append("file", new Blob([file.data], { type: file.contentType }), file.filename);
-    // No Content-Type: fetch adds the multipart boundary itself.
-    const headers: Record<string, string> = { Accept: "application/json" };
-    if (this.cfg.token) headers.Authorization = `Bearer ${this.cfg.token}`;
-    const res = await fetch(new URL(path, this.cfg.baseUrl), { method: "POST", headers, body: form });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`omnigent POST ${path} -> ${res.status} (${file.filename}): ${text.slice(0, 300)}`);
+    let stored: { id?: unknown; name?: unknown; metadata?: { filename?: unknown } };
+    try {
+      stored = await this.request("POST", `/v1/sessions/${encodeURIComponent(address)}/resources/files`, form);
+    } catch (err) {
+      throw new Error(`${file.filename}: ${err instanceof Error ? err.message : err}`);
     }
-    const stored = (await res.json()) as { id?: unknown; name?: unknown; metadata?: { filename?: unknown } };
     const id = str(stored.id);
     if (!id) throw new Error(`omnigent stored ${file.filename} without returning a file id`);
     return {
