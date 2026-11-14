@@ -12,6 +12,10 @@ idea → Jira (clarify outside Corral) → task backlog → dispatch (worktree +
      → item auto-resolves; a merged PR completes the task
 ```
 
+A change that spans several repositories takes one extra step: a **multi-repo
+spec task** reads the sub-projects and proposes a contract plus one task per
+repo; you approve the plan in the inbox, and the code tasks fan out.
+
 Corral owns the *work* (intake, dispatch, PR readiness, the review loop).
 omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
 `WorkerBackend` seam (`server/worker.ts`), today backed by `server/omnigent.ts`.
@@ -27,7 +31,8 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   → `Ready to merge`, merged → `Done` (names configurable per workflow).
 - **Dispatch** — one click. Pick a harness (Claude/Codex/OpenCode) and optionally
   pin an agent, model and reasoning level; blank means omnigent smart-routes.
-  Each task gets a fresh git worktree created by omnigent (opt out per task).
+  Each task gets a fresh git worktree created by omnigent (opt out per task); a
+  `review` or `spec` task runs in place, with no branch.
   **Favorites** save a harness/model/reasoning combination, scoped to a
   professional or personal repo context. A favorite on an OpenCode DeepSeek
   model turns red during its doubled-rate peak hours (01:00–04:00 and
@@ -39,10 +44,21 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   the first prompt, as session files omnigent hands to the harness.
 - **Review tasks** — a task of kind `review` points at someone else's PR/MR. The
   agent drafts its review, and publishes only after you approve it in the inbox.
+- **Multi-repo spec tasks** — a task of kind `spec` points at a folder holding
+  git repos, one sub-project per directory. The agent reads them and reports a
+  **plan**: the contract between the sub-projects (each REST endpoint, event,
+  schema or config key that crosses a repo boundary, with its owner, consumers
+  and delivery order) plus up to 12 sub-tasks, one per repo. The plan lands in
+  the inbox; **Approve plan** creates the code tasks, re-validating every path
+  (inside the folder, a repository root, no duplicate). Each child's prompt
+  carries the contract, so the repos cannot drift apart. A spec task reads only:
+  no branch, no commit, no PR. Children show a `from <spec title>` badge.
 - **Question inbox** — dispatched agents are given `skills/question-report.md`,
   which tells them to POST a clean question via `$CORRAL_URL/api/reports`. Structured
   question batches and permission requests are answered from the item. Snooze
-  (1h, 4h, tomorrow) and archive sit on top.
+  (1h, 4h, tomorrow) and archive sit on top. A run that stops without a report —
+  a plain closing message, or a backend error — is surfaced as a question item
+  carrying that last message, instead of sitting "in progress" forever.
 - **PR loop** — Corral watches each task's PR/MR. Review comments and merge
   conflicts are pushed back to the agent (`skills/pr-loop.md`). The item turns
   **green** only when threads are answered or resolved, checks pass and the PR
@@ -73,6 +89,9 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
 - **Offline mode** — a service worker caches the app shell and the last-known API
   responses, so the inbox opens on a flaky connection showing cached data. An
   offline banner shows when you are disconnected.
+- **Layout** — the sidebar collapses to icons, and the sidebar and the inbox list
+  resize by dragging the divider or with arrow keys (Shift for bigger steps,
+  Enter to reset); widths and the collapsed state persist per browser.
 
 Pages are hash-routed: `#/inbox`, `#/tasks`, `#/pulls`, `#/sessions`, `#/usage`,
 `#/settings`, `#/errors`.
@@ -115,6 +134,10 @@ and Corral's own assistant calls — is listed in [`docs/prompts.md`](docs/promp
 what it says, when it is sent, and which placeholders get substituted. Start
 there before changing agent behaviour.
 
+A task of kind `review` gets `skills/review.md` instead of the finish flow and
+the PR loop (it must not commit or push); a `spec` task gets `skills/spec.md` and
+reports a plan instead of a PR.
+
 ## Configuration
 
 `~/.config/corral/config.json` (generated on first run). The Settings page edits
@@ -147,6 +170,7 @@ server/       Node 22 (type-stripped TS), no runtime deps
   worker.ts   the WorkerBackend seam; omnigent.ts is the implementation
   capture.ts  agent events → inbox items → auto-resolution
   dispatch.ts prompt assembly and session start
+  multi-repo.ts  spec tasks: plan validation, contract, approval → child tasks
   attachments.ts  files attached to a prompt: allowed types, size caps
   pr.ts       PR loop: readiness gate, comments, conflicts, merge
   pulls.ts    GitHub/GitLab PR listing; repos.ts is the repo seam
@@ -169,7 +193,7 @@ and remote workers.
 
 ## Roadmap
 
-- **next** — daily digest, routing suggestions (quota headroom + editable rules)
+- **next** — routing suggestions (quota headroom + editable rules)
 - **later** — auto-dispatch queue, agent-fed intake, remote machines, fuller
   Jira sync (comments back)
 
