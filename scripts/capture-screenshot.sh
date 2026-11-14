@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
-  echo "Usage: $0 <built-checkout> <output.png> [hash-route]" >&2
+  echo "Usage: $0 <built-checkout> <output.png|output.gif> [hash-route]" >&2
   exit 2
 fi
 fixture_root=$(cd "$(dirname "$0")/.." && pwd)
@@ -69,6 +69,14 @@ if [ "$ready" != true ] || ! grep -q 'sample-open' "$scratch/tasks.json"; then
   echo "Fixture server did not become ready." >&2
   exit 1
 fi
+# A .gif output records the scripted demo tour (record-demo.ts) instead of one
+# screenshot; the tour starts at the inbox and ignores the route.
+case "$output" in
+  *.gif)
+    node "$fixture_root/scripts/record-demo.ts" "$chrome" "http://127.0.0.1:$port/?token=screenshot-fixture#/inbox" "$output"
+    test -s "$output"
+    exit 0;;
+esac
 # Capture once the page has loaded; CORRAL_FIXTURE_SETTLE waits for a page's
 # own post-mount fetches first.
 settle="true"
