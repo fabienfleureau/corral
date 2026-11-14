@@ -640,6 +640,28 @@ html.is-resizing * {
   gap: 6px;
 }
 
+/* Peak-hour pricing (the rate doubles): the chip turns red while it lasts. */
+.chip-peak,
+.chip-peak:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger-ink);
+  color: var(--danger-ink);
+}
+
+.chip-peak:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--danger-ink);
+}
+
+.chip-peak .chip-facts {
+  color: inherit;
+}
+
+/* The badge shares the chip's soft red, so it needs a solid fill to stand out. */
+.chip-peak .badge-urgent {
+  background: var(--danger-ink);
+  color: var(--bg);
+}
+
 .chip-name {
   font-weight: 600;
 }

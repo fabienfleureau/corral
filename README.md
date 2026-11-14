@@ -29,7 +29,9 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   pin an agent, model and reasoning level; blank means omnigent smart-routes.
   Each task gets a fresh git worktree created by omnigent (opt out per task).
   **Favorites** save a harness/model/reasoning combination, scoped to a
-  professional or personal repo context. An optional **pre-PR review step** runs
+  professional or personal repo context. A favorite on an OpenCode DeepSeek
+  model turns red during its doubled-rate peak hours (01:00–04:00 and
+  06:00–10:00 UTC, Mon–Fri). An optional **pre-PR review step** runs
   a named reviewer command (`reviewers` in the config) before the PR opens.
 - **Prompt attachments** — drop files on the New task prompt, paste a screenshot
   or pick them: PNG, JPEG, GIF and WebP images, PDFs, and text or code files (up
