@@ -134,8 +134,11 @@ button {
 }
 
 .sidebar {
-  /* Expanded width; the user's dragged width is an inline style. */
+  /* Expanded width; the user's dragged width is an inline style. A saved
+     width never starves the page: it yields once the window gets narrow
+     (SIDEBAR_LIMITS.min and CONTENT_MIN_WIDTH in App.tsx). */
   width: 200px;
+  max-width: max(160px, calc(100% - 480px));
   flex: none;
   background: var(--bg);
   border-right: 1px solid var(--border);
