@@ -91,7 +91,13 @@ export class CaptureEngine {
       this.hub.broadcast("session.updated", { address: e.address, task_id: taskId, status: e.status ?? null });
     }
 
-    const retried = ["idle", "done", "error"].includes(e.status ?? "") ? await this.retryInitialFailure(e.address, taskId) : false;
+    // A failed lookup must not abort the rest of the handler: the stop below would be lost.
+    const retried = ["idle", "done", "error"].includes(e.status ?? "")
+      ? await this.retryInitialFailure(e.address, taskId).catch((err) => {
+        console.error("corral: initial-failure check failed", err);
+        return false;
+      })
+      : false;
     if (runEnded && taskId) clearItemHandling(this.db, this.hub, taskId);
 
     if (blocked) {

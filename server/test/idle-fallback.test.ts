@@ -213,6 +213,21 @@ test("a run that failed to start is retried, not reported", async () => {
   } finally { db.close(); }
 });
 
+test("a failing start-failure lookup does not hide the stopped run", async () => {
+  const db = new Db(":memory:");
+  try {
+    db.insertTask(makeTask());
+    db.upsertTerminal({ address: "s1", task_id: "task-1", name: null, agent: "claude", last_status: "working", last_turn: 0, updated_ms: Date.now() });
+    const backend = {
+      name: "fake", read: async () => "tail", send: async () => undefined,
+      initialFailurePrompt: async () => { throw new Error("omnigent unreachable"); },
+      lastRunOutcome: async () => said,
+    } as unknown as WorkerBackend;
+    await new CaptureEngine(db, backend, { broadcast() {} }).handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "idle" });
+    assert.ok(db.openQuestionItemForTerminal("s1"));
+  } finally { db.close(); }
+});
+
 function omnigent(items: unknown[]) {
   const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
   const seen: string[] = [];
