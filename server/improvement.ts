@@ -4,9 +4,9 @@ import type { Hub } from "./capture.ts";
 import type { Item } from "./types.ts";
 import { collectImprovementEvidence } from "./improvement-evidence.ts";
 import { buildUsageEvidence, type ModelPrice, type UsageEvidence, type UsageRecord } from "./usage.ts";
+import { AnalysisSchedule } from "./analysis-schedule.ts";
 
 const DAY = 86_400_000;
-const RETRY = 3_600_000;
 
 /** Local usage logs for the digest. Kept as a callback so the analysis stays
  *  independent of the UsageScanner and easy to test. */
@@ -27,27 +27,24 @@ export class ImprovementAnalysis {
     this.hub = privateHub;
     this.complete = complete;
     this.options = options;
-    this.db.raw.exec(`CREATE TABLE IF NOT EXISTS improvement_settings (id INTEGER PRIMARY KEY CHECK(id = 1), interval_days INTEGER NOT NULL DEFAULT 0, last_success_ms INTEGER, last_attempt_ms INTEGER, error TEXT)`);
-    this.db.raw.exec(`INSERT OR IGNORE INTO improvement_settings (id) VALUES (1)`);
+    this.schedule = new AnalysisSchedule(privateDb, "improvement_settings");
   }
   private db: Db;
   private hub: Pick<Hub, "broadcast">;
   private complete: (prompt: string) => Promise<string>;
   private options: ImprovementOptions;
+  private schedule: AnalysisSchedule;
 
   status() {
-    const row = this.db.raw.prepare("SELECT * FROM improvement_settings WHERE id = 1").get() as { interval_days: number; last_success_ms: number | null; last_attempt_ms: number | null; error: string | null };
-    return { intervalDays: row.interval_days, lastSuccessMs: row.last_success_ms, lastAttemptMs: row.last_attempt_ms, error: row.error, running: this.running !== null };
+    return { ...this.schedule.status(), running: this.running !== null };
   }
 
   setIntervalDays(days: number) {
-    if (![0, 1, 7, 30].includes(days)) throw new Error("Invalid interval");
-    this.db.raw.prepare("UPDATE improvement_settings SET interval_days = ?, last_attempt_ms = NULL WHERE id = 1").run(days);
+    this.schedule.setIntervalDays(days);
   }
 
   async runIfDue(now = Date.now()): Promise<void> {
-    const s = this.status();
-    if (!s.intervalDays || (s.lastSuccessMs && now - s.lastSuccessMs < s.intervalDays * DAY) || (s.error && s.lastAttemptMs && now - s.lastAttemptMs < RETRY)) return;
+    if (!this.schedule.isDue(now)) return;
     await this.run();
   }
 
@@ -59,7 +56,7 @@ export class ImprovementAnalysis {
 
   private async perform(): Promise<Item> {
     const now = Date.now();
-    this.db.raw.prepare("UPDATE improvement_settings SET last_attempt_ms = ?, error = NULL WHERE id = 1").run(now);
+    this.schedule.begin(now);
     try {
       const since = now - 30 * DAY;
       // Only yield when there is a usage source: keeps a digest without usage
@@ -81,13 +78,13 @@ export class ImprovementAnalysis {
       this.db.raw.exec("BEGIN");
       try {
         this.db.insertItem(item);
-        this.db.raw.prepare("UPDATE improvement_settings SET last_success_ms = ?, error = NULL WHERE id = 1").run(Date.now());
+        this.schedule.succeed(Date.now());
         this.db.raw.exec("COMMIT");
       } catch (err) { this.db.raw.exec("ROLLBACK"); throw err; }
       this.hub.broadcast("item.created", item);
       return item;
     } catch (err) {
-      this.db.raw.prepare("UPDATE improvement_settings SET error = ? WHERE id = 1").run((err instanceof Error ? err.message : String(err)).slice(0, 500));
+      this.schedule.fail(err);
       throw err;
     }
   }
