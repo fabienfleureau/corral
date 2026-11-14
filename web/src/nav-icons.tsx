@@ -42,6 +42,12 @@ const paths: Record<string, ReactNode> = {
       <path d="M22 20H2" />
     </>
   ),
+  improve: (
+    <>
+      <path d="m3 17 6-6 4 4 8-8" />
+      <path d="M15 7h6v6" />
+    </>
+  ),
   settings: (
     <>
       <path d="M4 7h10" />

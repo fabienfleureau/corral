@@ -21,8 +21,9 @@ import { SessionsPage } from "./pages/Sessions";
 import { PullsPage } from "./pages/Pulls";
 import { SettingsPage } from "./pages/Settings";
 import { UsagePage } from "./pages/Usage";
+import { ImprovePage } from "./pages/Improve";
 
-type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "settings" | "errors";
+type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "improve" | "settings" | "errors";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
@@ -30,6 +31,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "pulls", label: "Pull Requests" },
   { key: "sessions", label: "Sessions" },
   { key: "usage", label: "Usage" },
+  { key: "improve", label: "Improve" },
   { key: "settings", label: "Settings" },
   { key: "errors", label: "Errors" },
 ];
@@ -212,7 +214,7 @@ export function App() {
         <nav className="nav" aria-label="Primary">
           {TABS.map((t) => {
             const count = counts[t.key as keyof Counts];
-            const hasCount = t.key !== "settings" && t.key !== "usage";
+            const hasCount = t.key !== "settings" && t.key !== "usage" && t.key !== "improve";
             const countClass = `nav-count ${t.key !== "sessions" && count > 0 ? "nav-count-hot" : ""} ${count > 0 ? "" : "nav-count-zero"}`;
             return t.key === "sessions" && omnigentUrl ? (
               <a key={t.key} className="nav-item" href={omnigentUrl} target="_blank" rel="noreferrer" aria-label="Sessions (opens Omnigent in a new tab)" title="Open Omnigent in a new tab">
@@ -269,6 +271,7 @@ export function App() {
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
         {tab === "usage" ? <UsagePage /> : null}
+        {tab === "improve" ? <ImprovePage /> : null}
         {tab === "settings" ? <SettingsPage /> : null}
         {tab === "errors" ? <section><h1>Error center</h1><p className="muted">Current background synchronization errors. Errors clear after a successful refresh.</p>{errors.length === 0 ? <p>No current errors.</p> : errors.map((error) => <div className="inline-error" key={error.source}><strong>{error.source}</strong><p>{error.message}</p><small>{new Date(error.updated_ms).toLocaleString()}</small></div>)}</section> : null}
       </main>

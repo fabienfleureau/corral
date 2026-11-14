@@ -1,9 +1,11 @@
-type ImprovementStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
 import type { AttachmentInput } from "./attachments";
 import type { Config, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
+
+/** Schedule and run state of a server-side analysis (improvement, skills). */
+export type AnalysisStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
 
 export class ApiError extends Error {
   readonly status: number;
@@ -267,9 +269,12 @@ export const api = {
   getRateLimits: (refresh = false): Promise<{ limits: PlatformRateLimit[]; fetched_ms: number }> =>
     get<{ limits: PlatformRateLimit[]; fetched_ms: number }>(`/api/rate-limits${refresh ? "?refresh=1" : ""}`),
 
-  improvementStatus: (): Promise<ImprovementStatus> => get<ImprovementStatus>("/api/improvement"),
-  setImprovementSchedule: (intervalDays: number): Promise<ImprovementStatus> => put<ImprovementStatus>("/api/improvement", { intervalDays }),
+  improvementStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/improvement"),
+  setImprovementSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/improvement", { intervalDays }),
   runImprovement: (): Promise<Item> => post<Item>("/api/improvement/run"),
+  skillsAnalysisStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/skills-analysis"),
+  setSkillsAnalysisSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/skills-analysis", { intervalDays }),
+  runSkillsAnalysis: (): Promise<Item> => post<Item>("/api/skills-analysis/run"),
   getConfig: (): Promise<Config> => get<Config>("/api/config"),
   putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[]; reviewers?: import("./types").Reviewer[]; models?: ModelCatalog }): Promise<{ ok: boolean }> =>
     put<{ ok: boolean }>("/api/config", input),
