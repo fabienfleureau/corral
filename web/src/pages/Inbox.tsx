@@ -13,8 +13,16 @@ import { inboxTitle, itemDisplayTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
 import { QuestionReply } from "../QuestionReply";
 import { TaskHistoryButton } from "../TaskHistory";
+import { ResizeHandle } from "../ResizeHandle";
+import { usePaneWidth } from "../use-pane-size";
+import type { PaneLimits } from "../pane-size";
 
 type StatusFilter = "open" | "snoozed" | "in-progress";
+
+const LIST_LIMITS: PaneLimits = { min: 260, max: 640 };
+const LIST_DEFAULT_WIDTH = 380;
+/** The detail pane never gets squeezed below this. */
+const DETAIL_MIN_WIDTH = 320;
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "open", label: "Open" },
@@ -83,6 +91,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Item | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const listSize = usePaneWidth("corral.inboxListWidth", LIST_DEFAULT_WIDTH, LIST_LIMITS);
 
   const [replyText, setReplyText] = useState("");
   const [replyBusy, setReplyBusy] = useState(false);
@@ -280,7 +289,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
 
   return (
     <div className="page inbox-page" style={active ? undefined : { display: "none" }}>
-      <div className="list-pane">
+      <div className="list-pane" style={{ width: listSize.width }}>
         <div className="list-toolbar">
           <div className="chip-row">
             {STATUS_FILTERS.map((f) => (
@@ -386,6 +395,15 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
           )}
         </div>
       </div>
+
+      <ResizeHandle
+        label="Resize inbox list"
+        width={listSize.width}
+        limits={LIST_LIMITS}
+        reserve={DETAIL_MIN_WIDTH}
+        onChange={listSize.setWidth}
+        onReset={listSize.reset}
+      />
 
       <div className="detail-pane">
         {selectedTask ? (
