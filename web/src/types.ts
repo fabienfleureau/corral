@@ -16,6 +16,8 @@ export type Task = {
   reasoning: string | null;
   session_model: string | null;
   session_reasoning: string | null;
+  /** Files attached to the prompt (absent in a task just created). */
+  attachment_count?: number;
   base_branch: string | null;
   branch: string | null;
   worktree_path: string | null;

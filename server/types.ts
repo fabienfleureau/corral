@@ -31,6 +31,17 @@ export interface TaskSpec {
 /** Matches a GitHub pull request or GitLab merge request URL. */
 export const PR_URL_RE = /^https?:\/\/[^\s/]+\/[^\s]+?(?:\/pull\/|\/-\/merge_requests\/)\d+\/?$/;
 
+/** A file attached to a task's prompt. The bytes stay in the database: this is
+ *  the metadata the API returns. */
+export interface TaskAttachment {
+  id: string;
+  task_id: string;
+  filename: string;
+  content_type: string;
+  bytes: number;
+  created_ms: number;
+}
+
 export interface Task {
   id: string;
   title: string;

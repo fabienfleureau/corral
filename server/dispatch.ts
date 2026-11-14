@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { formatBytes } from "./attachments.ts";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import { JiraClient } from "./jira.ts";
@@ -214,6 +215,8 @@ export async function dispatchTask(
   }
 
   const fullPrompt = `${taskText}\n\n---\n${questionConvention(cfg, task, reviewCommand)}`;
+  // Files dropped on the prompt travel with it: they are not part of its text.
+  const attachments = db.taskAttachmentFiles(task.id);
 
   let session: WorkerSession;
   try {
@@ -232,6 +235,7 @@ export async function dispatchTask(
           repoPath: task.repo_path,
           git: useWorktree ? { branch, base } : null,
           prompt: fullPrompt,
+          ...(attachments.length ? { attachments } : {}),
           harness: target,
           agent: opts.agent ?? null,
           model: opts.model === undefined ? task.model ?? null : opts.model,
@@ -293,6 +297,7 @@ export async function dispatchTask(
     branch: review || spec ? null : branch,
     worktree: useWorktree && session.cwd ? session.cwd : null,
     session: session.address,
+    attachments: attachments.length ? attachments.map((a) => `${a.filename} (${formatBytes(a.data.length)})`).join(", ") : undefined,
   }));
 
   // Implementation started: move the ticket to "In Progress". Best effort and

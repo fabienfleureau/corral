@@ -29,6 +29,10 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   **Favorites** save a harness/model/reasoning combination, scoped to a
   professional or personal repo context. An optional **pre-PR review step** runs
   a named reviewer command (`reviewers` in the config) before the PR opens.
+- **Prompt attachments** — drop files on the New task prompt, paste a screenshot
+  or pick them: PNG, JPEG, GIF and WebP images, PDFs, and text or code files (up
+  to 10 files, 25 MB). They are stored with the task and sent to the agent with
+  the first prompt, as session files omnigent hands to the harness.
 - **Review tasks** — a task of kind `review` points at someone else's PR/MR. The
   agent drafts its review, and publishes only after you approve it in the inbox.
 - **Question inbox** — dispatched agents are given `skills/question-report.md`,
@@ -139,6 +143,7 @@ server/       Node 22 (type-stripped TS), no runtime deps
   worker.ts   the WorkerBackend seam; omnigent.ts is the implementation
   capture.ts  agent events → inbox items → auto-resolution
   dispatch.ts prompt assembly and session start
+  attachments.ts  files attached to a prompt: allowed types, size caps
   pr.ts       PR loop: readiness gate, comments, conflicts, merge
   pulls.ts    GitHub/GitLab PR listing; repos.ts is the repo seam
   jira.ts     REST v3 (search, transitions, ADF comments)

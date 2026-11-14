@@ -5,6 +5,8 @@ import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, 
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
 import { TaskHistoryButton } from "../TaskHistory";
+import { toAttachmentInputs } from "../attachment-input";
+import { PromptAttachments } from "../PromptAttachments";
 import type { DispatchResult, NewTaskInput } from "../api";
 import type { AgentQuota, Context, Favorite, JiraSearchResult, ModelAvailability, ModelCatalog, Repo, Reviewer, Task } from "../types";
 import { modelFactsReport, retentionLabel } from "../model-indicators";
@@ -374,6 +376,7 @@ function TaskRow({
           {spec ? <span className="badge badge-review" title="Writes the contract between the sub-projects in repo_path; approving its plan in the inbox creates one task per sub-project">multi-repo spec</span> : null}
           {parentTitle ? <span className="badge badge-review" title="Created from a multi-repo plan; the contract is appended to this task's prompt">from {parentTitle}</span> : null}
           {task.target ? <span className="badge badge-target">{task.target}</span> : null}
+          {task.attachment_count ? <span className="badge badge-target" title="Files sent to the agent with the prompt">{task.attachment_count} {task.attachment_count === 1 ? "attachment" : "attachments"}</span> : null}
           {task.terminal_address ? <>
             <span className="muted">Model: {task.session_model || "Unknown"}</span>
             <span className="muted">Reasoning: {task.session_reasoning || "Unknown"}</span>
@@ -654,6 +657,8 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const [kind, setKind] = useState<"code" | "review" | "spec">("code");
   const [prUrl, setPrUrl] = useState("");
   const [prompt, setPrompt] = useState(prefill?.text ?? "");
+  /** Files dropped, pasted or picked for the prompt; sent with the task. */
+  const [files, setFiles] = useState<File[]>([]);
   const [repoChoice, setRepoChoice] = useState("");
   const [target, setTarget] = useState("");
   const [agent, setAgent] = useState("");
@@ -695,6 +700,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
 
   const clear = () => {
     setPrompt("");
+    setFiles([]);
     setPrUrl("");
     setRepoPath("");
     setBaseBranch("");
@@ -723,6 +729,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
       const input: NewTaskInput = {
         ...(review ? { kind, pr_url: prUrl.trim(), title: `Review ${prLabel(prUrl.trim())}` } : spec ? { kind } : {}),
         prompt,
+        ...(files.length ? { attachments: await toAttachmentInputs(files) } : {}),
         target: selectedTarget,
         model: selectedSettings.model.trim() || null,
         reasoning: selectedSettings.reasoning.trim() || null,
@@ -781,16 +788,18 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           <p className="muted form-hint">Step one: the agent reads the sub-projects and writes the contract between them, then proposes one task per sub-project. Nothing is created until you approve the plan in the inbox. No branch, no code changes. Name any system map or architecture doc in the prompt.</p>
         </>
       ) : null}
-      <label className="field">
-        <span>{review ? "Focus (optional)" : "Prompt"}</span>
-        <textarea
-          ref={promptRef}
-          rows={review ? 3 : 6}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder={review ? "Anything to look at in particular?" : "What should the agent do?"}
-        />
-      </label>
+      <PromptAttachments files={files} onChange={setFiles} disabled={busy}>
+        <label className="field">
+          <span>{review ? "Focus (optional)" : "Prompt"}</span>
+          <textarea
+            ref={promptRef}
+            rows={review ? 3 : 6}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={review ? "Anything to look at in particular?" : "What should the agent do?"}
+          />
+        </label>
+      </PromptAttachments>
       {spec ? null : <div className="field-row">
         <label className="field">
           <span>Repo</span>

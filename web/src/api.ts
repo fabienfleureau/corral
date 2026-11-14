@@ -2,6 +2,7 @@ type ImprovementStatus = { intervalDays: number; lastSuccessMs: number | null; l
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
+import type { AttachmentInput } from "./attachments";
 import type { Config, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
 
 export class ApiError extends Error {
@@ -160,6 +161,8 @@ export type NewTaskInput = {
   /** Omit to let omnigent title the session after dispatch. */
   title?: string;
   prompt?: string;
+  /** Files sent to the agent with the prompt (see web/src/attachments.ts). */
+  attachments?: AttachmentInput[];
   kind?: "code" | "review" | "spec";
   /** Required for kind "review": the PR/MR to review. */
   pr_url?: string;
