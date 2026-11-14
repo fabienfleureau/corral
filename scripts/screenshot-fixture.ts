@@ -7,11 +7,13 @@ import type { TaskEvent } from "../server/task-events.ts";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-/** One favorite per context, plus one more professional, to show the task form filter. */
+/** One favorite per context, plus more professional ones, to show the task form filter
+ *  and (the OpenCode DeepSeek one) the peak-hours highlight. */
 export const screenshotFavorites: Favorite[] = [
   { name: "Careful review", harness: "claude", agent: "", model: "opus", reasoning: "high", context: "professional", review: "cubic" },
   { name: "Quick fix", harness: "codex", agent: "", model: "gpt-6.1-sol", reasoning: "low", context: "professional", review: "" },
   { name: "Bulk Go work", harness: "opencode", agent: "", model: "opencode-go/kimi-k3.1-pro", reasoning: "", context: "professional", review: "" },
+  { name: "Cheap bulk", harness: "opencode", agent: "", model: "opencode-go/deepseek-v4.1-flash", reasoning: "", context: "professional", review: "" },
   { name: "Side project", harness: "opencode", agent: "", model: "opencode-go/claude-haiku-5-5", reasoning: "high", context: "personal", review: "" },
 ];
 

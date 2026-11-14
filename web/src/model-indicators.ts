@@ -5,6 +5,7 @@
 // factsFor/effortFacts mirror server/model-catalog.ts (the web bundle cannot
 // read the server's shipped JSON); server/test covers both copies.
 
+import { PEAK_SCHEDULE_LABEL, hasPeakPricing, peakEndsLabel } from "./peak-hours.ts";
 import type { AgentQuota, Context, ModelAvailability, ModelCatalog, ModelFacts, Retention } from "./types.ts";
 
 export interface ModelSelection {
@@ -30,6 +31,8 @@ export interface IndicatorInput {
   context: Context | null;
   /** GET /api/models/availability: provider id -> local model server probe. */
   providers?: Record<string, ModelAvailability>;
+  /** Clock reading for peak-hour pricing; defaults to the current time. */
+  now?: Date;
 }
 
 export interface ModelIndicator {
@@ -52,6 +55,8 @@ export interface ModelFactsReport {
   /** Compact one-liner for a favorite chip ("52 index · $3.46/task"). */
   summary: string;
   retention: Retention | null;
+  /** Set while the model is inside a peak-pricing window: the rate is doubled. */
+  peak: { until: string } | null;
   indicators: ModelIndicator[];
   warnings: ModelWarning[];
   /** Every indicator and warning, one per line: the tooltip. */
@@ -197,6 +202,17 @@ export function modelFactsReport(input: IndicatorInput): ModelFactsReport {
   }
 
   indicators.push(availabilityIndicator(input));
+  let peak: ModelFactsReport["peak"] = null;
+  if (hasPeakPricing(selection.harness, selection.model)) {
+    const until = peakEndsLabel(input.now ?? new Date());
+    peak = until ? { until } : null;
+    indicators.push({
+      key: "pricing",
+      label: "Pricing",
+      value: until ? "2× (peak hours)" : "standard rate",
+      hint: until ? `peak until ${until}; peak is ${PEAK_SCHEDULE_LABEL}` : `2× during peak hours: ${PEAK_SCHEDULE_LABEL}`,
+    });
+  }
   const quotaRow = quotaIndicator(selection, input.quota);
   if (quotaRow) indicators.push(quotaRow);
   if (facts) indicators.push({ key: "asOf", label: "Facts as of", value: facts.asOf, ...(facts.source ? { hint: facts.source } : {}) });
@@ -234,6 +250,7 @@ export function modelFactsReport(input: IndicatorInput): ModelFactsReport {
     hasFacts: facts !== null,
     summary: facts ? summaryParts.join(" · ") || "no numbers" : "no data",
     retention: facts?.retention ?? null,
+    peak,
     indicators,
     warnings,
     title,

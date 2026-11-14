@@ -10,6 +10,7 @@ import { PromptAttachments } from "../PromptAttachments";
 import type { DispatchResult, NewTaskInput } from "../api";
 import type { AgentQuota, Context, Favorite, JiraSearchResult, ModelAvailability, ModelCatalog, Repo, Reviewer, Task } from "../types";
 import { modelFactsReport, retentionLabel } from "../model-indicators";
+import { usePeakNow } from "../use-peak-now";
 import type { HarnessModels, ModelFactsReport, ModelSelection } from "../model-indicators";
 import { favoritesFor, repoContext } from "../favorite-context";
 import { errText, formatTs, isPrUrl, prLabel, REVIEW_HARNESS, timeAgo } from "../util";
@@ -238,6 +239,7 @@ function TaskRow({
   version: number;
   refresh: () => void;
 }) {
+  const now = usePeakNow();
   const [showDispatch, setShowDispatch] = useState(task.status === "open" || (task.status === "dispatched" && !task.terminal_address));
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [prompt, setPrompt] = useState(task.prompt);
@@ -491,6 +493,7 @@ function TaskRow({
               harnesses: harnessModels(catalog),
               context: repoContext(repos, task.repo_path),
               providers: providerModels,
+              now,
             })} />
             {inPlace ? null : <>
             <label className="field-inline">
@@ -591,6 +594,7 @@ export function ModelFactsLine({ report }: { report: ModelFactsReport }) {
     <div className="model-facts" title={report.title}>
       <span className="model-facts-label">Model facts</span>
       <span className={`model-facts-values${report.hasFacts ? "" : " muted"}`}>{report.summary}</span>
+      {report.peak ? <span className="badge badge-urgent" title={`Peak hours: the rate is doubled until ${report.peak.until}`}>2× peak until {report.peak.until}</span> : null}
       {report.retention ?
         <span className={`badge retention-${report.retention}`} title={`Data retention: ${retentionLabel(report.retention)}`}>retention {retentionLabel(report.retention)}</span> : null}
       {report.warnings.map((warning) => (
@@ -606,13 +610,14 @@ function FavoriteChip({ favorite, disabled, report, onPick }: { favorite: Favori
   return (
     <button
       type="button"
-      className="chip chip-favorite"
+      className={`chip chip-favorite${report.peak ? " chip-peak" : ""}`}
       disabled={disabled}
       title={disabled ? `Harness unavailable\n${report.title}` : report.title}
       onClick={onPick}
     >
       <span className="chip-name">{favorite.name}</span>
       <span className="chip-facts">{report.summary}</span>
+      {report.peak ? <span className="badge badge-urgent" title={`Peak hours: the rate is doubled until ${report.peak.until}`}>2× peak</span> : null}
       {report.retention ? <span className={`badge retention-${report.retention}`} title={`Data retention: ${retentionLabel(report.retention)}`}>{retentionLabel(report.retention)}</span> : null}
       {report.warnings.map((warning) => (
         <span key={warning.key} className="badge badge-warn" title={warning.message}>⚠ {warning.label}</span>
@@ -652,6 +657,7 @@ function copyWithExecCommand(text: string): boolean {
 
 // No title (omnigent names the session) and no target (picked at dispatch).
 function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, modelFacts, providerModels, reviewers, prefill, onPrefillHandled, onDone }: { tasks: Task[]; repos: Repo[]; targets: string[]; quotas: AgentQuota[]; agentOptions: Record<string, { id: string; name: string }[]>; catalog: Record<string, ModelOption[]>; modelFacts: ModelCatalog; providerModels: Record<string, ModelAvailability>; reviewers: Reviewer[]; prefill: TaskPrefill | null; onPrefillHandled: () => void; onDone: () => void }) {
+  const now = usePeakNow();
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   useEffect(() => { api.getConfig().then((cfg) => setFavorites(cfg.favorites ?? [])).catch(() => undefined); }, []);
   const [kind, setKind] = useState<"code" | "review" | "spec">("code");
@@ -831,7 +837,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           key={i}
           favorite={f}
           disabled={!formTargets.includes(f.harness)}
-          report={modelFactsReport({ selection: { harness: f.harness, model: f.model, reasoning: f.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: formContext, providers: providerModels })}
+          report={modelFactsReport({ selection: { harness: f.harness, model: f.model, reasoning: f.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: formContext, providers: providerModels, now })}
           onPick={() => { setTarget(f.harness); setAgent(f.agent); setReviewName(f.review ?? ""); setSettings((prev) => ({ ...prev, [f.harness]: { model: f.model, reasoning: f.reasoning } })); }}
         />
       ))}</div></div> : null}
@@ -863,6 +869,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
         harnesses: harnessModels(catalog),
         context: formContext,
         providers: providerModels,
+        now,
       })} />
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
@@ -892,6 +899,7 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, modelFacts,
   const [busy, setBusy] = useState<"search" | "import" | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const now = usePeakNow();
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [values, setSettings] = useState<ImportSettings>({ repo_path: "", base_branch: "", target: "", agent: "", model: "", reasoning: "" });
   const update = (patch: Partial<ImportSettings>) => setSettings((prev) => ({ ...prev, ...patch }));
@@ -1039,7 +1047,7 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, modelFacts,
                     key={i}
                     favorite={f}
                     disabled={!targets.includes(f.harness)}
-                    report={modelFactsReport({ selection: { harness: f.harness, model: f.model, reasoning: f.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: importContext, providers: providerModels })}
+                    report={modelFactsReport({ selection: { harness: f.harness, model: f.model, reasoning: f.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: importContext, providers: providerModels, now })}
                     onPick={() => update({ target: f.harness, agent: f.agent, model: f.model, reasoning: f.reasoning })}
                   />
                 ))}</div></div> : null}
@@ -1048,7 +1056,7 @@ function JiraImport({ repos, targets, quotas, agentOptions, catalog, modelFacts,
                   <label className="field"><span>Agent</span><select value={values.agent} onChange={(e) => update({ agent: e.target.value })} disabled={!values.target}><option value="">— none (bare harness) —</option>{values.agent && !(agentOptions[values.target] ?? []).some((a) => a.id === values.agent) ? <option value={values.agent}>{values.agent} (unavailable)</option> : null}{(agentOptions[values.target] ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
                 </div>
                 {values.target ? <div className="field-row"><ModelSettings models={catalog[values.target] ?? []} model={values.model} reasoning={values.reasoning} setModel={(model) => update({ model })} setReasoning={(reasoning) => update({ reasoning })} fieldClass="field" /></div> : null}
-                {values.target ? <ModelFactsLine report={modelFactsReport({ selection: { harness: values.target, model: values.model, reasoning: values.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: importContext, providers: providerModels })} /> : null}
+                {values.target ? <ModelFactsLine report={modelFactsReport({ selection: { harness: values.target, model: values.model, reasoning: values.reasoning }, catalog: modelFacts, quota: quotas, harnesses: harnessModels(catalog), context: importContext, providers: providerModels, now })} /> : null}
           </div>
           <div className="import-list">
             {selected.map((r) => (
