@@ -26,6 +26,9 @@
   --sig-orange: #8f5f00;
   --sig-red: #c13030;
   --sig-blue: #2f5fb8;
+  --brand-tile: linear-gradient(160deg, #4a63d6, #3549b4);
+  --brand-ink: #ffffff;
+  --brand-latch: #ffc857;
   color-scheme: light dark;
 }
 
@@ -58,6 +61,9 @@
     --sig-orange: #e5a634;
     --sig-red: #ff7b72;
     --sig-blue: #79b8ff;
+    --brand-tile: linear-gradient(160deg, #3c4f79, #26334f);
+    --brand-ink: #f2f6fc;
+    --brand-latch: #ffc857;
     color-scheme: dark;
   }
 }
@@ -87,6 +93,9 @@
   --sig-orange: #e5a634;
   --sig-red: #ff7b72;
   --sig-blue: #79b8ff;
+  --brand-tile: linear-gradient(160deg, #3c4f79, #26334f);
+  --brand-ink: #f2f6fc;
+  --brand-latch: #ffc857;
   color-scheme: dark;
 }
 
@@ -159,14 +168,28 @@ button {
   width: 24px;
   height: 24px;
   border-radius: 7px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-weight: 600;
-  font-size: 13px;
+  background: var(--brand-tile);
+  color: var(--brand-ink);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
+}
+
+.brand-mark svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.brand-mark-pen {
+  stroke: currentColor;
+  stroke-width: 2.4;
+}
+
+.brand-mark-latch {
+  stroke: var(--brand-latch);
+  stroke-width: 2.4;
 }
 
 .brand-name {
