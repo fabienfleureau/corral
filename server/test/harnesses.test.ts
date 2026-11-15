@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { OmnigentBackend } from "../omnigent.ts";
+import { resolveExecutable } from "../exec.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,7 +46,7 @@ test("falls back to local OpenCode models when the host catalog is unsupported",
   const dir = mkdtempSync(join(tmpdir(), "corral-models-"));
   const oldPath = process.env.PATH;
   try {
-    writeFileSync(join(dir, "opencode"), "#!/bin/sh\nprintf 'provider/model-a\\nprovider/model-b\\n'\n", { mode: 0o755 });
+    writeFileSync(join(dir, "opencode"), "#!/bin/sh\nprintf 'provider/model-a\\nprovider/model-b\\nvendor/sub/provider/model-c\\n'\n", { mode: 0o755 });
     process.env.PATH = dir;
     const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "host1", agents: {} });
     (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async (_m, path) => {
@@ -56,7 +57,24 @@ test("falls back to local OpenCode models when the host catalog is unsupported",
     assert.deepEqual((await backend.harnesses())[0].models, [
       { id: "provider/model-a", label: "provider/model-a", reasoning: [] },
       { id: "provider/model-b", label: "provider/model-b", reasoning: [] },
+      { id: "vendor/sub/provider/model-c", label: "vendor/sub/provider/model-c", reasoning: [] },
     ]);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("finds a CLI installed outside the server PATH", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-cli-"));
+  const oldPath = process.env.PATH;
+  try {
+    const bin = join(dir, "opencode");
+    writeFileSync(bin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    // A GUI-launched server gets a bare PATH: user installs are unreachable.
+    process.env.PATH = "/usr/bin:/bin";
+    assert.equal(resolveExecutable("opencode"), null);
+    assert.equal(resolveExecutable("opencode", [dir]), bin);
   } finally {
     process.env.PATH = oldPath;
     rmSync(dir, { recursive: true, force: true });
