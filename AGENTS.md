@@ -133,7 +133,7 @@ import). On failure the last frame is saved next to the output as
 | | |
 |---|---|
 | `server/` | API (`api.ts`), worker seam (`worker.ts`, `omnigent.ts`), PR loop (`pr.ts`), inbox lifecycle (`capture.ts`), dispatch (`dispatch.ts`), task history (`task-events.ts`) |
-| `web/` | React UI, hash-routed pages (`#/inbox`, `#/tasks`, `#/pulls`, `#/sessions`, `#/settings`); the task history modal is `TaskHistory.tsx` |
+| `web/` | React UI, hash-routed pages (`#/inbox`, `#/tasks`, `#/pulls`, `#/sessions`, `#/improve`, `#/settings`); the task history modal is `TaskHistory.tsx` |
 | `skills/` | Prompt conventions for dispatched agents (question reports, PR loop, handoff) |
 | `docs/prompts.md` | Registry of every prompt Corral sends — the place to look first |
 | `API.md` | HTTP contract — keep in sync with `server/api.ts` |

@@ -3,6 +3,7 @@
 
 import { execFile } from "node:child_process";
 import type { Config } from "./config.ts";
+import { SUMMARIZE_OPENER } from "./assistant-prompts.ts";
 
 export function llmComplete(cfg: Config, prompt: string, timeoutMs = 120000): Promise<string> {
   const argv = cfg.assistant.map((p) => p.replaceAll("{prompt}", prompt));
@@ -20,7 +21,7 @@ export function llmComplete(cfg: Config, prompt: string, timeoutMs = 120000): Pr
 
 export async function summarizeText(cfg: Config, text: string, title: string): Promise<string> {
   const prompt = [
-    "You are a helper inside a personal inbox app. Below is the recent terminal output of an",
+    `${SUMMARIZE_OPENER} Below is the recent terminal output of an`,
     "AI coding agent that has stopped and needs its human. Summarize for the human:",
     "1) the single question or decision the agent is waiting on (one sentence),",
     "2) the minimum context needed to answer (2-4 sentences).",

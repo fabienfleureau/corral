@@ -80,9 +80,12 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   limits for the PR loop.
 - **Model facts** — a shipped catalog of model facts (retention, quota, cost,
   benchmark scores) shows indicators on the task form.
-- **Improvement analysis** — on demand or on a schedule, the configured assistant
-  reviews recent task and PR activity and posts a digest to the inbox. It never
-  dispatches work.
+- **Self-improvement** (`#/improve`) — two analyses, each on demand or on a
+  schedule, that post a digest to the inbox and never dispatch work or change
+  files. The *improvement analysis* has the configured assistant review recent
+  task and PR activity. The *skills analysis* compares the skills installed on
+  this machine with the last 90 days of Claude Code and Codex sessions, flags
+  skills that look obsolete and proposes new ones with draft `SKILL.md` text.
 - **Notifications** — in-app + desktop, for new actionable items only.
 - **Metrics** — every event (created/dispatched/replied/resolved/…) is recorded
   (`/api/metrics/summary`).
@@ -94,7 +97,7 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   Enter to reset); widths and the collapsed state persist per browser.
 
 Pages are hash-routed: `#/inbox`, `#/tasks`, `#/pulls`, `#/sessions`, `#/usage`,
-`#/settings`, `#/errors`.
+`#/improve`, `#/settings`, `#/errors`.
 
 ## Quickstart
 
@@ -179,6 +182,8 @@ server/       Node 22 (type-stripped TS), no runtime deps
   task-events.ts  per-task history
   usage.ts    local session scan, cost and quota
   improvement*.ts  digest evidence and scheduled analysis
+  skills-*.ts      skill inventory, session scan and the skills analysis
+  analysis-schedule.ts  persisted schedule shared by both analyses
   db.ts       SQLite (tasks, items, task events, metrics)
   cli.ts      corral add / status / serve
 skills/       agent prompt conventions, injected at dispatch

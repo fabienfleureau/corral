@@ -15,6 +15,9 @@ import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
+import { SkillsAnalysis } from "./skills-analysis.ts";
+import { skillsEvidenceSource } from "./skills-evidence.ts";
+import { isInterval } from "./analysis-schedule.ts";
 import { dispatchTask } from "./dispatch.ts";
 import { checkAttachments, MAX_TASK_BODY_BYTES } from "./attachments.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
@@ -32,6 +35,9 @@ import { cacheControlFor, etagFor, isFresh } from "./static-cache.ts";
 import { SessionFacts } from "./session-facts.ts";
 import type { SessionFact } from "./session-facts.ts";
 
+/** The skills prompt carries more evidence than a summary: allow a longer assistant call. */
+export const SKILLS_ANALYSIS_TIMEOUT_MS = 300_000;
+
 export interface AppState {
   db: Db;
   cfg: Config;
@@ -41,6 +47,8 @@ export interface AppState {
   hub: Hub & { clients: Set<ServerResponse> };
   /** Agent usage scanner (Claude/Codex logs); created on first use when absent. */
   improvement?: ImprovementAnalysis;
+  /** Skills analysis (installed skills vs. session use); created on first use when absent. */
+  skills?: SkillsAnalysis;
   usage?: UsageScanner;
   /** Cached OpenCode Go quota snapshot (external HTTPS call, polled by the UI). */
   goQuota?: GoQuotaCache;
@@ -192,12 +200,25 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/improvement", (_req, res) => json(res, 200, improvement.status()));
   on("PUT", "/api/improvement", (_req, res, { body }) => {
     const days = (body as { intervalDays?: unknown } | null)?.intervalDays;
-    if (typeof days !== "number" || ![0, 1, 7, 30].includes(days)) return json(res, 400, { error: "Invalid interval" });
+    if (!isInterval(days)) return json(res, 400, { error: "Invalid interval" });
     improvement.setIntervalDays(days);
     json(res, 200, improvement.status());
   });
   on("POST", "/api/improvement/run", async (_req, res) => {
     try { json(res, 200, await improvement.run()); }
+    catch (err) { json(res, 500, { error: err instanceof Error ? err.message : String(err) }); }
+  });
+
+  const skills = state.skills ??= new SkillsAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt, SKILLS_ANALYSIS_TIMEOUT_MS), { evidence: skillsEvidenceSource(state.db) });
+  on("GET", "/api/skills-analysis", (_req, res) => json(res, 200, skills.status()));
+  on("PUT", "/api/skills-analysis", (_req, res, { body }) => {
+    const days = (body as { intervalDays?: unknown } | null)?.intervalDays;
+    if (!isInterval(days)) return json(res, 400, { error: "Invalid interval" });
+    skills.setIntervalDays(days);
+    json(res, 200, skills.status());
+  });
+  on("POST", "/api/skills-analysis/run", async (_req, res) => {
+    try { json(res, 200, await skills.run()); }
     catch (err) { json(res, 500, { error: err instanceof Error ? err.message : String(err) }); }
   });
 
