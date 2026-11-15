@@ -14,6 +14,7 @@ import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
+import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
@@ -186,7 +187,17 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     routes.push({ method, pattern, keys, handler, bodyLimit });
   };
 
+  const analysisAgent = new AnalysisAgent(state.db, state.hub, state.cfg, state.backend);
+  on("GET", "/api/analysis-repo", (_req, res) => json(res, 200, { repo: analysisAgent.repo() }));
+  on("PUT", "/api/analysis-repo", (_req, res, { body }) => {
+    const repo = (body as { repo?: unknown } | null)?.repo;
+    if (typeof repo !== "string") return json(res, 400, { error: "Repository path required" });
+    try { analysisAgent.setRepo(repo.trim()); json(res, 200, { repo: analysisAgent.repo() }); }
+    catch { json(res, 400, { error: "Repository must be an existing git repository" }); }
+  });
+
   const improvement = state.improvement ??= new ImprovementAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt), {
+    agent: analysisAgent,
     usage: async () => {
       const scanner = (state.usage ??= new UsageScanner(defaultSources()));
       await withDeadline(scanner.refresh(), 15_000, undefined);
@@ -209,7 +220,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     catch (err) { json(res, 500, { error: err instanceof Error ? err.message : String(err) }); }
   });
 
-  const skills = state.skills ??= new SkillsAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt, SKILLS_ANALYSIS_TIMEOUT_MS), { evidence: skillsEvidenceSource(state.db) });
+  const skills = state.skills ??= new SkillsAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt, SKILLS_ANALYSIS_TIMEOUT_MS), { evidence: skillsEvidenceSource(state.db), agent: analysisAgent });
   on("GET", "/api/skills-analysis", (_req, res) => json(res, 200, skills.status()));
   on("PUT", "/api/skills-analysis", (_req, res, { body }) => {
     const days = (body as { intervalDays?: unknown } | null)?.intervalDays;

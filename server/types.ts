@@ -10,7 +10,7 @@ export type TargetState = "suggested" | "confirmed";
  *  spec: multi-repo step one — the agent works in a folder of sub-projects (not
  *  a git repo), writes the contract between them and proposes one code task per
  *  sub-project; no branch, no PR. */
-export type TaskKind = "code" | "review" | "spec";
+export type TaskKind = "code" | "review" | "spec" | "analysis";
 
 /** One sub-task a spec proposes. `repo` is a directory relative to the spec task's folder. */
 export interface PlanSubtask {

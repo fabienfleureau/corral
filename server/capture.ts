@@ -316,7 +316,7 @@ export class CaptureEngine {
     const taskId = opts.taskId ?? null;
     // A finished review has no PR of its own to gate: report it as information.
     const taskKind = taskId ? this.db.getTask(taskId)?.kind : undefined;
-    const review = taskKind === "review" || taskKind === "spec";
+    const review = taskKind === "review" || taskKind === "spec" || taskKind === "analysis";
     const itemKind: Item["kind"] = isDone ? (review ? "digest" : "pr") : "question";
     const address =
       opts.terminal ??
