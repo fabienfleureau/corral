@@ -5,9 +5,10 @@
 // same information (status, blocked elicitations, tree).
 
 import { gzipSync } from "node:zlib";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { OmnigentConfig } from "./config.ts";
+import { resolveExecutable, runAsync } from "./exec.ts";
 import { LocalModelProbe } from "./model-probe.ts";
 import type {
   WorkerAttachment,
@@ -24,13 +25,35 @@ import type {
 } from "./worker.ts";
 
 const POLL_MS = 4000;
-const execFileAsync = promisify(execFile);
+
+/** Where a user install of the OpenCode CLI usually lands. */
+const OPENCODE_DIRS = [
+  join(homedir(), ".opencode/bin"),
+  join(homedir(), ".local/bin"),
+  join(homedir(), ".bun/bin"),
+  join(homedir(), ".npm-global/bin"),
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+];
+
+/**
+ * `opencode models` prints one model id per line (`provider/model`). Ids often
+ * carry extra path segments (`nvidia/deepseek-ai/…`), so only whitespace and a
+ * missing slash disqualify a line.
+ */
+function parseOpenCodeModels(stdout: string): WorkerModel[] {
+  const ids = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.includes("/") && !/\s/.test(line));
+  return [...new Set(ids)].map((id) => ({ id, label: id, reasoning: [] }));
+}
 
 async function localOpenCodeModels(): Promise<WorkerModel[]> {
+  const bin = resolveExecutable("opencode", OPENCODE_DIRS);
+  if (!bin) return [];
   try {
-    const { stdout } = await execFileAsync("opencode", ["models"], { timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
-    return [...new Set(stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^[^\s/]+\/[^\s/]+$/.test(line)))]
-      .map((id) => ({ id, label: id, reasoning: [] }));
+    return parseOpenCodeModels(await runAsync(bin, ["models"], { timeout: 5_000 }));
   } catch {
     return [];
   }

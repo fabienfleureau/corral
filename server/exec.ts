@@ -2,6 +2,8 @@
 // not block HTTP requests, SSE or worker polling.
 
 import { execFile } from "node:child_process";
+import { accessSync, constants } from "node:fs";
+import { join } from "node:path";
 
 export function runAsync(
   cmd: string,
@@ -16,6 +18,26 @@ export function runAsync(
       (err, stdout) => (err ? reject(err) : resolve(stdout.trim())),
     );
   });
+}
+
+/**
+ * Absolute path of a CLI installed outside the server's PATH. A server started
+ * from a GUI (or tmux without a login shell) gets a bare PATH: user installs
+ * like `~/.opencode/bin` are missing, so a bare `execFile(name)` fails there.
+ */
+export function resolveExecutable(name: string, extraDirs: string[] = []): string | null {
+  const dirs = [...(process.env.PATH ?? "").split(":"), ...extraDirs];
+  for (const dir of dirs) {
+    if (!dir) continue;
+    const candidate = join(dir, name);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Not here — try the next directory.
+    }
+  }
+  return null;
 }
 
 /** Map with at most `limit` calls in flight; keeps input order. */
