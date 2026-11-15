@@ -12,6 +12,7 @@ import { SelectionToTask } from "./SelectionToTask";
 import { openInboxItems } from "./inbox-selection";
 import { rememberInboxItems, unseenInboxItems } from "./inbox-seen";
 import { NavIcon } from "./nav-icons";
+import { BrandMark } from "./BrandMark";
 import { ResizeHandle } from "./ResizeHandle";
 import { usePaneFlag, usePaneWidth } from "./use-pane-size";
 import type { PaneLimits } from "./pane-size";
@@ -195,7 +196,7 @@ export function App() {
         style={sidebarCollapsed ? undefined : { width: sidebarSize.width }}
       >
         <div className="brand">
-          <span className="brand-mark">C</span>
+          <BrandMark />
           <span className="brand-name">Corral</span>
           <button
             type="button"
@@ -297,7 +298,7 @@ function TokenScreen() {
     <div className="token-screen">
       <form className="token-card" onSubmit={submit}>
         <div className="brand">
-          <span className="brand-mark">C</span>
+          <BrandMark />
           <span className="brand-name">Corral</span>
         </div>
         <p className="muted">Enter your Corral token to continue. It is stored as a cookie.</p>
