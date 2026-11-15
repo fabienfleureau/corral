@@ -269,12 +269,14 @@ export const api = {
   getRateLimits: (refresh = false): Promise<{ limits: PlatformRateLimit[]; fetched_ms: number }> =>
     get<{ limits: PlatformRateLimit[]; fetched_ms: number }>(`/api/rate-limits${refresh ? "?refresh=1" : ""}`),
 
+  analysisRepo: (): Promise<{ repo: string }> => get<{ repo: string }>("/api/analysis-repo"),
+  setAnalysisRepo: (repo: string): Promise<{ repo: string }> => put<{ repo: string }>("/api/analysis-repo", { repo }),
   improvementStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/improvement"),
   setImprovementSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/improvement", { intervalDays }),
-  runImprovement: (): Promise<Item> => post<Item>("/api/improvement/run"),
+  runImprovement: (): Promise<Task> => post<Task>("/api/improvement/run"),
   skillsAnalysisStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/skills-analysis"),
   setSkillsAnalysisSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/skills-analysis", { intervalDays }),
-  runSkillsAnalysis: (): Promise<Item> => post<Item>("/api/skills-analysis/run"),
+  runSkillsAnalysis: (): Promise<Task> => post<Task>("/api/skills-analysis/run"),
   getConfig: (): Promise<Config> => get<Config>("/api/config"),
   putConfig: (input: { jira?: JiraConfigInput; favorites?: import("./types").Favorite[]; reviewers?: import("./types").Reviewer[]; models?: ModelCatalog }): Promise<{ ok: boolean }> =>
     put<{ ok: boolean }>("/api/config", input),

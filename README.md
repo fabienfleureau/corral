@@ -81,8 +81,8 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
 - **Model facts** — a shipped catalog of model facts (retention, quota, cost,
   benchmark scores) shows indicators on the task form.
 - **Self-improvement** (`#/improve`) — two analyses, each on demand or on a
-  schedule, that post a digest to the inbox and never dispatch work or change
-  files. The *improvement analysis* has the configured assistant review recent
+  schedule, that dispatch read-only agent tasks in a selected repository and post
+  a digest to the inbox. The *improvement analysis* reviews recent
   task and PR activity. The *skills analysis* compares the skills installed on
   this machine with the last 90 days of Claude Code and Codex sessions, flags
   skills that look obsolete and proposes new ones with draft `SKILL.md` text.

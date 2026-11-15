@@ -39,6 +39,7 @@ Review this PR/MR: <pr url>      # only for a review task
 | File | Sent when | Placeholders | Behaviour if the file is missing |
 |---|---|---|---|
 | `skills/question-report.md` | every `code` task (neither `review` nor `spec`) | `{corral_url}`, `{corral_token}`, `{task_id}` | one-line fallback: *"When you need the human, ask clearly and wait. Do not guess."* |
+| `skills/analysis.md` | analysis tasks, replacing the PR convention | environment variables | read-only analysis and digest report |
 | `skills/spec.md` | **replaces** `question-report.md` and `pr-loop.md` when `task.kind === "spec"` (multi-repo step one) — a spec reads the sub-projects, reports a `plan` and never commits | `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Write the contract between the sub-projects and report it as a plan. Do not change code."* |
 | `skills/pr-loop.md` | same tasks, right after `question-report.md` | — | dropped (empty string is filtered out) |
 | `skills/pre-pr-review.md` | non-review task dispatched **with a reviewer** (`review` in the dispatch options) | `{review_command}` | dropped |

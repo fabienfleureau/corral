@@ -12,6 +12,7 @@ import { createHttpServer, SKILLS_ANALYSIS_TIMEOUT_MS, type AppState } from "./a
 import { SessionFacts } from "./session-facts.ts";
 import type { ServerResponse } from "node:http";
 import { DEFAULT_PRICES, UsageScanner, defaultSources } from "./usage.ts";
+import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
@@ -40,7 +41,9 @@ const hub = {
 
 const capture = new CaptureEngine(db, backend, hub, cfg, jira);
 const usage = new UsageScanner(defaultSources());
+const analysisAgent = new AnalysisAgent(db, hub, cfg, backend);
 const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt), {
+  agent: analysisAgent,
   usage: async () => {
     // A first scan of large logs can take a while: the digest still gets the
     // records indexed so far and marks the snapshot as scanning.
@@ -52,7 +55,7 @@ const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg
     };
   },
 });
-const skills = new SkillsAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt, SKILLS_ANALYSIS_TIMEOUT_MS), { evidence: skillsEvidenceSource(db) });
+const skills = new SkillsAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt, SKILLS_ANALYSIS_TIMEOUT_MS), { evidence: skillsEvidenceSource(db), agent: analysisAgent });
 const sessionFacts = new SessionFacts(backend);
 const state: AppState = { db, cfg, backend, capture, jira, hub, usage, improvement, skills, sessionFacts };
 setTimeout(() => void improvement.runIfDue().catch(() => undefined), 10_000);

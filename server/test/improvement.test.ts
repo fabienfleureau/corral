@@ -113,6 +113,7 @@ test("digest evidence carries linked tasks and usage costs", async () => {
     }),
   });
   const item = await service.run();
+  assert.ok("context" in item);
   const evidence = JSON.parse(item.context);
   assert.ok(evidence.tasks.some((t: { id: string }) => t.id === "older"), "task behind an item is included");
   assert.equal(evidence.usage.by_task[0].id, "recent");

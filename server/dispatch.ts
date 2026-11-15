@@ -58,7 +58,9 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
   // A review must not commit, push or open a PR: its convention replaces both
   // the finish flow of question-report.md and the PR loop.
   // A spec task never commits or opens a PR: it reports a plan instead.
-  const parts = task.kind === "review"
+  const parts = task.kind === "analysis"
+    ? [read("analysis.md", "Analyze the evidence and report a digest. Do not change files.")]
+    : task.kind === "review"
     ? [read("review.md", "Review the PR/MR. Do not change code. Ask before posting any comment.")]
     : task.kind === "spec"
     ? [read("spec.md", "Write the contract between the sub-projects and report it as a plan. Do not change code.")]
@@ -66,7 +68,7 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
       read("question-report.md", "When you need the human, ask clearly and wait. Do not guess."),
       read("pr-loop.md", ""),
     ];
-  if (task.kind !== "review" && task.kind !== "spec" && reviewCommand) {
+  if (task.kind !== "review" && task.kind !== "spec" && task.kind !== "analysis" && reviewCommand) {
     // A callback replacement, not a string: review commands legitimately contain
     // `$` sequences ($$, $&, $') that replaceAll would otherwise expand.
     parts.push(read("pre-pr-review.md", "").replaceAll("{review_command}", () => reviewCommand));
@@ -172,6 +174,7 @@ export async function dispatchTask(
     throw new Error("task has no repo assigned — assign one before dispatching");
   }
   const spec = task.kind === "spec";
+  const analysis = task.kind === "analysis";
   if (spec) {
     // The folder holds the sub-projects; it is not a repository itself.
     if (!isDirectory(task.repo_path)) throw new Error(`not a directory: ${task.repo_path}`);
@@ -189,7 +192,7 @@ export async function dispatchTask(
     if (!task.pr_url) throw new Error("review task has no PR/MR URL");
   }
   // A review reads the MR head without checking it out: no worktree, no branch.
-  const useWorktree = !review && !spec && opts.useWorktree !== false;
+  const useWorktree = !review && !spec && !analysis && opts.useWorktree !== false;
   const originalBranch = task.branch ?? `${slugify(taskLabel(task), 32)}-${task.id.slice(0, 6)}`;
   let branch = originalBranch;
 
@@ -264,7 +267,7 @@ export async function dispatchTask(
     target_state: "confirmed",
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
-    branch: review || spec ? null : branch,
+    branch: review || spec || analysis ? null : branch,
     worktree_path: useWorktree && session.cwd ? session.cwd : null,
     terminal_address: session.address,
     review: reviewCommand,
@@ -294,7 +297,7 @@ export async function dispatchTask(
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
     agent: opts.agent ?? null,
-    branch: review || spec ? null : branch,
+    branch: review || spec || analysis ? null : branch,
     worktree: useWorktree && session.cwd ? session.cwd : null,
     session: session.address,
     attachments: attachments.length ? attachments.map((a) => `${a.filename} (${formatBytes(a.data.length)})`).join(", ") : undefined,
@@ -310,5 +313,5 @@ export async function dispatchTask(
     );
   }
 
-  return { address: session.address, worktreePath: session.cwd, branch: review || spec ? "" : branch };
+  return { address: session.address, worktreePath: session.cwd, branch: review || spec || analysis ? "" : branch };
 }

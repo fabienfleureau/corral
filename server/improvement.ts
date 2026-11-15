@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "./db.ts";
 import type { Hub } from "./capture.ts";
-import type { Item } from "./types.ts";
+import type { Item, Task } from "./types.ts";
+import type { AnalysisAgent } from "./analysis-agent.ts";
 import { collectImprovementEvidence } from "./improvement-evidence.ts";
 import { buildUsageEvidence, type ModelPrice, type UsageEvidence, type UsageRecord } from "./usage.ts";
 import { AnalysisSchedule } from "./analysis-schedule.ts";
@@ -19,10 +20,11 @@ export interface ImprovementUsageSource {
 
 export interface ImprovementOptions {
   usage?: () => Promise<ImprovementUsageSource | null>;
+  agent?: AnalysisAgent;
 }
 
 export class ImprovementAnalysis {
-  private running: Promise<Item> | null = null;
+  private running: Promise<Item | Task> | null = null;
   constructor(privateDb: Db, privateHub: Pick<Hub, "broadcast">, complete: (prompt: string) => Promise<string>, options: ImprovementOptions = {}) {
     this.db = privateDb;
     this.hub = privateHub;
@@ -49,13 +51,13 @@ export class ImprovementAnalysis {
     await this.run();
   }
 
-  run(): Promise<Item> {
+  run(): Promise<Item | Task> {
     if (this.running) return this.running;
     this.running = this.perform().finally(() => { this.running = null; });
     return this.running;
   }
 
-  private async perform(): Promise<Item> {
+  private async perform(): Promise<Item | Task> {
     const now = Date.now();
     this.schedule.begin(now);
     try {
@@ -73,6 +75,11 @@ export class ImprovementAnalysis {
         "A merged PR is not proof of production success: production outcomes are not recorded. Events and items are capped; use the truncated flags. Review thread bodies are not stored, only counts and ids.",
         "Return concise markdown. Never dispatch tasks or make changes. Evidence follows:", evidence,
       ].join("\n\n");
+      if (this.options.agent) {
+        const task = await this.options.agent.start("Engineering improvement analysis", prompt);
+        this.schedule.succeed(Date.now());
+        return task;
+      }
       const proposal = (await this.complete(prompt)).trim();
       if (!proposal) throw new Error("Assistant returned an empty analysis");
       const item: Item = { id: randomUUID(), kind: "digest", status: "open", title: "Engineering improvement analysis", summary: "", body: `${proposal}\n\n---\n\nEvidence: bounded task, item, event, PR-snapshot and usage snapshots from the last 30 days, including tasks linked from older items. Data-quality flags and gaps are part of the evidence. Production outcomes are not collected.`, context: evidence, options: null, ready: 1, source_ref: null, task_id: null, structured: 1, created_ms: now, updated_ms: now, resolved_ms: null, snooze_until_ms: null };

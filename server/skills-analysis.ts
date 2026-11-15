@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "./db.ts";
 import type { Hub } from "./capture.ts";
-import type { Item } from "./types.ts";
+import type { Item, Task } from "./types.ts";
+import type { AnalysisAgent } from "./analysis-agent.ts";
 import { AnalysisSchedule } from "./analysis-schedule.ts";
 import { SKILLS_OPENER } from "./assistant-prompts.ts";
 import type { SkillsEvidence } from "./skills-evidence.ts";
@@ -9,6 +10,7 @@ import type { SkillsEvidence } from "./skills-evidence.ts";
 export interface SkillsAnalysisOptions {
   /** Inventory plus session scan; injected so the service stays testable. */
   evidence: (now: number) => Promise<SkillsEvidence>;
+  agent?: AnalysisAgent;
 }
 
 /** Reads the skills on this machine and how the human's agent sessions used
@@ -16,7 +18,7 @@ export interface SkillsAnalysisOptions {
  *  which new ones are worth writing. It proposes in an inbox digest; it never
  *  creates, edits or deletes a skill. */
 export class SkillsAnalysis {
-  private running: Promise<Item> | null = null;
+  private running: Promise<Item | Task> | null = null;
   private db: Db;
   private hub: Pick<Hub, "broadcast">;
   private complete: (prompt: string) => Promise<string>;
@@ -44,18 +46,24 @@ export class SkillsAnalysis {
     await this.run();
   }
 
-  run(): Promise<Item> {
+  run(): Promise<Item | Task> {
     if (this.running) return this.running;
     this.running = this.perform().finally(() => { this.running = null; });
     return this.running;
   }
 
-  private async perform(): Promise<Item> {
+  private async perform(): Promise<Item | Task> {
     const now = Date.now();
     this.schedule.begin(now);
     try {
       const evidence = await this.options.evidence(now);
-      const proposal = (await this.complete(buildSkillsPrompt(evidence))).trim();
+      const prompt = buildSkillsPrompt(evidence);
+      if (this.options.agent) {
+        const task = await this.options.agent.start("Skills analysis", prompt);
+        this.schedule.succeed(Date.now());
+        return task;
+      }
+      const proposal = (await this.complete(prompt)).trim();
       if (!proposal) throw new Error("Assistant returned an empty analysis");
       const item: Item = {
         id: randomUUID(), kind: "digest", status: "open", title: "Skills analysis", summary: "",

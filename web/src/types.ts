@@ -5,7 +5,7 @@ export type Task = {
   title: string;
   prompt: string;
   /** "review": review the existing PR/MR in pr_url; no branch, no PR. */
-  kind?: "code" | "review" | "spec";
+  kind?: "code" | "review" | "spec" | "analysis";
   /** The spec task a code task was created from (multi-repo). */
   parent_task_id?: string | null;
   repo_path: string;
