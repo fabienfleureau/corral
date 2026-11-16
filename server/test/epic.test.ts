@@ -113,7 +113,9 @@ test("sync: an existing task is attached to the epic instead of duplicated", wit
   const { epic, created } = await syncEpic(db, fakeJira(issue("E-1", "Epic"), [issue("E-2", "first", "from jira")]), "E-1");
   assert.deepEqual(created, []);
   assert.equal(db.getTask("t1")!.prompt, "mine", "a hand-written prompt is not replaced by ticket text");
-  assert.equal(db.getTask("t1")!.jira_url, "https://j/browse/E-2", "so dispatch frames the ticket as data");
+  assert.equal(db.getTask("t1")!.jira_url, null, "a second sync must still see a hand-written task");
+  await syncEpic(db, fakeJira(issue("E-1", "Epic"), [issue("E-2", "first", "from jira again")]), "E-1");
+  assert.equal(db.getTask("t1")!.prompt, "mine", "still not replaced after a second sync");
   assert.equal(db.getTask("t1")!.epic_id, epic.id);
   assert.equal(db.listTasks().length, 1);
 }));
