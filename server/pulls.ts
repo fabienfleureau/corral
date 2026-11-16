@@ -54,7 +54,7 @@ function epochMs(v: unknown): number {
 // ---- GitHub ----
 
 async function githubLogin(): Promise<string> {
-  const login = (JSON.parse(await run("gh", ["api", "user"])) as { login?: string }).login;
+  const login = (JSON.parse(await run("gh", ["api", "user", "--cache", "1h"])) as { login?: string }).login;
   if (!login) throw new Error("GitHub returned no login");
   return login;
 }
@@ -273,7 +273,11 @@ async function githubPull(url: string, login: string, awaitingMe: boolean): Prom
       totalChecks: checks.total,
       reviewCount: (d.reviews ?? []).length,
       changesRequested: d.reviewDecision === "CHANGES_REQUESTED",
-      unresolvedThreads: await githubUnresolvedThreads(d.url),
+      // These conditions take precedence over threads in colorize; fetching
+      // them cannot change the displayed result until the next refresh.
+      unresolvedThreads: d.reviewDecision === "CHANGES_REQUESTED" || checks.failing > 0 || d.isDraft || checks.pending > 0
+        ? null
+        : await githubUnresolvedThreads(d.url),
     });
     const author = d.author?.login ?? "";
     return {
