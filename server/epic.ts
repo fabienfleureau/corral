@@ -109,10 +109,13 @@ export async function syncEpic(db: Db, jira: EpicJira, key: string): Promise<Epi
     if (existing.epic_id !== epic.id) patch.epic_id = epic.id;
     if (existing.epic_out) patch.epic_out = 0;
     if (existing.jira_status !== f.jira_status) patch.jira_status = f.jira_status;
+    if (!existing.jira_url) patch.jira_url = f.jira_url;
     // Jira wins on the ticket text until work starts; after that the running
     // agent's prompt is history and must not change under it.
+    // A task a human wrote by hand (no Jira link) keeps its own text: only
+    // Jira-sourced tasks are refreshed, and dispatch frames those as data.
     const started = existing.status !== "open" || Boolean(existing.terminal_address);
-    if (!started) {
+    if (!started && existing.jira_url) {
       if (existing.title !== f.title) patch.title = f.title;
       if (existing.prompt !== f.prompt) patch.prompt = f.prompt;
       if (!existing.repo_path) {

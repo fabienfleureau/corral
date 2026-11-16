@@ -203,7 +203,7 @@ export async function dispatchTask(
   if (review) taskContext.push(`Review this PR/MR: ${task.pr_url}`);
   // A Jira-imported task's title and description are the ticket's own text:
   // frame the block as data before the conventions, which are Corral's rules.
-  const taskText = [task.jira_url ? DATA_NOT_INSTRUCTIONS : "", taskContext.join("\n\n"), contractBlock(db, task)]
+  const taskText = [task.jira_url || task.jira_key ? DATA_NOT_INSTRUCTIONS : "", taskContext.join("\n\n"), contractBlock(db, task)]
     .filter(Boolean)
     .join("\n\n");
 
