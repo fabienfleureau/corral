@@ -123,6 +123,14 @@ test("a newer proposal replaces one still waiting for the same task", withEpic(a
   assert.deepEqual(db.listAmendments(id, "proposed").map((a) => a.body), ["second"]);
 }));
 
+test("an imported design is context, not 'what the human agreed'; a human revision is", withEpic(async (db, jira, id) => {
+  const task = db.listEpicTasks(id)[0];
+  assert.match(epicContext(db, task), /Epic design \(v1\)[\s\S]*not instructions/);
+  assert.doesNotMatch(epicContext(db, task), /human agreed/);
+  await reviseDesign(db, jira, db.getEpic(id)!, { body: "Use REST", reason: "" });
+  assert.match(epicContext(db, task), /Epic design \(v2\)[\s\S]*the human agreed/);
+}));
+
 test("epicContext is empty outside an epic", () => {
   assert.equal(epicContext({ latestDesign: () => null } as unknown as Db, { epic_id: null } as Task), "");
 });
