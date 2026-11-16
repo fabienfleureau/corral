@@ -111,6 +111,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncRequest, setSyncRequest] = useState<"idle" | "requesting" | "requested" | "error">("idle");
   const [selected, setSelected] = useState<Item | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const listSize = usePaneWidth("corral.inboxListWidth", LIST_DEFAULT_WIDTH, LIST_LIMITS);
@@ -155,10 +156,16 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   // broadcasts the changes, which bumps eventVersion and reloads the list).
   useEffect(() => {
     if (!active) return;
-    const sync = () => { if (document.visibilityState === "visible") void api.syncPrs().catch(() => undefined); };
+    let cancelled = false;
+    const sync = () => {
+      if (document.visibilityState !== "visible") return;
+      setSyncRequest("requesting");
+      void api.syncPrs().then(() => { if (!cancelled) setSyncRequest("requested"); })
+        .catch(() => { if (!cancelled) setSyncRequest("error"); });
+    };
     sync();
     document.addEventListener("visibilitychange", sync);
-    return () => document.removeEventListener("visibilitychange", sync);
+    return () => { cancelled = true; document.removeEventListener("visibilitychange", sync); };
   }, [active]);
 
   const visibleItems = useVisibleInboxItems(allItems);
@@ -308,6 +315,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   /** An item the agent is handling reads as "in progress", not "open". */
   const selectedInProgress = selected !== null && isHandlingItem(selected) && selected.status === "open";
   const now = Date.now();
+  const refreshStatus = `${loading ? "Refreshing inbox" : error ? "Inbox refresh failed" : "Inbox up to date"}. ${syncRequest === "requesting" ? "Requesting GitHub/GitLab PR sync" : syncRequest === "requested" ? "GitHub/GitLab PR sync requested; completion status unavailable" : syncRequest === "error" ? "GitHub/GitLab PR sync request failed" : "GitHub/GitLab PR sync not requested"}`;
 
   return (
     <div className="page inbox-page" style={active ? undefined : { display: "none" }}>
@@ -325,7 +333,10 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               </button>
             ))}
           </div>
-          {loading && (items.length > 0 || (statusFilter === "in-progress" && inProgressTasks.length > 0)) ? <Spinner label="Loading…" /> : null}
+          <span className={`inbox-refresh-status ${error || syncRequest === "error" ? "inbox-refresh-error" : ""}`}
+            role="status" aria-label={refreshStatus} title={refreshStatus}>
+            {loading || syncRequest === "requesting" ? <Spinner /> : error || syncRequest === "error" ? "!" : "✓"}
+          </span>
         </div>
         {error ? <div className="inline-error">{error}</div> : null}
         <div className="item-list">
