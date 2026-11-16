@@ -92,6 +92,19 @@ export type TaskEvent = {
   data: string | null;
 };
 
+/** One event on the daily page, with its task and session context. */
+export type DailyActivity = TaskEvent & {
+  title: string;
+  prompt: string;
+  repo_name: string;
+  repo_path: string;
+  jira_url: string | null;
+  jira_key: string | null;
+  pr_url: string | null;
+  terminal_address: string | null;
+  session_url: string | null;
+};
+
 export type PullColor = "green" | "orange" | "red";
 
 export type Pull = {

@@ -1,6 +1,8 @@
 // Shared types for Corral. Keep this file erasable-syntax-only (no enums, no
 // parameter properties): Node runs TypeScript via type stripping.
 
+import type { TaskEvent } from "./task-events.ts";
+
 export type AgentTarget = "claude" | "codex" | "opencode" | string;
 
 export type TaskStatus = "open" | "dispatched" | "done" | "archived";
@@ -87,6 +89,18 @@ export interface Task {
 export function taskLabel(task: Pick<Task, "title" | "prompt">): string {
   return task.title.trim() || task.prompt.trim().split("\n")[0].slice(0, 80) || "Untitled task";
 }
+
+/** One task event with the task and repo fields the daily standup needs. */
+export type DailyActivity = TaskEvent & {
+  title: string;
+  prompt: string;
+  repo_name: string;
+  repo_path: string;
+  jira_url: string | null;
+  jira_key: string | null;
+  pr_url: string | null;
+  terminal_address: string | null;
+};
 
 export type ItemKind = "question" | "pr" | "digest" | "plan";
 export type ItemStatus = "open" | "resolved" | "archived";

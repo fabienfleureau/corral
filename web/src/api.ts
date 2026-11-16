@@ -2,7 +2,7 @@
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
 import type { AttachmentInput } from "./attachments";
-import type { Config, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
+import type { Config, DailyActivity, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
 
 /** Schedule and run state of a server-side analysis (improvement, skills). */
 export type AnalysisStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
@@ -205,7 +205,8 @@ export const api = {
 
   // ---- tasks ----
   progression: (): Promise<{ xp: number; level: number; levelXp: number; nextLevelXp: number; tasks: number; inbox: number }> => get("/api/progression"),
-  dailyActivity: (start: number, end: number): Promise<(TaskEvent & { title: string; prompt: string; repo_name: string; jira_url: string | null; jira_key: string | null; pr_url: string | null })[]> => get(`/api/daily${query({ start: String(start), end: String(end) })}`),
+  dailyActivity: (start: number, end: number): Promise<DailyActivity[]> => get(`/api/daily${query({ start: String(start), end: String(end) })}`),
+  summarizeDaily: (input: { start: number; end: number; date: string; favorite: string }): Promise<{ task: Task }> => post("/api/daily/summarize", input),
   listTasks: (status?: Task["status"]): Promise<Task[]> =>
     get<Task[]>(`/api/tasks${query({ status })}`),
   createTask: (input: NewTaskInput): Promise<Task> => post<Task>("/api/tasks", input),

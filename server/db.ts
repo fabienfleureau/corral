@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
-import type { Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
+import type { DailyActivity, Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
 import { logTaskChanges, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
@@ -290,11 +290,11 @@ export class Db {
   }
 
   /** Events for tasks in registered professional repositories, in chronological order. */
-  listDailyActivity(start: number, end: number): (TaskEvent & { title: string; prompt: string; repo_name: string; jira_url: string | null; jira_key: string | null; pr_url: string | null })[] {
-    return this.stmt(`SELECT e.*, t.title, t.prompt, r.name AS repo_name, t.jira_url, t.jira_key, t.pr_url
+  listDailyActivity(start: number, end: number): DailyActivity[] {
+    return this.stmt(`SELECT e.*, t.title, t.prompt, r.name AS repo_name, r.path AS repo_path, t.jira_url, t.jira_key, t.pr_url, t.terminal_address
       FROM task_events e JOIN tasks t ON t.id = e.task_id JOIN repos r ON r.path = t.repo_path
       WHERE COALESCE(r.context, 'professional') = 'professional' AND e.ts >= ? AND e.ts < ?
-      ORDER BY e.ts, e.id`).all(start, end) as unknown as (TaskEvent & { title: string; prompt: string; repo_name: string; jira_url: string | null; jira_key: string | null; pr_url: string | null })[];
+      ORDER BY e.ts, e.id`).all(start, end) as unknown as DailyActivity[];
   }
 
   // ---- task history ----

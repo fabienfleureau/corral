@@ -12,6 +12,8 @@ import {
   reviewFromHash,
   reviewTaskHash,
   selectionTaskHash,
+  taskFocusFromHash,
+  taskFocusHash,
   taskPrefillFromHash,
 } from '../../web/src/selection-task.ts';
 
@@ -44,6 +46,15 @@ test('the tasks hash round-trips a prompt verbatim', () => {
   assert.ok(hash.startsWith('#/tasks?prompt='));
   assert.equal(promptFromHash(hash), prompt);
   assert.equal(promptFromHash(hash.replace(/^#/, '')), prompt);
+});
+
+test('a daily item links to one task and does not prefill the form', () => {
+  const hash = taskFocusHash('task-42');
+  assert.equal(hash, '#/tasks?task=task-42');
+  assert.equal(taskFocusFromHash(hash), 'task-42');
+  assert.equal(taskFocusFromHash('#/tasks'), null);
+  assert.equal(taskFocusFromHash('#/inbox?task=task-42'), null);
+  assert.equal(taskPrefillFromHash(hash), null);
 });
 
 test('only the tasks route carries a prompt', () => {

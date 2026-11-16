@@ -62,6 +62,16 @@ export function reviewFromHash(hash: string): string | null {
   return /^https?:\/\/\S+$/.test(url) ? url : null;
 }
 
+/** Tasks-page route that highlights an existing task: `#/tasks?task=<id>`. */
+export function taskFocusHash(id: string): string {
+  return `#/tasks?${new URLSearchParams({ task: id }).toString()}`;
+}
+
+/** Read a focused task id out of a hash route; null for any other route. */
+export function taskFocusFromHash(hash: string): string | null {
+  return tasksQuery(hash)?.get("task") || null;
+}
+
 /** Everything a Tasks deep link can prefill, or null when there is nothing. */
 export function taskPrefillFromHash(hash: string): TaskPrefill | null {
   const text = promptFromHash(hash);
