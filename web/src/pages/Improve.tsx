@@ -98,6 +98,15 @@ export function ImprovePage() {
           doneMessage="Analysis task started."
         />
         <AnalysisPanel
+          title="Engineering skills analysis"
+          subject="engineering skills"
+          intro="Find learning topics and exercises grounded in your recent Corral activity. The agent receives task and PR metadata, event data, and clipped, redacted task descriptions and inbox questions. Activity alone cannot establish your proficiency. Each run starts an agent task and reports its findings in your inbox."
+          status={api.engineeringSkillsStatus}
+          setSchedule={api.setEngineeringSkillsSchedule}
+          run={api.runEngineeringSkills}
+          doneMessage="Analysis task started."
+        />
+        <AnalysisPanel
           title="Skills analysis"
           subject="skills"
           intro="Compare the skills installed on this machine with your last 90 days of Claude Code and Codex sessions: which look obsolete, and which new ones are worth writing. The agent receives each skill's name, description and opening lines (not the text of plugin skills), invocation counts, and the first prompt of recent sessions, truncated and stripped of boilerplate and secrets. Each run starts an agent task and reports draft skills in your inbox; no skills are changed."

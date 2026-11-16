@@ -80,10 +80,12 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   limits for the PR loop.
 - **Model facts** — a shipped catalog of model facts (retention, quota, cost,
   benchmark scores) shows indicators on the task form.
-- **Self-improvement** (`#/improve`) — two analyses, each on demand or on a
+- **Self-improvement** (`#/improve`) — three analyses, each on demand or on a
   schedule, that dispatch read-only agent tasks in a selected repository and post
   a digest to the inbox. The *improvement analysis* reviews recent
-  task and PR activity. The *skills analysis* compares the skills installed on
+  task and PR activity. The *engineering skills analysis* suggests learning topics
+  and exercises from Corral activity, without inferring proficiency from delegated
+  work. The *skills analysis* compares the skills installed on
   this machine with the last 90 days of Claude Code and Codex sessions, flags
   skills that look obsolete and proposes new ones with draft `SKILL.md` text.
 - **Notifications** — in-app + desktop, for new actionable items only.
@@ -183,7 +185,7 @@ server/       Node 22 (type-stripped TS), no runtime deps
   usage.ts    local session scan, cost and quota
   improvement*.ts  digest evidence and scheduled analysis
   skills-*.ts      skill inventory, session scan and the skills analysis
-  analysis-schedule.ts  persisted schedule shared by both analyses
+  analysis-schedule.ts  persisted schedule shared by analyses
   db.ts       SQLite (tasks, items, task events, metrics)
   cli.ts      corral add / status / serve
 skills/       agent prompt conventions, injected at dispatch

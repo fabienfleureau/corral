@@ -56,12 +56,15 @@ const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg
   },
 });
 const skills = new SkillsAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt, SKILLS_ANALYSIS_TIMEOUT_MS), { evidence: skillsEvidenceSource(db), agent: analysisAgent });
+const engineeringSkills = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt), { agent: analysisAgent, mode: "engineering-skills" });
 const sessionFacts = new SessionFacts(backend);
-const state: AppState = { db, cfg, backend, capture, jira, hub, usage, improvement, skills, sessionFacts };
+const state: AppState = { db, cfg, backend, capture, jira, hub, usage, improvement, skills, engineeringSkills, sessionFacts };
 setTimeout(() => void improvement.runIfDue().catch(() => undefined), 10_000);
 setInterval(() => void improvement.runIfDue().catch(() => undefined), 60_000);
 setTimeout(() => void skills.runIfDue().catch(() => undefined), 20_000);
 setInterval(() => void skills.runIfDue().catch(() => undefined), 60_000);
+setTimeout(() => void engineeringSkills.runIfDue().catch(() => undefined), 30_000);
+setInterval(() => void engineeringSkills.runIfDue().catch(() => undefined), 60_000);
 // Tasks page: the queue's session model/reasoning costs one backend round trip
 // per task. Read them once in the background so the first list load is warm.
 setTimeout(() => void sessionFacts.prime(db.listTasks()).catch(() => undefined), 1_000);

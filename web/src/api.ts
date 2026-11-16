@@ -273,6 +273,9 @@ export const api = {
 
   analysisRepo: (): Promise<{ repo: string }> => get<{ repo: string }>("/api/analysis-repo"),
   setAnalysisRepo: (repo: string): Promise<{ repo: string }> => put<{ repo: string }>("/api/analysis-repo", { repo }),
+  engineeringSkillsStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/engineering-skills"),
+  setEngineeringSkillsSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/engineering-skills", { intervalDays }),
+  runEngineeringSkills: (): Promise<Task> => post<Task>("/api/engineering-skills/run"),
   improvementStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/improvement"),
   setImprovementSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/improvement", { intervalDays }),
   runImprovement: (): Promise<Task> => post<Task>("/api/improvement/run"),
