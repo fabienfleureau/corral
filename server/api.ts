@@ -303,6 +303,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       ));
     }
     state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now(), body: `${item.body}\n\n**Reply:** ${content !== undefined ? JSON.stringify(content) : permission || text.trim()}` });
+    state.db.reward("inbox", item.id);
     state.db.recordMetric("item.replied", item.id, { address });
     state.hub.broadcast("item.updated", state.db.getItem(item.id));
     json(res, 200, { ok: true, sent_to: address });
@@ -323,7 +324,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   on("POST", "/api/items/:id/resolve", (_req, res, { params }) => {
+    const item = state.db.getItem(params.id);
+    if (!item) return json(res, 404, { error: "item not found" });
     state.db.updateItem(params.id, { status: "resolved", resolved_ms: Date.now() });
+    state.db.reward("inbox", item.id);
     state.db.recordMetric("item.resolved", params.id, { how: "manual" });
     state.hub.broadcast("item.updated", state.db.getItem(params.id));
     json(res, 200, state.db.getItem(params.id));
@@ -342,6 +346,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     state.hub.broadcast("item.updated", state.db.getItem(params.id));
     json(res, 200, state.db.getItem(params.id));
   });
+
+  on("GET", "/api/progression", (_req, res) => json(res, 200, state.db.progression()));
 
   on("GET", "/api/daily", (_req, res, { url }) => {
     const startText = url.searchParams.get("start");
@@ -412,6 +418,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       updated_ms: now,
     };
     state.db.insertTaskWithAttachments(task, attached.files);
+    state.db.reward("task", task.id);
     state.db.recordMetric("task.created", task.id, { source: b.jira_key ? "jira" : "manual" });
     logTaskEvent(state.db, task.id, "created", kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : "Task created", {
       source: b.jira_key ? "jira" : "manual",

@@ -7,6 +7,11 @@ import type { Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskAttachmen
 import { logTaskChanges, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS reward_events (
+  kind TEXT NOT NULL, ref TEXT NOT NULL, created_ms INTEGER NOT NULL,
+  PRIMARY KEY (kind, ref)
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -123,6 +128,20 @@ export class Db {
     this.raw.exec("PRAGMA journal_mode = WAL;");
     this.raw.exec(SCHEMA);
     this.migrate();
+  }
+
+  reward(kind: "task" | "inbox", ref: string): void {
+    this.stmt("INSERT OR IGNORE INTO reward_events (kind, ref, created_ms) VALUES (?, ?, ?)").run(kind, ref, Date.now());
+  }
+
+  progression(): { xp: number; level: number; levelXp: number; nextLevelXp: number; tasks: number; inbox: number } {
+    const counts = this.stmt("SELECT kind, COUNT(*) AS count FROM reward_events GROUP BY kind").all() as { kind: string; count: number }[];
+    const tasks = counts.find((r) => r.kind === "task")?.count ?? 0;
+    const inbox = counts.find((r) => r.kind === "inbox")?.count ?? 0;
+    const xp = tasks * 10 + inbox * 20;
+    let level = 1, levelXp = xp;
+    while (levelXp >= level * 100) { levelXp -= level * 100; level++; }
+    return { xp, level, levelXp, nextLevelXp: level * 100, tasks, inbox };
   }
 
   private stmt(sql: string): StatementSync {
