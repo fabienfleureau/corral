@@ -625,7 +625,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 </div>
               ) : null}
 
-              <div className="reply-block">
+              {selected.kind === "launch" ? null : <div className="reply-block">
                 {replyQuestions(selected.elicitation).length > 0 ? <>
                   <QuestionReply key={selected.id + selected.elicitation}
                     questions={replyQuestions(selected.elicitation)} disabled={replyBusy || selected.status !== "open"}
@@ -694,7 +694,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   ) : null}
                 </div>
                 </>}
-              </div>
+              </div>}
             </div>
           </>
         )}

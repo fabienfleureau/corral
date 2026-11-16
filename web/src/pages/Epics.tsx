@@ -95,7 +95,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
             <h2>{detail.epic.jira_key} · {detail.epic.title}</h2>
             <button className="btn" type="button" disabled={busy} onClick={() => void run(() => api.syncEpic(detail.epic.id))}>Resync from Jira</button>
           </div>
-          <label htmlFor="epic-progress">{summaryText(detail.summary)}</label>
+          <label className="epic-summary" htmlFor="epic-progress">{summaryText(detail.summary)}</label>
           <progress id="epic-progress" className="epic-progress" value={detail.summary.merged} max={Math.max(detail.summary.total, 1)} />
           {detail.epic.error ? <p className="inline-error" role="alert">{detail.epic.error}. Nothing in the cycle can be launched.</p> : null}
           <ol className="epic-tasks">

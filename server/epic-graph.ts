@@ -113,8 +113,6 @@ export function epicSummary(views: EpicTaskView[]): EpicSummary {
   };
 }
 
-const launchRef = (taskId: string) => `epic-launch:${taskId}`;
-
 /**
  * Keep one open "ready to launch" inbox item per ready task, and archive it
  * once the task has started or is blocked again. Also sets the stacked base
@@ -125,7 +123,7 @@ export function syncEpicLaunch(db: Db, hub: Hub): void {
   for (const epic of db.listEpics()) {
     const views = epicViews(db.listEpicTasks(epic.id), db.listEpicLinks(epic.id), items);
     for (const v of views) {
-      const existing = items.find((i) => i.kind === "launch" && i.source_ref === launchRef(v.task.id) && i.status === "open");
+      const existing = items.find((i) => i.kind === "launch" && i.task_id === v.task.id && i.status === "open");
       if (v.state === "ready") {
         const t = db.getTask(v.task.id)!;
         const blockerBranches = new Set(v.blockers.map((b) => (b.task_id ? db.getTask(b.task_id)?.branch : null)).filter(Boolean));
@@ -144,7 +142,7 @@ export function syncEpicLaunch(db: Db, hub: Hub): void {
         const item: Item = {
           id: randomUUID(), kind: "launch", status: "open", title: `Ready to launch: ${v.task.title}`,
           summary: `Epic ${epic.jira_key}`, body, context: "", options: null, ready: 1, handling: 0,
-          source_ref: launchRef(v.task.id), task_id: v.task.id, structured: 1,
+          source_ref: null, task_id: v.task.id, structured: 1,
           created_ms: now, updated_ms: now, resolved_ms: null, snooze_until_ms: null,
         };
         db.insertItem(item);

@@ -2457,7 +2457,9 @@ select:focus {
 }
 
 /* Epics page */
-.epics-import { display: flex; gap: .5rem; margin: .5rem 0 1rem; }
+.epics-import { display: flex; gap: .5rem; margin: .5rem 0 1rem; max-inline-size: 28rem; }
+.epics-import input { flex: 1; }
+.epic-summary { display: block; margin: .5rem 0 .25rem; }
 .epics-list { display: flex; flex-wrap: wrap; gap: .5rem; list-style: none; padding: 0; margin: 0 0 1rem; }
 .epics-list button { border: 1px solid var(--border); border-radius: 6px; padding: .4rem .7rem; background: transparent; color: inherit; cursor: pointer; text-align: left; }
 .epics-list button[aria-current="true"] { border-color: var(--accent-ink); }
