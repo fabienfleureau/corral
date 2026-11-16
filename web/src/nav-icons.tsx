@@ -34,6 +34,7 @@ const paths: Record<string, ReactNode> = {
       <path d="M13 15h4" />
     </>
   ),
+  daily: (<> <rect x="3" y="5" width="18" height="16" rx="2" /> <path d="M7 3v4M17 3v4M3 10h18M7 14h4M7 17h8" /> </>),
   usage: (
     <>
       <path d="M4 20V10" />

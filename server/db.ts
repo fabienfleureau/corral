@@ -270,6 +270,14 @@ export class Db {
     return rows as unknown as Task[];
   }
 
+  /** Events for tasks in registered professional repositories, in chronological order. */
+  listDailyActivity(start: number, end: number): (TaskEvent & { title: string; prompt: string; repo_name: string; jira_url: string | null; jira_key: string | null; pr_url: string | null })[] {
+    return this.stmt(`SELECT e.*, t.title, t.prompt, r.name AS repo_name, t.jira_url, t.jira_key, t.pr_url
+      FROM task_events e JOIN tasks t ON t.id = e.task_id JOIN repos r ON r.path = t.repo_path
+      WHERE COALESCE(r.context, 'professional') = 'professional' AND e.ts >= ? AND e.ts < ?
+      ORDER BY e.ts, e.id`).all(start, end) as unknown as (TaskEvent & { title: string; prompt: string; repo_name: string; jira_url: string | null; jira_key: string | null; pr_url: string | null })[];
+  }
+
   // ---- task history ----
 
   insertTaskEvent(e: Omit<TaskEvent, "id">): void {

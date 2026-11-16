@@ -2396,3 +2396,11 @@ select:focus {
   max-height: 220px;
   overflow-y: auto;
 }
+
+.daily-page { max-width: 850px; }
+.daily-date { display: flex; align-items: center; gap: .75rem; margin: 1.5rem 0; }
+.daily-task { border-top: 1px solid var(--border); padding: 1rem 0; }
+.daily-task h2 { font-size: 1.1rem; margin: 0; }
+.daily-task p { margin: .35rem 0; }
+.daily-task ul { padding-left: 1.3rem; line-height: 1.7; }
+.daily-task time { color: var(--muted); margin-right: .4rem; font-variant-numeric: tabular-nums; }

@@ -22,13 +22,15 @@ import { SessionsPage } from "./pages/Sessions";
 import { PullsPage } from "./pages/Pulls";
 import { SettingsPage } from "./pages/Settings";
 import { UsagePage } from "./pages/Usage";
+import { DailyPage } from "./pages/Daily";
 import { ImprovePage } from "./pages/Improve";
 
-type Tab = "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "improve" | "settings" | "errors";
+type Tab = "daily" | "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "improve" | "settings" | "errors";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
   { key: "tasks", label: "Tasks" },
+  { key: "daily", label: "Daily" },
   { key: "pulls", label: "Pull Requests" },
   { key: "sessions", label: "Sessions" },
   { key: "usage", label: "Usage" },
@@ -268,6 +270,7 @@ export function App() {
           </div>
         ) : null}
         <InboxPage active={tab === "inbox"} eventVersion={eventVersion} refresh={refresh} onSeen={markInboxSeen} />
+        {tab === "daily" ? <DailyPage eventVersion={eventVersion} /> : null}
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
