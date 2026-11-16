@@ -23,14 +23,16 @@ import { PullsPage } from "./pages/Pulls";
 import { SettingsPage } from "./pages/Settings";
 import { UsagePage } from "./pages/Usage";
 import { DailyPage } from "./pages/Daily";
+import { ProgressPage, ProgressCelebration } from "./pages/Progress";
 import { ImprovePage } from "./pages/Improve";
 
-type Tab = "daily" | "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "improve" | "settings" | "errors";
+type Tab = "progress" | "daily" | "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "improve" | "settings" | "errors";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
   { key: "tasks", label: "Tasks" },
   { key: "daily", label: "Daily" },
+  { key: "progress", label: "Progress" },
   { key: "pulls", label: "Pull Requests" },
   { key: "sessions", label: "Sessions" },
   { key: "usage", label: "Usage" },
@@ -217,7 +219,7 @@ export function App() {
         <nav className="nav" aria-label="Primary">
           {TABS.map((t) => {
             const count = counts[t.key as keyof Counts];
-            const hasCount = t.key !== "settings" && t.key !== "usage" && t.key !== "improve";
+            const hasCount = t.key !== "progress" && t.key !== "daily" && t.key !== "settings" && t.key !== "usage" && t.key !== "improve";
             const countClass = `nav-count ${t.key !== "sessions" && count > 0 ? "nav-count-hot" : ""} ${count > 0 ? "" : "nav-count-zero"}`;
             return t.key === "sessions" && omnigentUrl ? (
               <a key={t.key} className="nav-item" href={omnigentUrl} target="_blank" rel="noreferrer" aria-label="Sessions (opens Omnigent in a new tab)" title="Open Omnigent in a new tab">
@@ -270,6 +272,8 @@ export function App() {
           </div>
         ) : null}
         <InboxPage active={tab === "inbox"} eventVersion={eventVersion} refresh={refresh} onSeen={markInboxSeen} />
+        <ProgressCelebration eventVersion={eventVersion} onView={() => selectTab("progress")} />
+        {tab === "progress" ? <ProgressPage eventVersion={eventVersion} /> : null}
         {tab === "daily" ? <DailyPage eventVersion={eventVersion} /> : null}
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
