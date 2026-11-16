@@ -17,7 +17,7 @@ import { errText, formatTs, isPrUrl, prLabel, REVIEW_HARNESS, timeAgo } from "..
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 import { batchImportItems } from "../jira-import";
 import type { ImportSettings } from "../jira-import";
-import { taskPrefillFromHash } from "../selection-task";
+import { taskFocusFromHash, taskPrefillFromHash } from "../selection-task";
 import type { TaskPrefill } from "../selection-task";
 
 export function TasksPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
@@ -42,15 +42,20 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   /** Something picked elsewhere (an inbox selection, a PR from the Pulls page). */
   const [prefill, setPrefill] = useState<TaskPrefill | null>(() => taskPrefillFromHash(window.location.hash));
   const clearPrefill = useMemo(() => () => setPrefill(null), []);
+  /** A daily activity item links here with `#/tasks?task=<id>`. */
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(() => taskFocusFromHash(window.location.hash));
 
   // A deep link (#/tasks?prompt=… or #/tasks?review=…) becomes form state, then
   // leaves the URL so a reload or a shared link does not resurrect a stale one.
   useEffect(() => {
     const read = () => {
       const next = taskPrefillFromHash(window.location.hash);
-      if (!next) return;
-      setPrefill(next);
-      history.replaceState(null, "", "#/tasks");
+      const focus = taskFocusFromHash(window.location.hash);
+      if (next) {
+        setPrefill(next);
+        history.replaceState(null, "", "#/tasks");
+      }
+      setFocusedTaskId(focus);
     };
     read();
     window.addEventListener("hashchange", read);
@@ -124,6 +129,36 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const groups = useMemo(() => groupTasks(visibleTasks), [visibleTasks]);
   const sortedRepos = useMemo(() => sortRepos(repos, tasks), [repos, tasks]);
 
+  // Reveal a task linked from another page: done tasks are hidden by default,
+  // and its repo group may be collapsed.
+  useEffect(() => {
+    if (!focusedTaskId || loading) return;
+    const target = tasks.find((task) => task.id === focusedTaskId);
+    if (!target) return;
+    if ((target.status === "done" || target.status === "archived") && !showDoneArchived) {
+      setShowDoneArchived(true);
+      return;
+    }
+    const key = target.repo_path || "";
+    setCollapsed((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }, [focusedTaskId, tasks, loading, showDoneArchived]);
+
+  useEffect(() => {
+    if (!focusedTaskId || loading) return;
+    const rows = document.querySelectorAll<HTMLElement>(".task-row[data-task-id]");
+    for (const row of rows) {
+      if (row.dataset.taskId === focusedTaskId) {
+        row.scrollIntoView({ block: "center" });
+        break;
+      }
+    }
+  }, [focusedTaskId, tasks, loading, showDoneArchived, collapsed]);
+
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -153,7 +188,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} version={eventVersion} refresh={refresh} parentTitle={task.parent_task_id ? parentLabel(tasks, task.parent_task_id) : null} />
+              <TaskRow key={task.id} task={task} focused={task.id === focusedTaskId} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} version={eventVersion} refresh={refresh} parentTitle={task.parent_task_id ? parentLabel(tasks, task.parent_task_id) : null} />
             ))}
           </div>
         ) : null}
@@ -212,6 +247,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
 
 function TaskRow({
   task,
+  focused,
   repos,
   targets,
   quotas,
@@ -225,6 +261,8 @@ function TaskRow({
   parentTitle,
 }: {
   task: Task;
+  /** Linked from the daily page: highlight this row. */
+  focused: boolean;
   /** Title of the spec task this one was created from (multi-repo), or null. */
   parentTitle: string | null;
   repos: Repo[];
@@ -355,7 +393,7 @@ function TaskRow({
   };
 
   return (
-    <div className="task-row">
+    <div className={`task-row${focused ? " task-row-focused" : ""}`} data-task-id={task.id}>
       <div className="task-main">
         <div className="task-title">
           {task.title ? (

@@ -20,6 +20,7 @@ import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
 import { isInterval } from "./analysis-schedule.ts";
 import { dispatchTask } from "./dispatch.ts";
+import { dailySummaryPrompt } from "./daily-summary.ts";
 import { checkAttachments, MAX_TASK_BODY_BYTES } from "./attachments.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
@@ -38,6 +39,12 @@ import type { SessionFact } from "./session-facts.ts";
 
 /** The skills prompt carries more evidence than a summary: allow a longer assistant call. */
 export const SKILLS_ANALYSIS_TIMEOUT_MS = 300_000;
+
+function dailyInterval(startText: string | null, endText: string | null): { start: number; end: number } | null {
+  const start = Number(startText), end = Number(endText);
+  if (!startText || !endText || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end - start > 90_000_000) return null;
+  return { start, end };
+}
 
 export interface AppState {
   db: Db;
@@ -350,11 +357,43 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/progression", (_req, res) => json(res, 200, state.db.progression()));
 
   on("GET", "/api/daily", (_req, res, { url }) => {
-    const startText = url.searchParams.get("start");
-    const endText = url.searchParams.get("end");
-    const start = Number(startText), end = Number(endText);
-    if (!startText || !endText || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end - start > 90_000_000) return json(res, 400, { error: "invalid day interval" });
-    json(res, 200, state.db.listDailyActivity(start, end));
+    const interval = dailyInterval(url.searchParams.get("start"), url.searchParams.get("end"));
+    if (!interval) return json(res, 400, { error: "invalid day interval" });
+    const events = state.db.listDailyActivity(interval.start, interval.end);
+    json(res, 200, events.map((event) => ({
+      ...event,
+      session_url: event.terminal_address && state.backend.inspectUrl
+        ? state.backend.inspectUrl(event.terminal_address)
+        : null,
+    })));
+  });
+
+  on("POST", "/api/daily/summarize", async (req, res, { body }) => {
+    const b = (body ?? {}) as { start?: unknown; end?: unknown; date?: unknown; favorite?: unknown };
+    const interval = dailyInterval(typeof b.start === "number" ? String(b.start) : null, typeof b.end === "number" ? String(b.end) : null);
+    if (!interval) return json(res, 400, { error: "invalid day interval" });
+    if (b.date !== undefined && (typeof b.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(b.date))) return json(res, 400, { error: "invalid day" });
+    const favoriteName = typeof b.favorite === "string" ? b.favorite.trim() : "";
+    const favorite = (state.cfg.favorites ?? []).find((f) => f.name === favoriteName && (f.context ?? "professional") === "professional");
+    if (!favorite) return json(res, 400, { error: "choose a configured professional favorite" });
+    const events = state.db.listDailyActivity(interval.start, interval.end);
+    if (events.length === 0) return json(res, 409, { error: "no professional activity recorded for this day" });
+    const repo = events.find((event) => event.repo_path?.trim())?.repo_path ?? "";
+    if (!repo) return json(res, 400, { error: "the day's tasks have no repository" });
+    const date = typeof b.date === "string" ? b.date : new Date(interval.start).toISOString().slice(0, 10);
+    try {
+      const task = await analysisAgent.start(`Daily standup summary — ${date}`, dailySummaryPrompt(events, date), {
+        repo,
+        target: favorite.harness,
+        agent: favorite.agent || null,
+        model: favorite.model || null,
+        reasoning: favorite.reasoning || null,
+        source: "daily",
+      });
+      json(res, 200, { task });
+    } catch (err) {
+      json(res, 500, { error: String(err) });
+    }
   });
 
   // ---- tasks ----

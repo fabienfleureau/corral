@@ -1265,6 +1265,12 @@ select:focus {
   background: var(--bg-hover);
 }
 
+.task-row-focused {
+  background: var(--bg-hover);
+  box-shadow: inset 3px 0 var(--accent);
+  scroll-margin-block: 2rem;
+}
+
 .task-main {
   flex: 1;
   min-width: 0;
@@ -2413,7 +2419,14 @@ select:focus {
 
 .daily-page { max-width: 850px; }
 .daily-date { display: flex; align-items: center; gap: .75rem; margin: 1.5rem 0; }
-.daily-task { border-top: 1px solid var(--border); padding: 1rem 0; }
+.daily-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.25rem; }
+.daily-controls .daily-date { margin: .75rem 0; white-space: nowrap; }
+.daily-controls input[type="date"] { min-width: 11rem; }
+.daily-task { position: relative; border-top: 1px solid var(--border); padding: 1rem 0; }
+.daily-task:has(.daily-task-link:hover),
+.daily-task:has(.daily-task-link:focus-visible) { background: var(--bg-hover); }
+.daily-task a.daily-task-link::after { content: ""; position: absolute; inset: 0; }
+.daily-task :is(a:not(.daily-task-link), button) { position: relative; z-index: 1; }
 .daily-task h2 { font-size: 1.1rem; margin: 0; }
 .daily-task p { margin: .35rem 0; }
 .daily-task ul { padding-left: 1.3rem; line-height: 1.7; }
