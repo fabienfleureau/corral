@@ -9,12 +9,6 @@ function localDate(date: Date): string {
 }
 
 export function DailyPage({ eventVersion }: { eventVersion: number }) {
-  const [progress, setProgress] = useState<Awaited<ReturnType<typeof api.progression>> | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    api.progression().then((value) => { if (!cancelled) setProgress(value); }).catch(() => { if (!cancelled) setProgress(null); });
-    return () => { cancelled = true; };
-  }, [eventVersion]);
   const [date, setDate] = useState(() => localDate(new Date()));
   const [events, setEvents] = useState<Activity[]>([]);
   const [error, setError] = useState("");
@@ -33,14 +27,6 @@ export function DailyPage({ eventVersion }: { eventVersion: number }) {
   for (const event of events) groups.set(event.task_id, [...(groups.get(event.task_id) ?? []), event]);
   return <section className="daily-page">
     <h1>Daily standup</h1>
-    {progress ? <section className="progression" aria-labelledby="progression-title">
-      <div className="progression-heading"><h2 id="progression-title">Your progress</h2><strong>Level {progress.level}</strong></div>
-      <label htmlFor="level-progress">{progress.levelXp} / {progress.nextLevelXp} XP to level {progress.level + 1}</label>
-      <progress id="level-progress" value={progress.levelXp} max={progress.nextLevelXp} />
-      <p className="muted">{progress.xp} total XP · Create a task: 10 XP · Handle an inbox item: 20 XP</p>
-      <h3>Badges</h3>
-      <ul className="progression-badges">{([['Tasks created', progress.tasks], ['Inbox handled', progress.inbox]] as const).flatMap(([name, count]) => [1, 10, 50].map((threshold) => <li key={`${name}-${threshold}`} className={count >= threshold ? 'earned' : ''}><strong>{name} · {threshold}</strong><span>{count >= threshold ? 'Earned' : `${count} / ${threshold}`}</span></li>))}</ul>
-    </section> : null}
     <p className="muted">Activity recorded on professional tasks for the selected day. Times use your local time zone.</p>
     <label className="daily-date">Date <input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
     {error ? <p className="inline-error" role="alert">{error}</p> : null}

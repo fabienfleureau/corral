@@ -2430,3 +2430,15 @@ select:focus {
 .progression-badges li { border: 1px solid var(--border); border-radius: 6px; padding: .45rem .65rem; display: flex; flex-direction: column; font-size: .85rem; }
 .progression-badges li span { color: var(--muted); }
 .progression-badges li.earned { border-color: var(--accent); }
+
+.progression { max-width: 900px; border: 0; padding: 0; }
+.progression h1 { margin-bottom: 1.5rem; }
+.progression-badges { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .75rem; }
+.progression-badges li { align-items: center; text-align: center; gap: .3rem; padding: 1rem .5rem; }
+.badge-art { width: 72px; height: 79px; filter: grayscale(1); opacity: .45; }
+.earned .badge-art { filter: none; opacity: 1; }
+.progress-celebration { position: fixed; z-index: 100; right: 1.5rem; bottom: 1.5rem; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; max-width: min(36rem, 90vw); padding: 1rem; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg); box-shadow: 0 8px 24px #0003; }
+@media (prefers-reduced-motion: no-preference) {
+  .progress-celebration { animation: achievement-arrive .65s ease-out; }
+  @keyframes achievement-arrive { 0% { opacity: 0; transform: translateY(20px) scale(.9); } 65% { opacity: 1; transform: translateY(-4px) scale(1.02); } 100% { transform: none; } }
+}
