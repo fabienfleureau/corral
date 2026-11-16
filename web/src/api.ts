@@ -204,6 +204,7 @@ export const api = {
     post<Item>(`/api/items/${id}/snooze`, { until_ms: untilMs }),
 
   // ---- tasks ----
+  progression: (): Promise<{ xp: number; level: number; levelXp: number; nextLevelXp: number; tasks: number; inbox: number }> => get("/api/progression"),
   dailyActivity: (start: number, end: number): Promise<(TaskEvent & { title: string; prompt: string; repo_name: string; jira_url: string | null; jira_key: string | null; pr_url: string | null })[]> => get(`/api/daily${query({ start: String(start), end: String(end) })}`),
   listTasks: (status?: Task["status"]): Promise<Task[]> =>
     get<Task[]>(`/api/tasks${query({ status })}`),

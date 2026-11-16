@@ -2404,3 +2404,15 @@ select:focus {
 .daily-task p { margin: .35rem 0; }
 .daily-task ul { padding-left: 1.3rem; line-height: 1.7; }
 .daily-task time { color: var(--muted); margin-right: .4rem; font-variant-numeric: tabular-nums; }
+
+.progression { border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+.progression-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.progression h2 { font-size: 1.1rem; margin: 0 0 .75rem; }
+.progression h3 { font-size: .95rem; margin: 1rem 0 .5rem; }
+.progression label { display: block; margin-bottom: .35rem; }
+.progression progress { width: 100%; }
+.progression p { margin: .5rem 0; }
+.progression-badges { display: flex; flex-wrap: wrap; gap: .5rem; list-style: none; padding: 0; margin: 0; }
+.progression-badges li { border: 1px solid var(--border); border-radius: 6px; padding: .45rem .65rem; display: flex; flex-direction: column; font-size: .85rem; }
+.progression-badges li span { color: var(--muted); }
+.progression-badges li.earned { border-color: var(--accent); }

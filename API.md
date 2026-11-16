@@ -169,3 +169,7 @@ a dispatch or a PR sync.
 ### POST /api/tasks/:id/artifact
 
 Ask the active Claude session to create a private artifact and report its URL in the inbox. Returns 409 when the task has no active Claude session.
+
+### GET /api/progression
+
+Returns local progression: `xp`, `level`, `levelXp`, `nextLevelXp`, `tasks`, and `inbox`. Only eligible actions recorded after installation are counted.
