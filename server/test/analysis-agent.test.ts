@@ -25,6 +25,9 @@ test("analysis launches a persisted agent task", async () => {
     assert.equal(started[0].taskId, task.id);
     assert.equal(started[0].git, null);
     assert.match(started[0].prompt, /Analyze evidence/);
+    assert.match(started[0].prompt, /http:\/\/localhost:4787\/api\/reports/);
+    assert.match(started[0].prompt, /Bearer test/);
+    assert.ok(started[0].prompt.includes(task.id));
     assert.doesNotMatch(started[0].prompt, /gh pr create/);
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });
