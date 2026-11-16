@@ -62,6 +62,9 @@ type Item = {
 
 ## Endpoints
 
+### Daily activity
+- `GET /api/daily?start=<ms>&end=<ms>` → task history events in the half-open timestamp interval, joined to registered professional repositories (including legacy null contexts). The interval must be positive and at most 25 hours. Tasks with an unknown repository are excluded.
+
 ### Inbox
 - `GET /api/items?status=open|resolved|archived&kind=question|pr|digest|plan` → `Item[]` (newest first)
 - `POST /api/items/:id/reply` `{text}`, `{permission}`, or `{content}` → `{ok, sent_to}` — replies to the agent and resolves the item. For structured question batches, `content` maps each question ID to a string (single choice/custom answer) or nonempty string array (multiple selections); every question must be answered. Single-choice questions also accept `{text}`. Permission choices are `approve`, `reject`, `session`, or `always`; scoped choices require an offered pattern. 400 for invalid/incomplete answers; 409 if no terminal is linked or the elicitation item is not open.

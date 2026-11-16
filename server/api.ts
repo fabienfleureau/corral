@@ -329,6 +329,14 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, state.db.getItem(params.id));
   });
 
+  on("GET", "/api/daily", (_req, res, { url }) => {
+    const startText = url.searchParams.get("start");
+    const endText = url.searchParams.get("end");
+    const start = Number(startText), end = Number(endText);
+    if (!startText || !endText || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end - start > 90_000_000) return json(res, 400, { error: "invalid day interval" });
+    json(res, 200, state.db.listDailyActivity(start, end));
+  });
+
   // ---- tasks ----
   on("GET", "/api/tasks", async (_req, res, { url }) => {
     const status = url.searchParams.get("status") ?? undefined;
