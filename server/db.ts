@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
-import type { DailyActivity, Epic, EpicLink, Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
+import type { DailyActivity, Epic, EpicAmendment, EpicDesign, EpicLink, Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
 import { logTaskChanges, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
@@ -117,6 +117,27 @@ CREATE TABLE IF NOT EXISTS epic_links (
   PRIMARY KEY (epic_id, task_key, blocked_by_key)
 );
 
+CREATE TABLE IF NOT EXISTS epic_designs (
+  epic_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  author TEXT NOT NULL DEFAULT 'human',
+  created_ms INTEGER NOT NULL,
+  PRIMARY KEY (epic_id, version)
+);
+CREATE TABLE IF NOT EXISTS epic_amendments (
+  id TEXT PRIMARY KEY,
+  epic_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  design_version INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'proposed',
+  item_id TEXT,
+  created_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_epic_amendments_epic ON epic_amendments(epic_id, status);
+
 -- Files dropped on a task's prompt. The bytes wait here until dispatch hands
 -- them to the worker backend (see attachments.ts).
 CREATE TABLE IF NOT EXISTS task_attachments (
@@ -199,7 +220,12 @@ export class Db {
     if (!taskNames.has("spec")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN spec TEXT`);
     if (!taskNames.has("epic_id")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN epic_id TEXT`);
     if (!taskNames.has("epic_out")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN epic_out INTEGER NOT NULL DEFAULT 0`);
+    if (!taskNames.has("design_version")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN design_version INTEGER`);
+    if (!taskNames.has("amendment")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN amendment TEXT`);
+    if (!taskNames.has("amendment_hash")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN amendment_hash TEXT`);
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
+    const epicCols = this.raw.prepare("PRAGMA table_info(epics)").all() as { name: string }[];
+    if (!epicCols.some((c) => c.name === "design_block_hash")) this.raw.exec(`ALTER TABLE epics ADD COLUMN design_block_hash TEXT`);
     const repoCols = this.raw.prepare("PRAGMA table_info(repos)").all() as { name: string }[];
     if (!repoCols.some((c) => c.name === "context")) this.raw.exec(`ALTER TABLE repos ADD COLUMN context TEXT`);
     // Task history arrived after tasks did: give every pre-existing task the one
@@ -324,7 +350,7 @@ export class Db {
       .run(e.id, e.jira_key, e.title, e.description, e.error, e.synced_ms, e.created_ms);
   }
 
-  updateEpic(id: string, patch: Partial<Pick<Epic, "title" | "description" | "error" | "synced_ms">>): void {
+  updateEpic(id: string, patch: Partial<Pick<Epic, "title" | "description" | "error" | "synced_ms" | "design_block_hash">>): void {
     const keys = Object.keys(patch) as (keyof typeof patch)[];
     if (keys.length === 0) return;
     this.stmt(`UPDATE epics SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...keys.map((k) => patch[k] as never), id);
@@ -360,6 +386,46 @@ export class Db {
       this.raw.exec("ROLLBACK");
       throw err;
     }
+  }
+
+  // ---- epic designs and amendments ----
+
+  insertDesign(d: EpicDesign): void {
+    this.stmt(`INSERT INTO epic_designs (epic_id, version, body, reason, author, created_ms) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(d.epic_id, d.version, d.body, d.reason, d.author, d.created_ms);
+  }
+
+  latestDesign(epicId: string): EpicDesign | null {
+    return (this.stmt(`SELECT * FROM epic_designs WHERE epic_id = ? ORDER BY version DESC LIMIT 1`).get(epicId) as unknown as EpicDesign) ?? null;
+  }
+
+  listDesigns(epicId: string): EpicDesign[] {
+    return this.stmt(`SELECT * FROM epic_designs WHERE epic_id = ? ORDER BY version DESC`).all(epicId) as unknown as EpicDesign[];
+  }
+
+  insertAmendment(a: EpicAmendment): void {
+    this.stmt(`INSERT INTO epic_amendments (id, epic_id, task_id, design_version, body, status, item_id, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(a.id, a.epic_id, a.task_id, a.design_version, a.body, a.status, a.item_id, a.created_ms);
+  }
+
+  getAmendment(id: string): EpicAmendment | null {
+    return (this.stmt(`SELECT * FROM epic_amendments WHERE id = ?`).get(id) as unknown as EpicAmendment) ?? null;
+  }
+
+  getAmendmentByItem(itemId: string): EpicAmendment | null {
+    return (this.stmt(`SELECT * FROM epic_amendments WHERE item_id = ?`).get(itemId) as unknown as EpicAmendment) ?? null;
+  }
+
+  listAmendments(epicId: string, status?: EpicAmendment["status"]): EpicAmendment[] {
+    return (status
+      ? this.stmt(`SELECT * FROM epic_amendments WHERE epic_id = ? AND status = ? ORDER BY created_ms`).all(epicId, status)
+      : this.stmt(`SELECT * FROM epic_amendments WHERE epic_id = ? ORDER BY created_ms`).all(epicId)) as unknown as EpicAmendment[];
+  }
+
+  updateAmendment(id: string, patch: Partial<Pick<EpicAmendment, "status" | "item_id">>): void {
+    const keys = Object.keys(patch) as (keyof typeof patch)[];
+    if (keys.length === 0) return;
+    this.stmt(`UPDATE epic_amendments SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...keys.map((k) => patch[k] as never), id);
   }
 
   // ---- task history ----

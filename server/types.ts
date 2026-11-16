@@ -52,7 +52,31 @@ export interface Epic {
   description: string;
   /** Set when the last sync found a problem (a dependency cycle); null when fine. */
   error: string | null;
+  /** Hash of the design block as Corral last wrote it into the epic description. */
+  design_block_hash?: string | null;
   synced_ms: number;
+  created_ms: number;
+}
+
+/** One version of an epic's design. v1 is the epic's Jira text at import. */
+export interface EpicDesign {
+  epic_id: string;
+  version: number;
+  body: string;
+  reason: string;
+  author: string;
+  created_ms: number;
+}
+
+/** A proposed change to one task after a design revision, waiting for the human. */
+export interface EpicAmendment {
+  id: string;
+  epic_id: string;
+  task_id: string;
+  design_version: number;
+  body: string;
+  status: "proposed" | "applied" | "rejected";
+  item_id: string | null;
   created_ms: number;
 }
 
@@ -100,6 +124,11 @@ export interface Task {
   epic_id?: string | null;
   /** 1 once the ticket left the epic in Jira: kept, but no longer in its graph. */
   epic_out?: number;
+  /** Design version of its epic when the task was dispatched. */
+  design_version?: number | null;
+  /** The amendment written into the Jira ticket (current one only) and the hash of that block. */
+  amendment?: string | null;
+  amendment_hash?: string | null;
   status: TaskStatus;
   terminal_address: string | null;
   exit_code: number | null;
@@ -125,7 +154,7 @@ export type DailyActivity = TaskEvent & {
   terminal_address: string | null;
 };
 
-export type ItemKind = "question" | "pr" | "digest" | "plan" | "launch";
+export type ItemKind = "question" | "pr" | "digest" | "plan" | "launch" | "amendment";
 export type ItemStatus = "open" | "resolved" | "archived";
 
 export interface Item {

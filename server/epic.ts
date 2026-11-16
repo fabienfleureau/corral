@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "./db.ts";
 import { blockedByEdges, descriptionToText, type JiraIssue } from "./jira.ts";
+import { stripBlocks } from "./jira-blocks.ts";
 import { logTaskEvent } from "./task-events.ts";
 import type { Epic, Repo, Task } from "./types.ts";
 
@@ -75,11 +76,13 @@ export async function syncEpic(db: Db, jira: EpicJira, key: string): Promise<Epi
   const children = await jira.epicChildren(key);
   const now = Date.now();
   const title = epicIssue.fields.summary;
-  const description = descriptionToText(epicIssue.fields.description);
+  // Corral's own blocks are not part of the epic's text: the design block is history, kept apart.
+  const description = stripBlocks(descriptionToText(epicIssue.fields.description));
   let epic = db.getEpicByKey(key);
   if (!epic) {
     epic = { id: randomUUID(), jira_key: key, title, description, error: null, synced_ms: now, created_ms: now };
     db.insertEpic(epic);
+    db.insertDesign({ epic_id: epic.id, version: 1, body: description, reason: "Imported from Jira", author: "jira", created_ms: now });
   } else {
     db.updateEpic(epic.id, { title, description, synced_ms: now });
   }
@@ -89,6 +92,7 @@ export async function syncEpic(db: Db, jira: EpicJira, key: string): Promise<Epi
 
   for (const issue of children) {
     const f = jira.issueToTaskFields(issue);
+    f.prompt = stripBlocks(f.prompt); // the amendment block lives on the task, not in its prompt
     present.add(f.jira_key);
     const existing = db.getTaskByJiraKey(f.jira_key);
     if (!existing) {

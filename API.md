@@ -44,7 +44,7 @@ type Task = {
 
 type Item = {
   id: string;
-  kind: "question" | "pr" | "digest" | "plan" | "launch"; // launch: a task whose epic prerequisites are ready
+  kind: "question" | "pr" | "digest" | "plan" | "launch" | "amendment"; // launch: a task whose epic prerequisites are ready
   status: "open" | "resolved" | "archived";
   title: string;
   summary: string;   // structured summary ("" until summarized)
@@ -67,7 +67,7 @@ type Item = {
 - `POST /api/daily/summarize` `{start, end, date, favorite}` → `{task}` — starts an `analysis` task that summarizes the day's activity and reports the markdown to the inbox. `favorite` must name a configured professional favorite; its harness, agent, model and reasoning are used for the dispatch. The task runs without a worktree in the repository of the day's first event. 400 for an invalid interval/date/favorite, 409 when the day has no activity.
 
 ### Inbox
-- `GET /api/items?status=open|resolved|archived&kind=question|pr|digest|plan|launch` → `Item[]` (newest first)
+- `GET /api/items?status=open|resolved|archived&kind=question|pr|digest|plan|launch|amendment` → `Item[]` (newest first)
 - `POST /api/items/:id/reply` `{text}`, `{permission}`, or `{content}` → `{ok, sent_to}` — replies to the agent and resolves the item. For structured question batches, `content` maps each question ID to a string (single choice/custom answer) or nonempty string array (multiple selections); every question must be answered. Single-choice questions also accept `{text}`. Permission choices are `approve`, `reject`, `session`, or `always`; scoped choices require an offered pattern. 400 for invalid/incomplete answers; 409 if no terminal is linked or the elicitation item is not open.
 - `POST /api/items/:id/summarize` → `Item` — LLM summary of `body` into `summary` (async, may take ~10s)
 - `POST /api/items/:id/resolve` → `Item`
@@ -95,6 +95,8 @@ type Item = {
 - `GET /api/epics` → `(Epic & {summary})[]` — `summary` is `{total, merged, testable, ready, blocked}`; `Epic` is `{id, jira_key, title, description, error, synced_ms, created_ms}`; `description` is the epic's Jira text (the design), `error` a sync problem such as a dependency cycle
 - `POST /api/epics` `{key}` → `{epic, created, updated, out, tasks, links}` — import a Jira epic by key, or resync it when known (same call). Children are the tickets whose parent is the epic; each becomes a task (or an existing task for that `jira_key` is attached). `links` are `{task_key, blocked_by_key}` from the Jira "blocks / is blocked by" links between children. A `Repo: <name>` line in a ticket picks the task's repo among the registered ones. A task already dispatched keeps its prompt and title; a ticket that left the epic is flagged `epic_out: 1`, not deleted. 400 on a bad key or no Jira config, 502 on a Jira failure
 - `GET /api/epics/:id` → `{epic, tasks, links, views, summary}` — `views` lists the tasks in dependency order as `{task, state, blockers: [{key, task_id, satisfied}], alert, testable, stack_on}`. `state` is `out | merged | pr_ready | pr_open | running | ready | blocked`. A blocker is satisfied when its task is merged (or its Jira ticket Done), or its PR item is green and ready. `ready` = every blocker satisfied; the sync then keeps one open inbox item of kind `launch` per ready task (never dispatches), and sets `base_branch` to the prerequisite's branch only when exactly one same-repo prerequisite is unmerged. `alert` is set when a prerequisite PR was closed without merging. 404 when unknown
+- `POST /api/epics/:id/design` `{body, reason?}` → `EpicDetail` — publish a new design version. v1 is the epic's Jira text at import. The version replaces the single `[corral:begin:design]` block of the Jira epic description (the rest of the description is never touched), then is stored. 409 `{conflict: true}` when that block was edited in Jira, lost its markers or appeared on its own (nothing saved); 400 without `body` or Jira. In the background an assistant proposes one amendment per unstarted task the revision changes: an inbox item of kind `amendment`, nothing written to Jira yet. `GET /api/epics/:id` adds `design`, `design_versions`, `amendments` (proposed) and `impacted` on each view (started on an older design, not merged)
+- `POST /api/items/:id/amendment/apply|reject` → `Item` (or `POST /api/amendments/:id/apply|reject` → amendment) — apply writes the amendment into the ticket's `[corral:begin:amendment]` block and onto the task (injected at dispatch after the design); 409 on a conflict or when already handled
 - `POST /api/epics/:id/sync` → same body as `POST /api/epics`
 - `POST /api/jira/tasks/:id/done` `{transition_id?}` → `{ok, transition}` — auto-picks a done-like transition when omitted
 - `POST /api/jira/tasks/:id/comment` `{text}` → `{ok}`

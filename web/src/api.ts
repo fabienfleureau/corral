@@ -208,6 +208,9 @@ export const api = {
   getEpic: (id: string): Promise<EpicDetail> => get(`/api/epics/${id}`),
   importEpic: (key: string): Promise<EpicDetail> => post("/api/epics", { key }),
   syncEpic: (id: string): Promise<EpicDetail> => post(`/api/epics/${id}/sync`),
+  reviseDesign: (id: string, input: { body: string; reason: string }): Promise<EpicDetail> => post(`/api/epics/${id}/design`, input),
+  applyAmendment: (itemId: string): Promise<Item> => post(`/api/items/${itemId}/amendment/apply`),
+  rejectAmendment: (itemId: string): Promise<Item> => post(`/api/items/${itemId}/amendment/reject`),
 
   // ---- tasks ----
   progression: (): Promise<{ xp: number; level: number; levelXp: number; nextLevelXp: number; tasks: number; inbox: number }> => get("/api/progression"),
