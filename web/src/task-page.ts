@@ -35,6 +35,12 @@ export function lastHarnessSettings(tasks: Task[], harness: string): { model: st
   return { model: latest?.model ?? "", reasoning: latest?.reasoning ?? "" };
 }
 
+/** Folder of the newest spec task, used to prefill the next multi-repo task. */
+export function lastSpecFolder(tasks: Task[]): string {
+  const latest = tasks.filter((task) => task.kind === "spec" && task.repo_path.trim()).sort((a, b) => b.created_ms - a.created_ms)[0];
+  return latest?.repo_path.trim() ?? "";
+}
+
 export type ModelOption = { id: string; label: string; reasoning: string[] };
 
 export function modelChoices(models: ModelOption[], current: string): ModelOption[] {

@@ -1,7 +1,7 @@
 // Tasks — dispatch queue grouped by repository.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, modelChoices, reasoningChoices } from "../task-page";
+import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, lastSpecFolder, modelChoices, reasoningChoices } from "../task-page";
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
 import { TaskHistoryButton } from "../TaskHistory";
@@ -671,6 +671,8 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const [settings, setSettings] = useState<Record<string, { model: string; reasoning: string }>>({});
   const [repoTouched, setRepoTouched] = useState(false);
   const [repoPath, setRepoPath] = useState("");
+  /** null reads as "use the newest spec task's folder"; an empty string is a deliberate clear. */
+  const [specFolder, setSpecFolder] = useState<string | null>(null);
   const [baseBranch, setBaseBranch] = useState("");
   const [reviewName, setReviewName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -719,6 +721,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const shownFavorites = favoritesFor(favorites, formContext);
   const review = kind === "review";
   const spec = kind === "spec";
+  const folderPath = specFolder ?? lastSpecFolder(tasks);
   const formTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
   const selectedTarget = formTargets.includes(target) ? target : formTargets[0] ?? "";
   const prUrlValid = isPrUrl(prUrl);
@@ -739,7 +742,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
         target: selectedTarget,
         model: selectedSettings.model.trim() || null,
         reasoning: selectedSettings.reasoning.trim() || null,
-        repo_path: spec ? repoPath.trim() : selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo,
+        repo_path: spec ? folderPath.trim() : selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo,
         base_branch: review || spec ? null : baseBranch.trim() || null,
       };
       const task = await api.createTask(input);
@@ -789,7 +792,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
         <>
           <label className="field">
             <span>Folder of sub-projects</span>
-            <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/folder (one git repo per directory)" />
+            <input value={folderPath} onChange={(e) => setSpecFolder(e.target.value)} placeholder="/path/to/folder (one git repo per directory)" />
           </label>
           <p className="muted form-hint">Step one: the agent reads the sub-projects and writes the contract between them, then proposes one task per sub-project. Nothing is created until you approve the plan in the inbox. No branch, no code changes. Name any system map or architecture doc in the prompt.</p>
         </>
@@ -873,10 +876,10 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
       })} />
       {error ? <div className="inline-error">{error}</div> : null}
       <div className="form-foot">
-        <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !hasContent || !selectedTarget || (!!agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent)) || !(spec || selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
+        <button className="btn btn-primary" onClick={() => void submit(true)} disabled={busy || !hasContent || !selectedTarget || (!!agent && !(agentOptions[selectedTarget] ?? []).some((a) => a.id === agent)) || !(spec ? folderPath.trim() : selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo)}>
           Create and dispatch
         </button>
-        <button className="btn" onClick={() => void submit(false)} disabled={busy || !hasContent || (spec && !repoPath.trim())}>
+        <button className="btn" onClick={() => void submit(false)} disabled={busy || !hasContent || (spec && !folderPath.trim())}>
           {busy ? <Spinner /> : null}
           {busy ? "Creating…" : "Create task"}
         </button>
