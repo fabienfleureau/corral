@@ -150,3 +150,7 @@ copy it literally into a `curl`.
 - `README.md` stops linking this page.
 
 Add a prompt → add its row here in the same PR.
+
+### Claude artifact request (`server/api.ts`)
+
+The inbox action asks the active Claude session to create a private artifact explaining the task and report its URL. The user controls sharing in Claude.
