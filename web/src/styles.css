@@ -2455,3 +2455,18 @@ select:focus {
   .progress-celebration { animation: achievement-arrive .65s ease-out; }
   @keyframes achievement-arrive { 0% { opacity: 0; transform: translateY(20px) scale(.9); } 65% { opacity: 1; transform: translateY(-4px) scale(1.02); } 100% { transform: none; } }
 }
+
+/* Epics page */
+.epics-import { display: flex; gap: .5rem; margin: .5rem 0 1rem; }
+.epics-list { display: flex; flex-wrap: wrap; gap: .5rem; list-style: none; padding: 0; margin: 0 0 1rem; }
+.epics-list button { border: 1px solid var(--border); border-radius: 6px; padding: .4rem .7rem; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.epics-list button[aria-current="true"] { border-color: var(--accent-ink); }
+.epic-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.epic-progress { inline-size: 100%; max-inline-size: 28rem; accent-color: var(--ok-ink); }
+.epic-tasks { list-style: none; padding: 0; margin: 1rem 0; display: flex; flex-direction: column; gap: .5rem; }
+.epic-task { border: 1px solid var(--border); border-radius: 6px; padding: .6rem .8rem; display: grid; gap: .25rem; }
+.epic-task[data-state="out"] { opacity: .6; }
+.epic-task-line { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.epic-task-title { flex: 1 1 14rem; font-weight: 600; }
+.epic-task-sub { color: var(--muted); font-size: .85rem; }
+.epic-task select { max-inline-size: 14rem; }

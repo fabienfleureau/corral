@@ -363,7 +363,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             <div className="pane-note">{statusFilter === "open" ? "Nothing needs you." : "Nothing here."}</div>
           ) : (
             items.map((item) => {
-              const needsYou = item.status === "open" && (item.kind === "question" || item.kind === "plan");
+              const needsYou = item.status === "open" && (item.kind === "question" || item.kind === "plan" || item.kind === "launch");
               const snoozed = item.snooze_until_ms !== null && item.snooze_until_ms > Date.now();
               const rowTask = item.task_id ? tasksById[item.task_id] : undefined;
               const rowPr = itemPrUrl(item.body, rowTask?.pr_url);
@@ -563,6 +563,19 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   >
                     {actionBusy ? <Spinner /> : null}
                     Approve plan
+                  </button>
+                ) : null}
+                {selected.kind === "launch" && selected.status === "open" && linkedTask ? (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => linkedTask.target && linkedTask.repo_path
+                      ? void runAction(async () => { await api.dispatchTask(linkedTask.id, {}); return api.resolveItem(selected.id); })
+                      : void (window.location.hash = "/tasks")}
+                    disabled={actionBusy}
+                    title={linkedTask.target && linkedTask.repo_path ? "Start the agent on this task" : "Pick a repository and a harness on the task first"}
+                  >
+                    {actionBusy ? <Spinner /> : null}
+                    {linkedTask.target && linkedTask.repo_path ? "Launch" : "Open task"}
                   </button>
                 ) : null}
                 {selected.kind === "pr" && linkedTask?.branch ? <ForcePrRefresh task={linkedTask} onChecked={refresh} /> : null}

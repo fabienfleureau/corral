@@ -1,4 +1,5 @@
 import { Db } from "../server/db.ts";
+import { syncEpicLaunch } from "../server/epic-graph.ts";
 import type { Favorite } from "../server/favorites.ts";
 import { prItemBody, type PrInfo } from "../server/pr.ts";
 import type { Pull } from "../server/pulls.ts";
@@ -37,12 +38,41 @@ export function seedScreenshotData(db: Db): void {
   db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
   db.insertRepo({ id: "sample-home", name: "side-project", path: "/sample/side-project", jira_prefix: null, context: "personal", source: "manual", created_ms: now });
   seedInboxItems(db, now);
+  seedEpic(db, now);
   seedTaskHistory(db, now);
   seedPulls(db, now);
 }
 
 /** A multi-repo spec with its plan waiting for approval, and a code task a
  *  previous plan created. */
+/** One epic: a merged task, a PR ready, a task ready to launch (stacked) and a blocked one. */
+export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
+  db.insertEpic({ id: "sample-epic", jira_key: "EX-100", title: "Widget sizes across the platform", description: "Design v1", error: null, synced_ms: now, created_ms: now - 86_400_000 });
+  const rows: { key: string; title: string; status: Task["status"]; repo: string; branch?: string; pr?: string }[] = [
+    { key: "EX-101", title: "Add a size field to the widget API", status: "done", repo: "/sample/example-project", branch: "feat/widget-size-api", pr: "https://gitlab.com/example/platform/-/merge_requests/31" },
+    { key: "EX-102", title: "Store widget sizes", status: "dispatched", repo: "/sample/example-project", branch: "feat/widget-size-store", pr: "https://gitlab.com/example/platform/-/merge_requests/32" },
+    { key: "EX-103", title: "Show the size in the console", status: "open", repo: "/sample/side-project" },
+    { key: "EX-104", title: "Document widget sizes", status: "open", repo: "/sample/example-project" },
+  ];
+  rows.forEach((r, i) => db.insertTask({
+    id: `sample-epic-${r.key}`, title: `${r.key} ${r.title}`, prompt: r.title, repo_path: r.repo, target: "claude", target_state: "confirmed",
+    base_branch: null, branch: r.branch ?? null, worktree_path: null, assignee: null, jira_key: r.key, jira_url: `https://jira.example.com/browse/${r.key}`,
+    jira_parent_key: "EX-100", jira_status: null, pr_url: r.pr ?? null, pr_meta: null, status: r.status, terminal_address: null, exit_code: null,
+    created_ms: now - (10 - i) * 60_000, updated_ms: now - (10 - i) * 60_000, epic_id: "sample-epic",
+  }));
+  db.replaceEpicLinks("sample-epic", [
+    { task_key: "EX-102", blocked_by_key: "EX-101" },
+    { task_key: "EX-103", blocked_by_key: "EX-102" },
+    { task_key: "EX-104", blocked_by_key: "EX-103" },
+  ]);
+  const pr = (key: string, ready: number): Item => ({
+    id: `sample-epic-pr-${key}`, kind: "pr", status: "open", title: `PR ${ready ? "ready for review" : "needs work"}: ${key}`, summary: ready ? "ready for review" : "checks pending", body: "", context: "",
+    options: null, ready, handling: 0, source_ref: null, task_id: `sample-epic-${key}`, structured: 1, created_ms: now, updated_ms: now, resolved_ms: null, snooze_until_ms: null,
+  });
+  db.insertItem(pr("EX-102", 1));
+  syncEpicLaunch(db, { broadcast: () => undefined });
+}
+
 export function seedMultiRepo(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
   const contract = "`POST /v1/widgets` accepts `{size: \"s\" | \"m\" | \"l\"}` and returns it unchanged.\n\nDelivery order: `api-spec` first, then `core`.";
   const subtasks = [

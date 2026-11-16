@@ -19,6 +19,7 @@ import type { PaneLimits } from "./pane-size";
 import { InboxPage } from "./pages/Inbox";
 import { TasksPage } from "./pages/Tasks";
 import { SessionsPage } from "./pages/Sessions";
+import { EpicsPage } from "./pages/Epics";
 import { PullsPage } from "./pages/Pulls";
 import { SettingsPage } from "./pages/Settings";
 import { UsagePage } from "./pages/Usage";
@@ -26,11 +27,12 @@ import { DailyPage } from "./pages/Daily";
 import { ProgressPage, ProgressCelebration } from "./pages/Progress";
 import { ImprovePage } from "./pages/Improve";
 
-type Tab = "progress" | "daily" | "inbox" | "tasks" | "pulls" | "sessions" | "usage" | "improve" | "settings" | "errors";
+type Tab = "progress" | "daily" | "inbox" | "tasks" | "epics" | "pulls" | "sessions" | "usage" | "improve" | "settings" | "errors";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
   { key: "tasks", label: "Tasks" },
+  { key: "epics", label: "Epics" },
   { key: "daily", label: "Daily" },
   { key: "progress", label: "Progress" },
   { key: "pulls", label: "Pull Requests" },
@@ -276,6 +278,7 @@ export function App() {
         {tab === "progress" ? <ProgressPage eventVersion={eventVersion} /> : null}
         {tab === "daily" ? <DailyPage eventVersion={eventVersion} /> : null}
         {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
+        {tab === "epics" ? <EpicsPage eventVersion={eventVersion} refresh={refresh} /> : null}
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
         {tab === "usage" ? <UsagePage /> : null}

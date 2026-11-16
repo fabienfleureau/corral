@@ -44,7 +44,7 @@ type Task = {
 
 type Item = {
   id: string;
-  kind: "question" | "pr" | "digest" | "plan";
+  kind: "question" | "pr" | "digest" | "plan" | "launch"; // launch: a task whose epic prerequisites are ready
   status: "open" | "resolved" | "archived";
   title: string;
   summary: string;   // structured summary ("" until summarized)
@@ -67,7 +67,7 @@ type Item = {
 - `POST /api/daily/summarize` `{start, end, date, favorite}` → `{task}` — starts an `analysis` task that summarizes the day's activity and reports the markdown to the inbox. `favorite` must name a configured professional favorite; its harness, agent, model and reasoning are used for the dispatch. The task runs without a worktree in the repository of the day's first event. 400 for an invalid interval/date/favorite, 409 when the day has no activity.
 
 ### Inbox
-- `GET /api/items?status=open|resolved|archived&kind=question|pr|digest|plan` → `Item[]` (newest first)
+- `GET /api/items?status=open|resolved|archived&kind=question|pr|digest|plan|launch` → `Item[]` (newest first)
 - `POST /api/items/:id/reply` `{text}`, `{permission}`, or `{content}` → `{ok, sent_to}` — replies to the agent and resolves the item. For structured question batches, `content` maps each question ID to a string (single choice/custom answer) or nonempty string array (multiple selections); every question must be answered. Single-choice questions also accept `{text}`. Permission choices are `approve`, `reject`, `session`, or `always`; scoped choices require an offered pattern. 400 for invalid/incomplete answers; 409 if no terminal is linked or the elicitation item is not open.
 - `POST /api/items/:id/summarize` → `Item` — LLM summary of `body` into `summary` (async, may take ~10s)
 - `POST /api/items/:id/resolve` → `Item`
@@ -92,9 +92,9 @@ type Item = {
 ### Jira
 - `GET /api/jira/search?q=<text or jql>` → `[{title, prompt, jira_key, jira_url, jira_parent_key, jira_status, repo_path, repo_name, existing_task_id, fingerprint}]` — `repo_*` is the repo the import would target (null when no prefix mapping), `existing_task_id` is set when the issue is already imported (import skips it), `fingerprint` hashes the fields the import would write
 - `POST /api/jira/import` `{items: [{key, fingerprint, repo_path?, base_branch?, target?, agent?, model?, reasoning?}]}` (or `{keys: string[]}`, no fingerprint check) → `{created: Task[], changed: SearchResult[], skipped: string[], failed: string[]}` — optional settings are saved on each imported task; omitted repo uses the Jira prefix mapping. An item whose fingerprint no longer matches the issue (content or repo mapping changed since search) lands in `changed` with its current preview and is not imported; keys with an existing task land in `skipped`. The issue's current status is stored on the task (`jira_status`) as the starting point of the status sync.
-- `GET /api/epics` → `(Epic & {task_count})[]` — `Epic` is `{id, jira_key, title, description, error, synced_ms, created_ms}`; `description` is the epic's Jira text (the design), `error` a sync problem such as a dependency cycle
+- `GET /api/epics` → `(Epic & {summary})[]` — `summary` is `{total, merged, testable, ready, blocked}`; `Epic` is `{id, jira_key, title, description, error, synced_ms, created_ms}`; `description` is the epic's Jira text (the design), `error` a sync problem such as a dependency cycle
 - `POST /api/epics` `{key}` → `{epic, created, updated, out, tasks, links}` — import a Jira epic by key, or resync it when known (same call). Children are the tickets whose parent is the epic; each becomes a task (or an existing task for that `jira_key` is attached). `links` are `{task_key, blocked_by_key}` from the Jira "blocks / is blocked by" links between children. A `Repo: <name>` line in a ticket picks the task's repo among the registered ones. A task already dispatched keeps its prompt and title; a ticket that left the epic is flagged `epic_out: 1`, not deleted. 400 on a bad key or no Jira config, 502 on a Jira failure
-- `GET /api/epics/:id` → `{epic, tasks, links}` — 404 when unknown
+- `GET /api/epics/:id` → `{epic, tasks, links, views, summary}` — `views` lists the tasks in dependency order as `{task, state, blockers: [{key, task_id, satisfied}], alert, testable, stack_on}`. `state` is `out | merged | pr_ready | pr_open | running | ready | blocked`. A blocker is satisfied when its task is merged (or its Jira ticket Done), or its PR item is green and ready. `ready` = every blocker satisfied; the sync then keeps one open inbox item of kind `launch` per ready task (never dispatches), and sets `base_branch` to the prerequisite's branch only when exactly one same-repo prerequisite is unmerged. `alert` is set when a prerequisite PR was closed without merging. 404 when unknown
 - `POST /api/epics/:id/sync` → same body as `POST /api/epics`
 - `POST /api/jira/tasks/:id/done` `{transition_id?}` → `{ok, transition}` — auto-picks a done-like transition when omitted
 - `POST /api/jira/tasks/:id/comment` `{text}` → `{ok}`

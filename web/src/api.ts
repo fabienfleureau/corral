@@ -2,7 +2,7 @@
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
 import type { AttachmentInput } from "./attachments";
-import type { Config, DailyActivity, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
+import type { Config, DailyActivity, Epic, EpicDetail, EpicSummary, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
 
 /** Schedule and run state of a server-side analysis (improvement, skills). */
 export type AnalysisStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
@@ -202,6 +202,12 @@ export const api = {
   syncPrs: (): Promise<{ ok: boolean; ran: boolean }> => post<{ ok: boolean; ran: boolean }>("/api/prs/sync"),
   snoozeItem: (id: string, untilMs: number): Promise<Item> =>
     post<Item>(`/api/items/${id}/snooze`, { until_ms: untilMs }),
+
+  // ---- epics ----
+  listEpics: (): Promise<(Epic & { summary: EpicSummary })[]> => get("/api/epics"),
+  getEpic: (id: string): Promise<EpicDetail> => get(`/api/epics/${id}`),
+  importEpic: (key: string): Promise<EpicDetail> => post("/api/epics", { key }),
+  syncEpic: (id: string): Promise<EpicDetail> => post(`/api/epics/${id}/sync`),
 
   // ---- tasks ----
   progression: (): Promise<{ xp: number; level: number; levelXp: number; nextLevelXp: number; tasks: number; inbox: number }> => get("/api/progression"),

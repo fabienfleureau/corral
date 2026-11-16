@@ -14,6 +14,7 @@ import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncEpic } from "./epic.ts";
+import { epicSummary, epicViews, syncEpicLaunch } from "./epic-graph.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
 import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
@@ -568,6 +569,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         jira: state.jira ?? null,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
+      if (task.epic_id) syncEpicLaunch(state.db, state.hub);
       json(res, 200, result);
     } catch (err) {
       json(res, 500, { error: String(err) });
@@ -828,11 +830,18 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   // ---- epics ----
   const epicDetail = (id: string) => {
     const epic = state.db.getEpic(id);
-    return epic ? { epic, tasks: state.db.listEpicTasks(id), links: state.db.listEpicLinks(id) } : null;
+    if (!epic) return null;
+    const tasks = state.db.listEpicTasks(id), links = state.db.listEpicLinks(id);
+    const views = epicViews(tasks, links, state.db.listItems());
+    return { epic, tasks, links, views, summary: epicSummary(views) };
   };
 
   on("GET", "/api/epics", (_req, res) => {
-    json(res, 200, state.db.listEpics().map((epic) => ({ ...epic, task_count: state.db.listEpicTasks(epic.id).length })));
+    const items = state.db.listItems();
+    json(res, 200, state.db.listEpics().map((epic) => ({
+      ...epic,
+      summary: epicSummary(epicViews(state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), items)),
+    })));
   });
 
   on("GET", "/api/epics/:id", (_req, res, { params }) => {
@@ -846,6 +855,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!state.jira?.configured) return json(res, 400, { error: "Jira is not configured" });
     try {
       const result = await syncEpic(state.db, state.jira, key);
+      syncEpicLaunch(state.db, state.hub);
       state.hub.broadcast("epic.updated", result.epic);
       json(res, 200, { ...result, ...epicDetail(result.epic.id) });
     } catch (err) {

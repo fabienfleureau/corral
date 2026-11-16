@@ -125,7 +125,7 @@ export type DailyActivity = TaskEvent & {
   terminal_address: string | null;
 };
 
-export type ItemKind = "question" | "pr" | "digest" | "plan";
+export type ItemKind = "question" | "pr" | "digest" | "plan" | "launch";
 export type ItemStatus = "open" | "resolved" | "archived";
 
 export interface Item {
