@@ -50,6 +50,7 @@ export interface AppState {
   improvement?: ImprovementAnalysis;
   /** Skills analysis (installed skills vs. session use); created on first use when absent. */
   skills?: SkillsAnalysis;
+  engineeringSkills?: ImprovementAnalysis;
   usage?: UsageScanner;
   /** Cached OpenCode Go quota snapshot (external HTTPS call, polled by the UI). */
   goQuota?: GoQuotaCache;
@@ -217,6 +218,19 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
   on("POST", "/api/improvement/run", async (_req, res) => {
     try { json(res, 200, await improvement.run()); }
+    catch (err) { json(res, 500, { error: err instanceof Error ? err.message : String(err) }); }
+  });
+
+  const engineeringSkills = state.engineeringSkills ??= new ImprovementAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt), { agent: analysisAgent, mode: "engineering-skills" });
+  on("GET", "/api/engineering-skills", (_req, res) => json(res, 200, engineeringSkills.status()));
+  on("PUT", "/api/engineering-skills", (_req, res, { body }) => {
+    const days = (body as { intervalDays?: unknown } | null)?.intervalDays;
+    if (!isInterval(days)) return json(res, 400, { error: "Invalid interval" });
+    engineeringSkills.setIntervalDays(days);
+    json(res, 200, engineeringSkills.status());
+  });
+  on("POST", "/api/engineering-skills/run", async (_req, res) => {
+    try { json(res, 200, await engineeringSkills.run()); }
     catch (err) { json(res, 500, { error: err instanceof Error ? err.message : String(err) }); }
   });
 

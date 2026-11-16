@@ -119,10 +119,15 @@ a dispatch or a PR sync.
 - `GET /api/rate-limits[?refresh=1]` → `{limits: PlatformRateLimit[], fetched_ms}` — remaining GitHub and GitLab API quota for the PR loop, shown on the Usage page. `PlatformRateLimit` is `{host: "github"|"gitlab", windows: [{name, limit, remaining, reset_ms}], note, fetched_ms}`: GitHub contributes `core`, `search` and `graphql` (from `gh api rate_limit`, which spends no quota), GitLab the authenticated throttle (from the `RateLimit-*` headers of one `glab api user` call). A platform that fails to answer returns `windows: []` and a `note` instead of an error. The answer is cached for 60s, shared across concurrent polls; `refresh=1` (the page's Refresh button) bypasses the cache.
 
 ### Improvement analysis
-- `GET /api/analysis-repo` → `{repo}`; `PUT /api/analysis-repo` `{repo}` persists the git repository used by both analyses.
+- `GET /api/analysis-repo` → `{repo}`; `PUT /api/analysis-repo` `{repo}` persists the git repository used by analyses.
 - `GET /api/improvement` → schedule, last attempt/success, error and running state.
 - `PUT /api/improvement` `{intervalDays: 0|1|7|30}` → updated state; 0 disables automatic runs.
 - `POST /api/improvement/run` → a dispatched analysis task. The agent reports an inbox digest when finished. Concurrent launch requests share one run. The analysis sends bounded evidence to the agent. By default: 60 recent task snapshots plus up to 60 tasks linked from items or task events (so older items keep their task), 300 items, 1500 events with their payloads, persisted PR snapshots (checks, mergeability, unresolved thread counts and gate reasons) and API-equivalent usage cost/token attribution per task from local agent logs. It also includes derived `data_quality` flags (untitled tasks, done tasks without a PR, repeated dispatches, items resolved without a timestamp, duplicate PR items, orphan/malformed task ids, open PR items) and an explicit `gaps` list; caps are reported in `limits`/`truncated`. Production outcomes and review-thread bodies are still not recorded. Scheduled runs catch up after restart and failed runs retry after one hour.
+
+### Engineering skills analysis
+- `GET /api/engineering-skills` → analysis status with an independent schedule.
+- `PUT /api/engineering-skills` `{intervalDays: 0|1|7|30}` → updated status.
+- `POST /api/engineering-skills/run` → a dispatched analysis task. The analysis uses the bounded 30-day Corral activity snapshot, plus clipped and redacted task descriptions and inbox question bodies, to suggest learning topics and exercises. It does not fetch code diffs or review comments, and cannot establish the human's proficiency from delegated work.
 
 ### Skills analysis
 - `GET /api/skills-analysis` → `{intervalDays, lastSuccessMs, lastAttemptMs, error, running}`, same shape as the improvement analysis, with its own schedule.

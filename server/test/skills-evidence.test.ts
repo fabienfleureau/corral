@@ -261,7 +261,7 @@ test("Corral's own assistant runs are not the human's sessions", () => {
   ];
   const evidence = buildSkillsEvidence({ inventory, sessions, hasOlderLogs: false, now: NOW });
   assert.equal(evidence.skills[0].uses_window, 2, "the human session and the unrelated headless run");
-  assert.equal(evidence.logs.corral_assistant_runs_excluded, 3);
+  assert.equal(evidence.logs.corral_assistant_runs_excluded, ASSISTANT_PROMPT_OPENERS.length);
   assert.deepEqual(evidence.prompts.map((p) => p.text).sort(), ["Refactor the billing module", "Use the pr-description skill. Draft the MR"]);
 });
 
