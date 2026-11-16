@@ -435,6 +435,18 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, state.db.listTaskEvents(task.id, limit));
   });
 
+  on("POST", "/api/tasks/:id/artifact", async (_req, res, { params }) => {
+    const task = state.db.getTask(params.id);
+    if (!task) return json(res, 404, { error: "task not found" });
+    if (task.target !== "claude" || task.status !== "dispatched" || !task.terminal_address) {
+      return json(res, 409, { error: "task has no active Claude session" });
+    }
+    const prompt = "Create a Claude artifact that explains this task and its results to colleagues. Publish it privately and report the artifact URL in the Corral inbox. Do not share it publicly.";
+    await state.backend.send(task.terminal_address, prompt);
+    logTaskEvent(state.db, task.id, "prompt", "Requested a Claude artifact", promptData(prompt, { session: task.terminal_address }));
+    json(res, 200, { ok: true });
+  });
+
   on("POST", "/api/tasks/:id/archive-session", async (_req, res, { params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });

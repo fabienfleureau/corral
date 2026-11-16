@@ -210,6 +210,7 @@ export const api = {
   createTask: (input: NewTaskInput): Promise<Task> => post<Task>("/api/tasks", input),
   approvePlan: (taskId: string): Promise<{ children: Task[] }> => post<{ children: Task[] }>(`/api/tasks/${taskId}/approve-plan`),
   patchTask: (id: string, input: Partial<Task>): Promise<Task> => patch<Task>(`/api/tasks/${id}`, input),
+  requestArtifact: (id: string): Promise<{ ok: boolean }> => post(`/api/tasks/${id}/artifact`),
   archiveTaskSession: (id: string): Promise<Task> => post<Task>(`/api/tasks/${id}/archive-session`),
   dispatchTask: (
     id: string,

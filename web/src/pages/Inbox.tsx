@@ -82,6 +82,28 @@ function ForcePrRefresh({ task, onChecked }: { task: Task; onChecked: () => void
   );
 }
 
+function RequestArtifact({ task }: { task: Task }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (task.target !== "claude" || task.status !== "dispatched" || !task.terminal_address) return null;
+  const run = async () => {
+    setBusy(true);
+    setNote(null);
+    setError(null);
+    try {
+      await api.requestArtifact(task.id);
+      setNote("Request sent. Claude will report the artifact link in the inbox.");
+    } catch (err) { setError(errText(err)); }
+    finally { setBusy(false); }
+  };
+  return <>
+    <button className="btn" disabled={busy} onClick={() => void run()}>{busy ? "Requesting…" : "Ask Claude for an artifact"}</button>
+    {note ? <span className="inline-ok" role="status">{note}</span> : null}
+    {error ? <span className="inline-error" role="alert">{error}</span> : null}
+  </>;
+}
+
 export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: boolean; eventVersion: number; refresh: () => void; onSeen: (items: Item[]) => void }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
   const [allItems, setAllItems] = useState<Item[]>([]);
@@ -423,6 +445,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     {openBusy ? "Opening…" : "View task"}
                   </button>
                 ) : <span className="muted">No session available.</span>}
+                <RequestArtifact key={selectedTask.id} task={selectedTask} />
                 <TaskHistoryButton taskId={selectedTask.id} title={selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"} version={eventVersion} />
                 {selectedTask.branch ? <ForcePrRefresh task={selectedTask} onChecked={refresh} /> : null}
                 <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask)} title="Archive this task; its session keeps running">
@@ -532,6 +555,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   </button>
                 ) : null}
                 {selected.kind === "pr" && linkedTask?.branch ? <ForcePrRefresh task={linkedTask} onChecked={refresh} /> : null}
+                {linkedTask ? <RequestArtifact key={linkedTask.id} task={linkedTask} /> : null}
                 {linkedTask ? <TaskHistoryButton taskId={linkedTask.id} title={linkedTask.title || linkedTask.prompt.trim().split("\n")[0] || "Untitled task"} version={eventVersion} /> : null}
                 <button
                   className="btn"
