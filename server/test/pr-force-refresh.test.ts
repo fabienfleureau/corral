@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "../db.ts";
-import { syncTaskPr, type PrDelivery, type PrInfo } from "../pr.ts";
+import { syncAllPrs, syncTaskPr, type PrDelivery, type PrInfo } from "../pr.ts";
 import { createHttpServer, type AppState } from "../api.ts";
 import type { WorkerBackend, WorkerStart, WorkerSession } from "../worker.ts";
 import type { Task } from "../types.ts";
@@ -100,6 +100,27 @@ test("pr sync: a forced refresh re-hands comments the loop already pushed", with
   assert.deepEqual(deliveries, [{ address: "s1", comments: true, conflict: false }]);
   assert.equal(started.length, 0, "the live session gets the message, no respawn");
   assert.equal(JSON.parse(db.getTask("task-1")!.pr_meta ?? "{}").pushed, "t1", "the signature is kept");
+}));
+
+test("periodic PR sync delivers new comments while the item is snoozed", { timeout: 5000 }, withDb(async (db, dir) => {
+  db.insertTask(makeTask());
+  const hub = { broadcast: () => undefined };
+  const { backend, sent } = fakeBackend();
+  const opts = { finder: () => ({ ...prWithComment, threads: [] }), backend, cfg: cfg(dir) };
+  await syncAllPrs(db, hub, opts, 0);
+  const item = db.listItems({ kind: "pr" })[0];
+  const until = Date.now() + 60_000;
+  db.updateItem(item.id, { snooze_until_ms: until });
+
+  let delivered!: () => void;
+  const delivery = new Promise<void>((resolve) => { delivered = resolve; });
+  await syncAllPrs(db, hub, { ...opts, finder: () => prWithComment, onDelivered: delivered }, 0);
+  await delivery;
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /^PR review comments/);
+  assert.match(sent[0].text, /please rename this/);
+  assert.equal(db.getItem(item.id)!.handling, 1);
+  assert.equal(db.getItem(item.id)!.snooze_until_ms, until);
 }));
 
 test("pr sync: a forced refresh with nothing to hand off leaves the agent alone", withDb(async (db, dir) => {
