@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { filterTasks, groupTasks, sortRepos } from '../../web/src/task-page.ts';
+import { filterTasks, groupTasks, lastSpecFolder, sortRepos } from '../../web/src/task-page.ts';
 
 test('groups by repo and orders tasks by status then recency', () => {
   const tasks = [
@@ -45,6 +45,17 @@ test('uses the latest settings for each harness, including cleared settings', as
   assert.deepEqual(lastHarnessSettings(tasks, 'codex'), { model: '', reasoning: 'high' });
   assert.deepEqual(lastHarnessSettings(tasks, 'claude'), { model: 'opus', reasoning: '' });
   assert.deepEqual(lastHarnessSettings(tasks, 'other'), { model: '', reasoning: '' });
+});
+
+test('prefills the spec folder from the newest spec task only', () => {
+  const tasks = [
+    { kind: 'spec', repo_path: ' /old/folder ', created_ms: 1 },
+    { kind: 'code', repo_path: '/newer/repo', created_ms: 5 },
+    { kind: 'spec', repo_path: '/new/folder', created_ms: 3 },
+    { kind: 'spec', repo_path: '', created_ms: 4 },
+  ] as any;
+  assert.equal(lastSpecFolder(tasks), '/new/folder');
+  assert.equal(lastSpecFolder([]), '');
 });
 
 test('model options retain saved values and use model-specific reasoning', async () => {
