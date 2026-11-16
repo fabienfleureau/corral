@@ -11,7 +11,44 @@ export interface JiraIssue {
     parent?: { key: string } | null;
     status?: { name: string } | null;
     issuetype?: { name: string } | null;
+    issuelinks?: JiraIssueLink[];
   };
+}
+
+/** One entry of an issue's `issuelinks`. `inwardIssue` set means "this issue
+ *  <type.inward> that issue" (e.g. "is blocked by"); `outwardIssue` set means
+ *  "this issue <type.outward> that issue" (e.g. "blocks"). */
+export interface JiraIssueLink {
+  type?: { name?: string; inward?: string; outward?: string } | null;
+  inwardIssue?: { key: string } | null;
+  outwardIssue?: { key: string } | null;
+}
+
+const ISSUE_FIELDS = ["summary", "description", "parent", "status", "issuetype", "issuelinks"];
+
+/**
+ * "task X is blocked by task Y" edges among `issues`, from their Blocks-type
+ * links. Matched by the link's wording as well as its name: names vary per
+ * instance, the inward/outward text is what Jira shows. Edges to issues outside
+ * the set are dropped; both sides of a link yield the same edge, deduplicated.
+ */
+export function blockedByEdges(issues: JiraIssue[]): { task_key: string; blocked_by_key: string }[] {
+  const keys = new Set(issues.map((i) => i.key));
+  const seen = new Set<string>();
+  const out: { task_key: string; blocked_by_key: string }[] = [];
+  const add = (task: string, blocker: string) => {
+    if (task === blocker || !keys.has(task) || !keys.has(blocker) || seen.has(`${task}>${blocker}`)) return;
+    seen.add(`${task}>${blocker}`);
+    out.push({ task_key: task, blocked_by_key: blocker });
+  };
+  for (const issue of issues) {
+    for (const link of issue.fields.issuelinks ?? []) {
+      const t = link.type;
+      if (link.inwardIssue && (/blocked by/i.test(t?.inward ?? "") || (!t?.inward && /^blocks$/i.test(t?.name ?? "")))) add(issue.key, link.inwardIssue.key);
+      if (link.outwardIssue && (/^blocks$/i.test(t?.outward ?? "") || (!t?.outward && /^blocks$/i.test(t?.name ?? "")))) add(link.outwardIssue.key, issue.key);
+    }
+  }
+  return out;
 }
 
 export interface JiraTransition {
@@ -38,7 +75,7 @@ function adf(text: string) {
   };
 }
 
-function descriptionToText(description: unknown): string {
+export function descriptionToText(description: unknown): string {
   if (!description) return "";
   if (typeof description === "string") return description;
   if (typeof description === "object" && "content" in (description as Record<string, unknown>)) {
@@ -104,7 +141,7 @@ export class JiraClient {
     const params = new URLSearchParams({
       jql: jql.slice(0, 2000),
       maxResults: String(max),
-      fields: "summary,description,parent,status,issuetype",
+      fields: ISSUE_FIELDS.join(","),
     });
     try {
       const res = await this.request<{ issues: JiraIssue[] }>("GET", `/rest/api/3/search?${params}`);
@@ -115,7 +152,7 @@ export class JiraClient {
       const res = await this.request<{ issues: JiraIssue[] }>("POST", `/rest/api/3/search/jql`, {
         jql: jql.slice(0, 2000),
         maxResults: max,
-        fields: ["summary", "description", "parent", "status", "issuetype"],
+        fields: ISSUE_FIELDS,
       });
       return res.issues ?? [];
     }
@@ -140,8 +177,14 @@ export class JiraClient {
   async getIssue(key: string): Promise<JiraIssue> {
     return this.request<JiraIssue>(
       "GET",
-      `/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,description,parent,status,issuetype`,
+      `/rest/api/3/issue/${encodeURIComponent(key)}?fields=${ISSUE_FIELDS.join(",")}`,
     );
+  }
+
+  /** The tickets whose parent is `epicKey` (its direct children). */
+  async epicChildren(epicKey: string): Promise<JiraIssue[]> {
+    if (!/^[A-Za-z0-9]+-\d+$/.test(epicKey)) throw new Error(`not a Jira key: ${epicKey}`);
+    return this.runJql(`parent = ${epicKey} ORDER BY key ASC`, 100);
   }
 
   async transitions(key: string): Promise<JiraTransition[]> {
