@@ -4,8 +4,9 @@ export type Task = {
   id: string;
   title: string;
   prompt: string;
-  /** "review": review the existing PR/MR in pr_url; no branch, no PR. */
-  kind?: "code" | "review" | "spec" | "analysis";
+  /** "review": review the existing PR/MR in pr_url; no branch, no PR.
+   *  "ops": work in a folder and report back; no branch, no PR. */
+  kind?: "code" | "review" | "spec" | "analysis" | "ops";
   /** The spec task a code task was created from (multi-repo). */
   parent_task_id?: string | null;
   repo_path: string;

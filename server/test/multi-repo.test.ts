@@ -100,6 +100,27 @@ test("dispatch: a spec runs in the folder without worktree or PR loop, and has n
   assert.equal((await call("POST", `/api/tasks/${task.id}/check-pr`)).status, 400);
 }));
 
+test("dispatch: an ops task runs in a plain folder without worktree or PR", withFolder(async ({ db, folder, started, call }) => {
+  const created = await call("POST", "/api/tasks", { kind: "ops", prompt: "Prepare a test plan", repo_path: folder });
+  assert.equal(created.status, 200);
+  const task = await created.json() as Task;
+  // use_worktree and a reviewer are ignored: neither applies to an ops task.
+  const res = await call("POST", `/api/tasks/${task.id}/dispatch`, { target: "claude", use_worktree: true, review: "cubic" });
+  assert.equal(res.status, 200, await res.text());
+  assert.equal(started.length, 1);
+  assert.equal(started[0].git, null);
+  assert.equal(started[0].repoPath, folder);
+  const prompt = started[0].prompt;
+  assert.match(prompt, /Corral action task/);
+  assert.ok(prompt.includes(task.id), "placeholders are filled");
+  assert.doesNotMatch(prompt, /gh pr create|glab mr create|\{task_id\}/);
+  assert.equal(db.getTask(task.id)?.branch, null);
+  assert.equal((await call("POST", `/api/tasks/${task.id}/check-pr`)).status, 400);
+  const reported = await call("POST", "/api/reports", { task_id: task.id, kind: "done", title: "Test plan", body: "Prepared it.\n\n## Handoff\nNothing left" });
+  assert.equal(reported.status, 200);
+  assert.equal((await reported.json() as Item).kind, "digest");
+}));
+
 test("plan report: stored on the spec task, one open plan item, refreshed on a new report", withFolder(async ({ db, folder, call }) => {
   const task = (await (await call("POST", "/api/tasks", { kind: "spec", prompt: "p", repo_path: folder })).json()) as Task;
   const subtasks = [

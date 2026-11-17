@@ -178,7 +178,7 @@ export type NewTaskInput = {
   prompt?: string;
   /** Files sent to the agent with the prompt (see web/src/attachments.ts). */
   attachments?: AttachmentInput[];
-  kind?: "code" | "review" | "spec";
+  kind?: "code" | "review" | "spec" | "ops";
   /** Required for kind "review": the PR/MR to review. */
   pr_url?: string;
   repo_path?: string;
@@ -225,7 +225,7 @@ export const api = {
   orchestrateEpic: (id: string, request: string): Promise<{ proposal: string }> => post(`/api/epics/${id}/orchestrate`, { request }),
   patchEpicSettings: async (id: string, input: { favorite_name: string; repo_path: string }): Promise<EpicDetail> =>
     checkEpicDetail(await patch(`/api/epics/${id}`, input), "PATCH", `/api/epics/${id}`),
-  createEpicRequest: (id: string, input: { request: string; favorite_name: string; repo_path: string }): Promise<Task> =>
+  createEpicRequest: (id: string, input: { request: string; favorite_name: string; repo_path: string; kind?: "code" | "ops" }): Promise<Task> =>
     post(`/api/epics/${id}/requests`, input),
   getEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await get(`/api/epics/${id}`), "GET", `/api/epics/${id}`),
   importEpic: async (key: string): Promise<EpicDetail> => checkEpicDetail(await post("/api/epics", { key }), "POST", "/api/epics"),

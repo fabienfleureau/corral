@@ -314,10 +314,10 @@ export class CaptureEngine {
   }): Promise<Item> {
     const isDone = opts.kind === "done" || opts.kind === "pr";
     const taskId = opts.taskId ?? null;
-    // A finished review has no PR of its own to gate: report it as information.
+    // A task without a PR of its own reports into the inbox as information.
     const taskKind = taskId ? this.db.getTask(taskId)?.kind : undefined;
-    const review = taskKind === "review" || taskKind === "spec" || taskKind === "analysis";
-    const itemKind: Item["kind"] = isDone ? (review ? "digest" : "pr") : "question";
+    const noPr = taskKind === "review" || taskKind === "spec" || taskKind === "analysis" || taskKind === "ops";
+    const itemKind: Item["kind"] = isDone ? (noPr ? "digest" : "pr") : "question";
     const address =
       opts.terminal ??
       (taskId ? this.db.getTask(taskId)?.terminal_address ?? null : null);

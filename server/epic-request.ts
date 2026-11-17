@@ -12,6 +12,8 @@ import type { Epic, Repo, Task } from "./types.ts";
 export interface EpicRequestSettings {
   favorite_name?: string;
   repo_path?: string;
+  /** code opens a PR; ops works in the folder and reports back without one. */
+  kind?: "code" | "ops";
 }
 
 export class EpicRequestError extends Error {}
@@ -50,6 +52,8 @@ export function createEpicRequestTask(
 ): Task {
   const request = input.request.trim();
   if (!request || request.length > 8000) throw new EpicRequestError("request must be between 1 and 8000 characters");
+  const kind = input.kind ?? "code";
+  if (kind !== "code" && kind !== "ops") throw new EpicRequestError("kind must be code or ops");
   const { favorite, repoPath } = resolveEpicRequestSettings(input, favorites, db.listRepos());
   const review = favorite?.review ? reviewers.find((r) => r.name === favorite.review)?.command ?? null : null;
   const now = Date.now();
@@ -57,7 +61,7 @@ export function createEpicRequestTask(
     id: randomUUID(),
     title: request.split("\n")[0].trim().slice(0, 120) || "Epic request",
     prompt: request,
-    kind: "code",
+    kind,
     repo_path: repoPath,
     target: favorite?.harness ?? "",
     target_state: "suggested",
@@ -85,7 +89,7 @@ export function createEpicRequestTask(
   db.updateEpic(epic.id, { favorite_name: favorite?.name ?? null, repo_path: repoPath });
   db.recordMetric("task.created", task.id, { source: "epic_request", epic: epic.jira_key });
   logTaskEvent(db, task.id, "created", "Task created from an epic request", {
-    source: "epic_request", epic: epic.jira_key, repo: repoPath || null, favorite: favorite?.name ?? null,
+    source: "epic_request", epic: epic.jira_key, kind, repo: repoPath || null, favorite: favorite?.name ?? null,
   });
   return task;
 }

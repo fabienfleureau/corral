@@ -107,6 +107,8 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
   // A spec task never commits or opens a PR: it reports a plan instead.
   const parts = task.kind === "analysis"
     ? [read("analysis.md", "Analyze the evidence and report a digest. Do not change files.")]
+    : task.kind === "ops"
+    ? [read("ops.md", "Do the task in this folder. No branch, no commit, no PR. Report what you did to Corral.")]
     : task.kind === "review"
     ? [read("review.md", "Review the PR/MR. Do not change code. Ask before posting any comment.")]
     : task.kind === "spec"
@@ -222,8 +224,10 @@ export async function dispatchTask(
   }
   const spec = task.kind === "spec";
   const analysis = task.kind === "analysis";
-  if (spec) {
-    // The folder holds the sub-projects; it is not a repository itself.
+  const ops = task.kind === "ops";
+  if (spec || ops) {
+    // A spec holds sub-projects; an ops task just needs its context folder.
+    // Neither is a repository itself.
     if (!isDirectory(task.repo_path)) throw new Error(`not a directory: ${task.repo_path}`);
   } else {
     try {
@@ -239,7 +243,9 @@ export async function dispatchTask(
     if (!task.pr_url) throw new Error("review task has no PR/MR URL");
   }
   // A review reads the MR head without checking it out: no worktree, no branch.
-  const useWorktree = !review && !spec && !analysis && opts.useWorktree !== false;
+  // A spec, analysis or ops task uses a folder as context and never creates one.
+  const noBranch = review || spec || analysis || ops;
+  const useWorktree = !noBranch && opts.useWorktree !== false;
   const originalBranch = task.branch ?? branchName(task);
   let branch = originalBranch;
 
@@ -257,7 +263,7 @@ export async function dispatchTask(
   // Resolve the reviewer before building the prompt: {base_branch} needs the
   // task's pinned branch, or the remote default when the task did not pin one.
   let reviewCommand: string | null = null;
-  if (!review && !spec && opts.review) {
+  if (!review && !spec && !ops && opts.review) {
     const reviewer = (cfg.reviewers ?? []).find((r) => r.name === opts.review);
     if (!reviewer) throw new Error(`unknown reviewer: ${opts.review}`);
     const baseBranch = task.base_branch?.trim() || await defaultBranchName(task.repo_path);
@@ -314,7 +320,7 @@ export async function dispatchTask(
     target_state: "confirmed",
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
-    branch: review || spec || analysis ? null : branch,
+    branch: noBranch ? null : branch,
     worktree_path: useWorktree && session.cwd ? session.cwd : null,
     terminal_address: session.address,
     review: reviewCommand,
@@ -341,11 +347,11 @@ export async function dispatchTask(
   logTaskEvent(db, task.id, "prompt", `Initial prompt sent to ${target}`, promptData(fullPrompt, {
     source: "dispatch",
     harness: target,
-    kind: review ? "review" : spec ? "spec" : "code",
+    kind: review ? "review" : spec ? "spec" : analysis ? "analysis" : ops ? "ops" : "code",
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
     agent: opts.agent ?? null,
-    branch: review || spec || analysis ? null : branch,
+    branch: noBranch ? null : branch,
     worktree: useWorktree && session.cwd ? session.cwd : null,
     session: session.address,
     attachments: attachments.length ? attachments.map((a) => `${a.filename} (${formatBytes(a.data.length)})`).join(", ") : undefined,
@@ -361,5 +367,5 @@ export async function dispatchTask(
     );
   }
 
-  return { address: session.address, worktreePath: session.cwd, branch: review || spec || analysis ? "" : branch };
+  return { address: session.address, worktreePath: session.cwd, branch: noBranch ? "" : branch };
 }
