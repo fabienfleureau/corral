@@ -310,6 +310,8 @@ export type EpicTaskView = {
 export type EpicDesign = { epic_id: string; version: number; body: string; reason: string; author: string; created_ms: number };
 
 export type EpicDetail = {
+  /** Set when the server answered an import/sync failure as JSON. */
+  error?: string | null;
   epic: Epic;
   tasks: Task[];
   links: { task_key: string; blocked_by_key: string }[];

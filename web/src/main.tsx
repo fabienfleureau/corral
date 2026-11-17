@@ -2,6 +2,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { ErrorBoundary } from "./ErrorBoundary";
 import "./styles.css";
 
 // Theme: light by default; "dark" or "system" are explicit choices (Settings).
@@ -21,7 +22,9 @@ const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("missing #root element");
 
 createRoot(rootEl).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  <ErrorBoundary>
+    <StrictMode>
+      <App />
+    </StrictMode>
+  </ErrorBoundary>,
 );

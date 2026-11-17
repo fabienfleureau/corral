@@ -13,7 +13,13 @@ const bundle = await build({
   write: false,
 });
 type ApiModule = {
-  api: { improvementStatus: () => Promise<unknown>; listTasks: () => Promise<unknown> };
+  api: {
+    improvementStatus: () => Promise<unknown>;
+    listTasks: () => Promise<unknown>;
+    listEpics: () => Promise<unknown>;
+    getEpic: (id: string) => Promise<unknown>;
+    importEpic: (key: string) => Promise<unknown>;
+  };
   ApiError: new (status: number, message: string) => Error & { status: number };
 };
 const module = { exports: {} as ApiModule };
@@ -57,6 +63,53 @@ test("a JSON success body still parses", async () => {
   stubFetch(JSON.stringify([{ id: "task-1" }]), { status: 200, headers: { "Content-Type": "application/json" } });
   try {
     assert.deepEqual(await api.listTasks(), [{ id: "task-1" }]);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// Before the epics stack, the server sent {epic, tasks, links} for a detail
+// and `task_count` rows for the list. Both are valid JSON, but the page asks
+// for `views` and `summary` and used to render nothing.
+const staleDetail = JSON.stringify({ epic: { id: "e-1" }, tasks: [], links: [] });
+const currentDetail = JSON.stringify({
+  epic: { id: "e-1" }, tasks: [], links: [], views: [],
+  summary: { total: 0, merged: 0, testable: 0, ready: 0, blocked: 0 },
+});
+
+for (const [name, call] of [
+  ["getEpic", () => api.getEpic("e-1")],
+  ["importEpic", () => api.importEpic("OPS-12")],
+] as const) {
+  test(`${name} reports an old server instead of returning a detail without views`, async () => {
+    stubFetch(staleDetail, { status: 200, headers: { "Content-Type": "application/json" } });
+    try {
+      await assert.rejects(call, (err: unknown) => {
+        assert.ok(err instanceof ApiError);
+        assert.match(err.message, /old epic response/);
+        assert.match(err.message, /restart it and reload/);
+        return true;
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+}
+
+test("listEpics reports an old server instead of returning rows without a summary", async () => {
+  stubFetch(JSON.stringify([{ id: "e-1", task_count: 3 }]), { status: 200, headers: { "Content-Type": "application/json" } });
+  try {
+    await assert.rejects(() => api.listEpics(), /old epic response/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a current epic detail still parses", async () => {
+  stubFetch(currentDetail, { status: 200, headers: { "Content-Type": "application/json" } });
+  try {
+    const detail = await api.getEpic("e-1") as { views: unknown[] };
+    assert.deepEqual(detail.views, []);
   } finally {
     globalThis.fetch = realFetch;
   }
