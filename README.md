@@ -47,6 +47,10 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   the first prompt, as session files omnigent hands to the harness.
 - **Review tasks** — a task of kind `review` points at someone else's PR/MR. The
   agent drafts its review, and publishes only after you approve it in the inbox.
+- **Action tasks** — the Epic page can create a task of kind `ops`: the agent works
+  in the chosen folder with no worktree, branch or PR and reports back to the
+  inbox. The folder may hold several repos or none, so it fits requests that need
+  context but no source change.
 - **Multi-repo spec tasks** — a task of kind `spec` points at a folder holding
   git repos, one sub-project per directory. The agent reads them and reports a
   **plan**: the contract between the sub-projects (each REST endpoint, event,

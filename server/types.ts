@@ -11,8 +11,10 @@ export type TargetState = "suggested" | "confirmed";
  *  existing PR/MR (pr_url) and posts comments only after the human approves.
  *  spec: multi-repo step one — the agent works in a folder of sub-projects (not
  *  a git repo), writes the contract between them and proposes one code task per
- *  sub-project; no branch, no PR. */
-export type TaskKind = "code" | "review" | "spec" | "analysis";
+ *  sub-project; no branch, no PR. ops: the agent carries out a request with a
+ *  folder as context (the folder need not be a git repo) and reports back; no
+ *  branch, no PR. */
+export type TaskKind = "code" | "review" | "spec" | "analysis" | "ops";
 
 /** One sub-task a spec proposes. `repo` is a directory relative to the spec task's folder. */
 export interface PlanSubtask {

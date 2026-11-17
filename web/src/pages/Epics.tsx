@@ -49,6 +49,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [busy, setBusy] = useState(false);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [request, setRequest] = useState("");
+  const [kind, setKind] = useState<"code" | "ops">("code");
   const [favorite, setFavorite] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [createdTask, setCreatedTask] = useState<Task | null>(null);
@@ -76,6 +77,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     if (!detail) return;
     setFavorite(detail.epic.favorite_name ?? "");
     setRepoPath(detail.epic.repo_path ?? "");
+    setKind("code");
     setRequest("");
     setCreatedTask(null);
     setProposal("");
@@ -198,7 +200,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
               const allowed = favoritesFor(favorites, repoContext(repos, path));
               const chosenFavorite = favorite && allowed.some((f) => f.name === favorite) ? favorite : "";
               void run(async () => {
-                const task = await api.createEpicRequest(detail.epic.id, { request: text, favorite_name: chosenFavorite, repo_path: path });
+                const task = await api.createEpicRequest(detail.epic.id, { request: text, favorite_name: chosenFavorite, repo_path: path, kind });
                 setRequest("");
                 setProposal("");
                 setCreatedTask(task);
@@ -206,6 +208,14 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
             }}>
               <label htmlFor="epic-request-text">What needs to happen?</label>
               <textarea id="epic-request-text" name="request" value={request} onChange={(e) => setRequest(e.target.value)} rows={3} maxLength={8000} aria-describedby="epic-request-help" required />
+              <fieldset className="epic-request-kind" aria-describedby="epic-request-kind-help">
+                <legend>Task type</legend>
+                <input type="radio" id="epic-request-kind-code" name="kind" value="code" checked={kind === "code"} onChange={() => setKind("code")} disabled={busy} />
+                <label htmlFor="epic-request-kind-code">Code change — opens a PR from a git repo</label>
+                <input type="radio" id="epic-request-kind-ops" name="kind" value="ops" checked={kind === "ops"} onChange={() => setKind("ops")} disabled={busy} />
+                <label htmlFor="epic-request-kind-ops">Action in folder — no PR</label>
+                <small id="epic-request-kind-help" className="muted epic-request-help">An action uses the working directory as context and reports back. The folder does not need to be a git repository.</small>
+              </fieldset>
               <div className="epic-request-choices">
                 <div className="field">
                   <label htmlFor="epic-request-favorite">Favorite</label>

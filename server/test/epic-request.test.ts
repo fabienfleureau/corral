@@ -65,6 +65,7 @@ test("epic request: settings persist and a request becomes a linked task", () =>
   assert.equal(task.prompt, "Split the widget work\ninto two tickets");
   assert.equal(task.title, "Split the widget work");
   assert.equal(task.repo_path, work.path);
+  assert.equal(task.kind, "code");
   assert.equal(task.target, "claude");
   assert.equal(task.agent, "worker");
   assert.equal(task.model, "opus");
@@ -116,4 +117,22 @@ test("epic request: a working directory is free text, not a repo pick", () => wi
   assert.equal(created.body.target, "claude", "a custom path uses the professional favorite context");
   assert.equal(db.getEpic("e")!.repo_path, "/another/custom/checkout");
   assert.equal(db.listRepos().some((r) => r.path === "/another/custom/checkout"), false, "a typed path does not register a repo");
+}));
+
+test("epic request: an action task takes a plain folder and expects no PR", () => withApi(async (send, db) => {
+  const created = await send("POST", "/api/epics/e/requests", {
+    request: "Prepare a test plan with the qovery api CLI",
+    repo_path: "/workspace/qovery",
+    favorite_name: "Work",
+    kind: "ops",
+  });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  assert.equal(created.body.kind, "ops");
+  assert.equal(created.body.repo_path, "/workspace/qovery");
+  assert.equal(created.body.target, "claude", "the saved favorite still supplies the settings");
+  assert.equal(created.body.review, reviewers[0].command);
+
+  const bad = await send("POST", "/api/epics/e/requests", { request: "do it", kind: "spec" });
+  assert.equal(bad.status, 400);
+  assert.equal(db.listTasks().length, 1, "a refused kind leaves no task behind");
 }));

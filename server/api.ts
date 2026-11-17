@@ -422,10 +422,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/tasks", (req, res, { body }) => {
     const b = body as Partial<Task> & { attachments?: unknown };
     const kind = b?.kind ?? "code";
-    if (kind !== "code" && kind !== "review" && kind !== "spec") return json(res, 400, { error: "kind must be code, review or spec" });
-    if (kind === "spec") {
-      if (!b?.prompt?.trim()) return json(res, 400, { error: "spec tasks need a prompt" });
-      if (!b.repo_path?.trim() || !isDirectory(b.repo_path)) return json(res, 400, { error: "spec tasks need an existing folder in repo_path" });
+    if (kind !== "code" && kind !== "review" && kind !== "spec" && kind !== "ops") return json(res, 400, { error: "kind must be code, review, spec or ops" });
+    if (kind === "spec" || kind === "ops") {
+      if (!b?.prompt?.trim()) return json(res, 400, { error: `${kind} tasks need a prompt` });
+      if (!b.repo_path?.trim() || !isDirectory(b.repo_path)) return json(res, 400, { error: `${kind} tasks need an existing folder in repo_path` });
     }
     const prUrl = b?.pr_url?.trim() || null;
     if (kind === "review" && (!prUrl || !PR_URL_RE.test(prUrl))) {
@@ -465,7 +465,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     state.db.insertTaskWithAttachments(task, attached.files);
     state.db.reward("task", task.id);
     state.db.recordMetric("task.created", task.id, { source: b.jira_key ? "jira" : "manual" });
-    logTaskEvent(state.db, task.id, "created", kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : "Task created", {
+    logTaskEvent(state.db, task.id, "created", kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : kind === "ops" ? "Action task created" : "Task created", {
       source: b.jira_key ? "jira" : "manual",
       kind,
       repo: task.repo_path || null,
@@ -618,6 +618,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!task) return json(res, 404, { error: "task not found" });
     if (task.kind === "review") return json(res, 400, { error: "review tasks have no PR of their own" });
     if (task.kind === "spec") return json(res, 400, { error: "spec tasks have no PR of their own" });
+    if (task.kind === "ops") return json(res, 400, { error: "ops tasks have no PR of their own" });
     if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
     const force = (body as { force?: unknown } | undefined)?.force === true;
     const report: { delivered: PrDelivery | null } = { delivered: null };
@@ -869,6 +870,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     return out;
   };
 
+  const epicRequestKind = (body: unknown): "code" | "ops" => {
+    const kind = (body as { kind?: unknown } | null)?.kind;
+    if (kind === undefined || kind === null || kind === "") return "code";
+    if (kind !== "code" && kind !== "ops") throw new EpicRequestError("kind must be code or ops");
+    return kind;
+  };
+
   const epicRequestFailure = (res: ServerResponse, err: unknown) =>
     json(res, err instanceof EpicRequestError ? 400 : 500, { error: String(err instanceof Error ? err.message : err) });
 
@@ -906,6 +914,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         request: b.request,
         favorite_name: input.favorite_name ?? epic.favorite_name ?? "",
         repo_path: input.repo_path ?? epic.repo_path ?? "",
+        kind: epicRequestKind(body),
       }, state.cfg.favorites ?? [], state.cfg.reviewers ?? []);
       state.hub.broadcast("task.updated", task);
       state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));

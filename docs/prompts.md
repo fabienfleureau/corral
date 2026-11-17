@@ -43,6 +43,7 @@ Review this PR/MR: <pr url>      # only for a review task
 |---|---|---|---|
 | `skills/question-report.md` | every `code` task (neither `review` nor `spec`) | `{corral_url}`, `{corral_token}`, `{task_id}` | one-line fallback: *"When you need the human, ask clearly and wait. Do not guess."* |
 | `skills/analysis.md` | analysis tasks, replacing the PR convention | `{corral_url}`, `{corral_token}`, `{task_id}` | read-only analysis and digest report |
+| `skills/ops.md` | ops tasks (an Epic page request without a PR), replacing the PR convention | `{corral_url}`, `{corral_token}`, `{task_id}` | do the work in the folder, no branch or PR, report what was done |
 | `skills/spec.md` | **replaces** `question-report.md` and `pr-loop.md` when `task.kind === "spec"` (multi-repo step one) — a spec reads the sub-projects, reports a `plan` and never commits | `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Write the contract between the sub-projects and report it as a plan. Do not change code."* |
 | `skills/epic-task.md` | a `code` task of an epic (`epic_id`), in the task text before the conventions: check the ticket's Preconditions, report a question and stop if one is unmet | — | one-line fallback: *"Before changing anything, check the ticket's Preconditions section. If one is not met, report a question and stop."* |
 | `skills/pr-loop.md` | same tasks, right after `question-report.md` | — | dropped (empty string is filtered out) |
@@ -59,6 +60,7 @@ What each one is for:
 - **`question-report.md`** — the report contract: commit, push, open the PR/MR,
   write a `## Handoff`, then POST `kind: "done"` to `/api/reports`; POST
   `kind: "question"` (with one-click `options`) only when genuinely blocked.
+- **`ops.md`** — the no-PR convention for a task that uses a folder as context: carry out the request, do not branch, commit, push or open a PR, and report the result with a `## Handoff`.
 - **`pr-loop.md`** — the PR loop: comparable before/after screenshots for UI
   changes, keeping the PR/MR title and description current after every push
   (Corral renders that description at the top of the inbox item), handling
