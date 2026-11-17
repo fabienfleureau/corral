@@ -62,6 +62,8 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   A task whose prerequisites are ready waits on the Epics page: nothing is added to the
   inbox and nothing runs until you click **Launch** there. In the same repo it stacks on
   its prerequisite's branch only when launched. Decision: [ADR 0002](docs/adr/0002-epic-tasks-start-from-epic-page.md).
+  The request field has two actions: **Propose a plan** reads the epic without creating
+  a task, a PR or a Jira change; **Create task** tracks the work for later dispatch.
   A ticket's `Préconditions` are checked by the agent before it starts. The epic's
   **design** is versioned: publishing a revision writes the current version into the
   Jira epic, marks started tasks **impacted**, and an assistant proposes an
