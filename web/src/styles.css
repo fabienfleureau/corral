@@ -2479,13 +2479,20 @@ select:focus {
 .epics-list button { background: var(--bg); padding: .75rem 1rem; min-width: 13rem; }
 .epics-list button[aria-current="true"] { box-shadow: inset 3px 0 var(--accent-ink); }
 .epic-head { padding-top: .5rem; }
-.epic-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1rem; margin: 1.5rem 0; align-items: start; }
-.epic-group { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; min-width: 0; }
+/* One row in status order: blocked on the left, merged on the right. */
+.epic-groups { display: flex; flex-flow: row nowrap; gap: 1rem; margin: 1.5rem 0; align-items: flex-start; overflow-x: auto; overscroll-behavior-inline: contain; padding-bottom: .25rem; }
+.epic-group { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; flex: 1 0 16rem; min-inline-size: 0; }
 .epic-group h3 { display: flex; align-items: center; justify-content: space-between; text-transform: capitalize; margin: 0 0 .75rem; font-size: .95rem; }
 .epic-group h3 span { color: var(--muted); font-size: .8rem; }
 .epic-group .epic-tasks { margin: 0; }
-.epic-task { background: var(--bg-sunken); border-radius: 8px; padding: .8rem; }
-.epic-task-title { overflow-wrap: anywhere; }
+.epic-task { background: var(--bg-sunken); border-radius: 8px; padding: .8rem; position: relative; }
+.epic-task-title { margin: 0; overflow-wrap: anywhere; }
+/* The title links the whole card to Jira; its controls stay clickable. */
+.epic-task a.card-link::after { content: ""; position: absolute; inset: 0; }
+.epic-task a, .epic-task button, .epic-task select { position: relative; z-index: 1; }
+.epic-task:has(a.card-link:hover) { border-color: var(--accent-ink); }
+.epic-task:has(a.card-link:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+.epic-task a.card-link:focus-visible { outline: none; }
 .epic-design { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
 .epic-design h3 { margin-top: 0; }
 
@@ -2498,3 +2505,4 @@ select:focus {
 .epic-request button { justify-self: start; }
 .epic-request-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; margin-block: .5rem; }
 .epic-request-created { margin-block: .5rem 0; }
+.epic-request-help { display: block; margin-top: .25rem; }
