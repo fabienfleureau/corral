@@ -13,6 +13,12 @@ export function Spinner({ label }: { label?: string }) {
 }
 
 const iconPaths: Record<Item["kind"], ReactNode> = {
+  launch: (
+    <>
+      <path d="M5 12h14" />
+      <path d="m13 6 6 6-6 6" />
+    </>
+  ),
   question: (
     <>
       <circle cx="12" cy="12" r="9" />

@@ -7,6 +7,7 @@
 import { mapLimit, runAsync } from "./exec.ts";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
+import { syncEpicLaunch } from "./epic-graph.ts";
 import type { Db } from "./db.ts";
 import type { WorkerBackend } from "./worker.ts";
 import type { Hub } from "./capture.ts";
@@ -798,6 +799,7 @@ export function startSyncAllPrs(
       const reportedTasks = new Set(db.listItems({ kind: "pr" }).filter((i) => i.status !== "archived").map((i) => i.task_id));
       const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url || reportedTasks.has(t.id));
       await mapLimit(tasks, 4, (task) => syncTaskPr(db, hub, task, opts).catch(() => null));
+      try { syncEpicLaunch(db, hub); } catch (err) { console.error("corral: epic launch sync failed:", String(err)); }
     } finally {
       syncAllRunning = false;
     }

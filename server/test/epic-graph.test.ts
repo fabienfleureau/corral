@@ -1,0 +1,95 @@
+// Epic readiness: what is blocked, what is ready to launch, what stacks on what.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Db } from "../db.ts";
+import { epicSummary, epicViews, syncEpicLaunch } from "../epic-graph.ts";
+import type { EpicLink, Item, Task } from "../types.ts";
+
+const task = (key: string, over: Partial<Task> = {}): Task => ({
+  id: key, title: `${key} t`, prompt: "", repo_path: "/r/a", target: "", target_state: "suggested", base_branch: null, branch: null,
+  worktree_path: null, assignee: null, jira_key: key, jira_url: null, jira_parent_key: null, pr_url: null, pr_meta: null, status: "open",
+  terminal_address: null, exit_code: null, created_ms: 1, updated_ms: 1, epic_id: "e", epic_out: 0, ...over,
+});
+const link = (t: string, b: string): EpicLink => ({ epic_id: "e", task_key: t, blocked_by_key: b });
+const pr = (taskId: string, over: Partial<Item> = {}): Item => ({
+  id: `pr-${taskId}`, kind: "pr", status: "open", title: "", summary: "", body: "", context: "", options: null, ready: 0, handling: 0,
+  source_ref: null, task_id: taskId, structured: 1, created_ms: 1, updated_ms: 1, resolved_ms: null, snooze_until_ms: null, ...over,
+});
+const state = (views: ReturnType<typeof epicViews>, key: string) => views.find((v) => v.task.jira_key === key)!;
+
+test("a task is blocked until its prerequisite PR is green and ready, then ready to launch", () => {
+  const tasks = [task("A-1", { status: "dispatched", branch: "a1", pr_url: "u" }), task("A-2")];
+  const links = [link("A-2", "A-1")];
+  assert.equal(state(epicViews(tasks, links, [pr("A-1", { ready: 0 })]), "A-2").state, "blocked");
+  const ready = epicViews(tasks, links, [pr("A-1", { ready: 1 })]);
+  assert.equal(state(ready, "A-2").state, "ready");
+  assert.equal(state(ready, "A-1").state, "pr_ready");
+});
+
+test("merged or Jira-done prerequisite unblocks; a ticket that left the epic is ignored", () => {
+  const links = [link("A-2", "A-1"), link("A-2", "A-0")];
+  const merged = epicViews([task("A-0", { status: "done" }), task("A-1", { jira_status: "Done" }), task("A-2")], links, []);
+  assert.equal(state(merged, "A-2").state, "ready");
+  const out = epicViews([task("A-1", { epic_out: 1 }), task("A-2")], [link("A-2", "A-1")], []);
+  assert.equal(state(out, "A-2").state, "ready");
+  assert.equal(state(out, "A-1").state, "out");
+});
+
+test("same-repo: stack on the only unmerged prerequisite branch; other repo or several blockers use the default", () => {
+  const dep = (over: Partial<Task>) => task("A-1", { status: "dispatched", branch: "feat/a1", pr_url: "u", ...over });
+  const ready = [pr("A-1", { ready: 1 })];
+  assert.equal(state(epicViews([dep({}), task("A-2")], [link("A-2", "A-1")], ready), "A-2").stack_on, "feat/a1");
+  assert.equal(state(epicViews([dep({ repo_path: "/r/b" }), task("A-2")], [link("A-2", "A-1")], ready), "A-2").stack_on, null);
+  const two = epicViews([dep({}), task("A-3", { status: "dispatched", branch: "feat/a3", pr_url: "u" }), task("A-2")], [link("A-2", "A-1"), link("A-2", "A-3")], [...ready, pr("A-3", { ready: 1 })]);
+  assert.equal(state(two, "A-2").stack_on, null);
+  assert.equal(state(epicViews([dep({ status: "done" }), task("A-2")], [link("A-2", "A-1")], []), "A-2").stack_on, null);
+});
+
+test("a prerequisite PR closed without merging keeps dependents blocked and raises an alert", () => {
+  const views = epicViews([task("A-1", { status: "dispatched", pr_url: "u" }), task("A-2")], [link("A-2", "A-1")], [pr("A-1", { status: "resolved" })]);
+  assert.equal(state(views, "A-2").state, "blocked");
+  assert.match(state(views, "A-2").alert ?? "", /A-1.*closed/);
+});
+
+test("order follows dependencies, summary counts merged and testable", () => {
+  const tasks = [task("A-3"), task("A-1", { status: "done" }), task("A-2", { status: "dispatched", pr_url: "u", branch: "b" })];
+  const views = epicViews(tasks, [link("A-3", "A-2"), link("A-2", "A-1")], [pr("A-2", { ready: 1 })]);
+  assert.deepEqual(views.map((v) => v.task.jira_key), ["A-1", "A-2", "A-3"]);
+  assert.deepEqual(epicSummary(views), { total: 3, merged: 1, testable: 2, ready: 1, blocked: 0 });
+});
+
+test("a dependency cycle does not hang ordering", () => {
+  const views = epicViews([task("A-1"), task("A-2")], [link("A-1", "A-2"), link("A-2", "A-1")], []);
+  assert.equal(views.length, 2);
+});
+
+test("launch items: one per ready task, archived once started, base branch stacked", () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-epic-g-"));
+  const db = new Db(join(dir, "t.db"));
+  const hub = { broadcast: () => undefined };
+  try {
+    db.insertEpic({ id: "e", jira_key: "E-1", title: "E", description: "", error: null, synced_ms: 1, created_ms: 1 });
+    db.insertTask(task("A-1", { status: "dispatched", branch: "feat/a1", pr_url: "u", terminal_address: "s" }));
+    db.insertTask(task("A-2"));
+    db.replaceEpicLinks("e", [{ task_key: "A-2", blocked_by_key: "A-1" }]);
+    syncEpicLaunch(db, hub);
+    assert.equal(db.listItems({ kind: "launch" }).length, 0, "blocked: nothing to launch");
+    db.insertItem(pr("A-1", { ready: 1 }));
+    syncEpicLaunch(db, hub);
+    syncEpicLaunch(db, hub);
+    const items = db.listItems({ kind: "launch" });
+    assert.equal(items.length, 1, "deduplicated on refresh");
+    assert.equal(items[0].task_id, "A-2");
+    assert.equal(db.getTask("A-2")!.base_branch, "feat/a1");
+    db.updateTask("A-2", { status: "dispatched", terminal_address: "s2" });
+    syncEpicLaunch(db, hub);
+    assert.equal(db.listItems({ kind: "launch" })[0].status, "archived");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
