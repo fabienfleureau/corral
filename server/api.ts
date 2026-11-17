@@ -848,7 +848,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   const epicDetail = (id: string) => {
     const epic = state.db.getEpic(id);
     if (!epic) return null;
-    const tasks = state.db.listEpicTasks(id), links = state.db.listEpicLinks(id);
+    // The board data mirrors Jira: a prompt-created task stays on the Tasks page.
+    const tasks = state.db.listEpicTasks(id).filter((t) => t.jira_key), links = state.db.listEpicLinks(id);
     const impacted = impactedTaskIds(state.db, id);
     const views = epicViews(tasks, links, state.db.listItems()).map((v) => ({ ...v, impacted: impacted.has(v.task.id) }));
     return {
@@ -940,6 +941,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const epic = state.db.getEpic(params.id);
     if (!epic) return json(res, 404, { error: "epic not found" });
     if (epic.error) return json(res, 409, { error: epic.error });
+    const linked = state.db.getTask(params.taskId);
+    if (linked?.epic_id === epic.id && !linked.jira_key) {
+      return json(res, 409, { error: "only Jira tickets can be launched from the epic; dispatch this task from the Tasks page" });
+    }
     const view = epicViews(
       state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), state.db.listItems(),
     ).find((v) => v.task.id === params.taskId);
