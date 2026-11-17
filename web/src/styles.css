@@ -2474,3 +2474,28 @@ select:focus {
 .epic-design { margin-top: 1.5rem; }
 .epic-design form { display: grid; gap: .5rem; max-inline-size: 48rem; }
 .epic-design textarea { font: inherit; }
+
+/* Epic overview */
+.epics-page { width: 100%; }
+.epics-page article { max-width: 74rem; }
+.epics-list button { background: var(--bg); padding: .75rem 1rem; min-width: 13rem; }
+.epics-list button[aria-current="true"] { box-shadow: inset 3px 0 var(--accent-ink); }
+.epic-head { padding-top: .5rem; }
+.epic-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1rem; margin: 1.5rem 0; align-items: start; }
+.epic-group { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; min-width: 0; }
+.epic-group h3 { display: flex; align-items: center; justify-content: space-between; text-transform: capitalize; margin: 0 0 .75rem; font-size: .95rem; }
+.epic-group h3 span { color: var(--muted); font-size: .8rem; }
+.epic-group .epic-tasks { margin: 0; }
+.epic-task { background: var(--bg-sunken); border-radius: 8px; padding: .8rem; }
+.epic-task-title { overflow-wrap: anywhere; }
+.epic-design { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+.epic-design h3 { margin-top: 0; }
+
+.epic-orchestration { margin-top: 1.5rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.epic-orchestration h3 { margin: 0; }
+.epic-orchestration form { display: grid; gap: .5rem; max-width: 48rem; }
+.epic-orchestration textarea { font: inherit; }
+.epic-orchestration button { justify-self: start; }
+.epic-proposal { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .75rem; }
+.epic-proposal h4 { margin: 0; }
+.epic-proposal p { white-space: pre-wrap; overflow-wrap: anywhere; }

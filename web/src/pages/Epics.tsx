@@ -45,6 +45,8 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [reason, setReason] = useState("");
+  const [request, setRequest] = useState("");
+  const [proposal, setProposal] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,6 +62,8 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     api.getEpic(selectedId).then((d) => { if (!cancelled) setDetail(d); }).catch((e) => { if (!cancelled) setError(errText(e)); });
     return () => { cancelled = true; };
   }, [selectedId, eventVersion]);
+
+  useEffect(() => { setRequest(""); setProposal(""); }, [selectedId]);
 
   // The editor starts from the current design and follows a new version.
   const designVersion = detail?.design?.version ?? 0;
@@ -91,7 +95,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   };
 
   return (
-    <section>
+    <section className="page-scroll epics-page">
       <h1>Epics</h1>
       <form className="epics-import" onSubmit={(e) => { e.preventDefault(); if (key.trim()) void run(async () => { const d = await api.importEpic(key.trim()); setKey(""); return d; }); }}>
         <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="Jira epic key, e.g. OPS-12" aria-label="Jira epic key" />
@@ -102,7 +106,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
       <ul className="epics-list">
         {epics.map((e) => (
           <li key={e.id}>
-            <button type="button" aria-current={e.id === selectedId} onClick={() => setSelectedId(e.id)}>
+            <button type="button" disabled={busy} aria-current={e.id === selectedId} onClick={() => setSelectedId(e.id)}>
               <strong>{e.jira_key}</strong> {e.title}<br /><span className="muted">{summaryText(e.summary)}</span>
             </button>
           </li>
@@ -119,8 +123,24 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
           <progress id="epic-progress" className="epic-progress" value={detail.summary.merged} max={Math.max(detail.summary.total, 1)} />
           {detail.epic.error ? <p className="inline-error" role="alert">{detail.epic.error}. Nothing in the cycle can be launched.</p> : null}
           <p className="muted">Ready tasks wait here until you launch them. Nothing is added to the inbox on its own.</p>
-          <ol className="epic-tasks">
-            {detail.views.map((v) => (
+          <section className="epic-orchestration" aria-labelledby="epic-orchestration-title">
+            <h3 id="epic-orchestration-title">Plan with the assistant</h3>
+            <p className="muted">Ask for design changes, task coordination or test coverage. Review the proposal before making changes.</p>
+            <form aria-labelledby="epic-orchestration-title" onSubmit={(e) => { e.preventDefault(); if (request.trim()) void run(async () => { const result = await api.orchestrateEpic(detail.epic.id, request); setProposal(result.proposal); }); }}>
+              <label htmlFor="epic-request">What would you like to change?</label>
+              <textarea id="epic-request" value={request} onChange={(e) => setRequest(e.target.value)} rows={3} maxLength={8000} required />
+              <button className="btn btn-primary" disabled={busy} type="submit">{busy ? <Spinner /> : null}Propose a plan</button>
+            </form>
+            {proposal ? <div className="epic-proposal" role="status"><h4>Proposal</h4><p>{proposal}</p><p className="muted">This proposal has not changed the epic or its tasks.</p></div> : null}
+          </section>
+          <div className="epic-groups">
+            {(Object.keys(STATE_LABEL) as EpicTaskState[]).map((state) => {
+              const views = detail.views.filter((view) => view.state === state);
+              if (!views.length) return null;
+              return <section key={state} className="epic-group" aria-label={STATE_LABEL[state]}>
+                <h3>{STATE_LABEL[state]} <span>{views.length}</span></h3>
+                <ul className="epic-tasks">
+            {views.map((v) => (
               <li key={v.task.id} className="epic-task" data-state={v.state}>
                 <div className="epic-task-line">
                   <span className="epic-task-title">{v.task.title}</span>
@@ -159,7 +179,10 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
                 {v.alert ? <div className="inline-error" role="alert">{v.alert}</div> : null}
               </li>
             ))}
-          </ol>
+                </ul>
+              </section>;
+            })}
+          </div>
           <section aria-labelledby="epic-design-title" className="epic-design">
             <h3 id="epic-design-title">Design v{detail.design?.version ?? 1}</h3>
             {detail.amendments.length ? <p className="muted">{detail.amendments.length} amendment{detail.amendments.length > 1 ? "s" : ""} waiting in the inbox.</p> : null}
