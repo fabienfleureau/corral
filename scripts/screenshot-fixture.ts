@@ -4,7 +4,8 @@ import { prItemBody, type PrInfo } from "../server/pr.ts";
 import type { Pull } from "../server/pulls.ts";
 import type { Item, Task } from "../server/types.ts";
 import type { TaskEvent } from "../server/task-events.ts";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Written by scripts/capture-screenshot.sh so the Markdown-path link has a file. */
@@ -330,12 +331,51 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
   for (const item of items) db.insertItem(item);
 }
 
+/** Synthetic Claude session logs so the Usage page has chart data in captures. */
+export function seedScreenshotUsage(home: string): void {
+  const models = [
+    { id: "claude-opus-5-5", output: 18_000 },
+    { id: "claude-sonnet-5-5", output: 32_000 },
+    { id: "claude-haiku-5-5", output: 60_000 },
+    { id: "claude-opus-4-7", output: 12_000 },
+  ];
+  const dir = join(home, ".claude", "projects", "corral-screenshot-fixture");
+  mkdirSync(dir, { recursive: true });
+  const lines: string[] = [];
+  const now = Date.now();
+  for (let day = 6; day >= 0; day--) {
+    for (const [mi, model] of models.entries()) {
+      for (let call = 0; call < 2 + (day % 2); call++) {
+        lines.push(JSON.stringify({
+          type: "assistant",
+          requestId: `fixture-${day}-${mi}-${call}`,
+          cwd: "/sample/example-project",
+          timestamp: new Date(now - day * 86_400_000 - call * 3_600_000).toISOString(),
+          message: {
+            id: `msg-${day}-${mi}-${call}`,
+            model: model.id,
+            usage: {
+              input_tokens: 1_000 + call * 400,
+              output_tokens: model.output + call * 1_000,
+              cache_read_input_tokens: model.output * 2,
+            },
+          },
+        }));
+      }
+    }
+  }
+  writeFileSync(join(dir, "usage.jsonl"), lines.join("\n") + "\n");
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [dbPath, configPath] = process.argv.slice(2);
   if (!dbPath) throw new Error("Pass a new fixture database path");
   const db = new Db(dbPath);
   try { seedScreenshotData(db); } finally { db.close(); }
   if (configPath) {
+    // The config lives at <home>/.config/corral/config.json; the usage scanner
+    // reads the same temporary home through the server's HOME.
+    seedScreenshotUsage(dirname(dirname(dirname(configPath))));
     const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
     writeFileSync(configPath, JSON.stringify({ ...config, favorites: screenshotFavorites }, null, 2) + "\n");
   }

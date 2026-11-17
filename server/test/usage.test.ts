@@ -173,6 +173,38 @@ test("buildReport: range filter, task attribution and efficiency", () => {
   assert.ok(r.timeline.length >= 7);
 });
 
+test("buildReport: timeline keeps per-model cost and tokens in each bucket", () => {
+  const now = Date.parse("2026-11-04T12:00:00Z");
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const r = buildReport({
+    records: [
+      rec({ ts: today.getTime() + 3_600_000, output: 1_000_000 }), // opus: $20
+      rec({ ts: today.getTime() + 3_600_000, model: "claude-sonnet-5-5", output: 500_000 }), // $5
+      rec({ ts: yesterday.getTime() + 3_600_000, output: 250_000 }), // $5
+      rec({ ts: yesterday.getTime() + 3_600_000, agent: "codex", model: "gpt-unknown", input: 100 }), // unpriced
+    ],
+    tasks: [],
+    prices: DEFAULT_PRICES,
+    range: "7d",
+    quota: [],
+    scanning: false,
+    now,
+  });
+  assert.deepEqual(r.timeline.find((b) => b.start_ms === today.getTime())?.models, [
+    { agent: "claude", model: "claude-opus-5-5", cost_usd: 20, tokens: 1_000_000 },
+    { agent: "claude", model: "claude-sonnet-5-5", cost_usd: 5, tokens: 500_000 },
+  ]);
+  assert.deepEqual(r.timeline.find((b) => b.start_ms === yesterday.getTime())?.models, [
+    { agent: "claude", model: "claude-opus-5-5", cost_usd: 5, tokens: 250_000 },
+    { agent: "codex", model: "gpt-unknown", cost_usd: 0, tokens: 100 },
+  ]);
+  assert.ok(r.timeline.every((b) => Array.isArray(b.models)));
+  assert.ok(r.timeline.some((b) => b.models.length === 0)); // filled empty buckets
+});
+
 test("OpenCode Go quota reads subscription windows and handles failures", async () => {
   const { opencodeGoQuota } = await import("../usage.ts");
   const dir = mkdtempSync(join(tmpdir(), "corral-go-"));

@@ -87,7 +87,8 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
 - **Sessions** — the omnigent sessions Corral knows about, with a link out to each.
 - **Usage** — Claude Code, Codex and OpenCode Go spend and quota from local
   session data, cost per done task, PR additions, and GitHub/GitLab API rate
-  limits for the PR loop.
+  limits for the PR loop. The Over time chart splits cost or tokens by agent
+  or by model; `#/usage?range=7d&group=model&metric=tokens` opens the model view.
 - **Model facts** — a shipped catalog of model facts (retention, quota, cost,
   benchmark scores) shows indicators on the task form.
 - **Self-improvement** (`#/improve`) — three analyses, each on demand or on a
