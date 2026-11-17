@@ -515,6 +515,19 @@ export interface UsageTotals {
   unpriced_calls: number;
 }
 
+/** One bar of the Over time chart: spend and tokens split by agent and by model. */
+export interface UsageTimelineBucket {
+  start_ms: number;
+  claude: number;
+  codex: number;
+  claude_tokens: number;
+  codex_tokens: number;
+  opencode_go: number;
+  opencode_go_tokens: number;
+  /** Unpriced calls add tokens but no cost. */
+  models: { agent: UsageAgent; model: string; cost_usd: number; tokens: number }[];
+}
+
 export interface UsageReport {
   range: UsageRange;
   since_ms: number | null;
@@ -525,7 +538,7 @@ export interface UsageReport {
   by_agent: ({ agent: UsageAgent } & UsageTotals)[];
   by_model: ({ agent: UsageAgent; model: string; priced: boolean } & UsageTotals)[];
   /** Buckets: hourly for 24h, daily otherwise (local time). */
-  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number; opencode_go: number; opencode_go_tokens: number }[];
+  timeline: UsageTimelineBucket[];
   bucket: "hour" | "day";
   efficiency: {
     /** Tasks with spend in range. */
@@ -543,6 +556,10 @@ export interface UsageReport {
 
 function emptyTotals(): UsageTotals {
   return { calls: 0, input: 0, output: 0, cache_read: 0, cache_write: 0, cost_usd: 0, unpriced_calls: 0 };
+}
+
+function emptyBucket(start_ms: number): UsageTimelineBucket {
+  return { start_ms, claude: 0, codex: 0, claude_tokens: 0, codex_tokens: 0, opencode_go: 0, opencode_go_tokens: 0, models: [] };
 }
 
 function add(t: UsageTotals, r: UsageRecord, cost: number | null): void {
@@ -593,7 +610,7 @@ export function buildReport(input: {
   const totals = emptyTotals();
   const byAgent = new Map<UsageAgent, UsageTotals>();
   const byModel = new Map<string, { agent: UsageAgent; model: string; priced: boolean } & UsageTotals>();
-  const timeline = new Map<number, { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number; opencode_go: number; opencode_go_tokens: number }>();
+  const timeline = new Map<number, UsageTimelineBucket>();
   const perTask = new Map<string, { task: Task; cost: number; tokens: number; agents: Set<UsageAgent> }>();
   let attributed = 0;
   let unattributed = 0;
@@ -613,10 +630,14 @@ export function buildReport(input: {
 
     const b = bucketStart(r.ts, bucket);
     let tl = timeline.get(b);
-    if (!tl) timeline.set(b, (tl = { start_ms: b, claude: 0, codex: 0, claude_tokens: 0, codex_tokens: 0, opencode_go: 0, opencode_go_tokens: 0 }));
+    if (!tl) timeline.set(b, (tl = emptyBucket(b)));
     const agent = r.agent === "opencode-go" ? "opencode_go" : r.agent;
     tl[agent] += cost ?? 0;
     tl[`${agent}_tokens`] += tokensOf(r);
+    let mt = tl.models.find((m) => m.agent === r.agent && m.model === r.model);
+    if (!mt) tl.models.push((mt = { agent: r.agent, model: r.model, cost_usd: 0, tokens: 0 }));
+    mt.cost_usd += cost ?? 0;
+    mt.tokens += tokensOf(r);
 
     if (!cwdTask.has(r.cwd)) cwdTask.set(r.cwd, r.cwd ? taskForCwd(r.cwd, input.tasks) : null);
     const task = cwdTask.get(r.cwd) ?? null;
@@ -639,7 +660,7 @@ export function buildReport(input: {
     let cur = since !== null ? bucketStart(since, bucket) : keys[0];
     const end = bucketStart(now, bucket);
     while (cur <= end) {
-      filled.push(timeline.get(cur) ?? { start_ms: cur, claude: 0, codex: 0, claude_tokens: 0, codex_tokens: 0, opencode_go: 0, opencode_go_tokens: 0 });
+      filled.push(timeline.get(cur) ?? emptyBucket(cur));
       const d = new Date(cur);
       if (bucket === "hour") d.setHours(d.getHours() + 1);
       else d.setDate(d.getDate() + 1);
@@ -659,7 +680,7 @@ export function buildReport(input: {
     totals,
     by_agent: [...byAgent.entries()].map(([agent, t]) => ({ agent, ...t })).sort((x, y) => y.cost_usd - x.cost_usd),
     by_model: [...byModel.values()].sort((x, y) => y.cost_usd - x.cost_usd || y.output - x.output),
-    timeline: filled,
+    timeline: filled.map((b) => ({ ...b, models: b.models.sort((x, y) => y.cost_usd - x.cost_usd || x.model.localeCompare(y.model)) })),
     bucket,
     efficiency: {
       tasks_with_spend: tasksWithSpend.length,

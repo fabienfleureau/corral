@@ -254,7 +254,7 @@ export type UsageReport = {
   totals: UsageTotals;
   by_agent: ({ agent: UsageAgent } & UsageTotals)[];
   by_model: ({ agent: UsageAgent; model: string; priced: boolean } & UsageTotals)[];
-  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number; opencode_go: number; opencode_go_tokens: number }[];
+  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number; opencode_go: number; opencode_go_tokens: number; models: { agent: UsageAgent; model: string; cost_usd: number; tokens: number }[] }[];
   bucket: "hour" | "day";
   efficiency: {
     tasks_with_spend: number;

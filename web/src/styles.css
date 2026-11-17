@@ -1962,6 +1962,37 @@ select:focus {
 }
 
 /* ---- Usage page ---- */
+/* Over time model series need more colors than the three agent series. Keep
+   them local to the chart and follow the same light/dark theme switches. */
+:root {
+  --chart-m1: #3b53c4;
+  --chart-m2: #26734d;
+  --chart-m3: #8c6ac8;
+  --chart-m4: #8a6116;
+  --chart-m5: #b23535;
+  --chart-m6: #0f7b86;
+  --chart-other: #9aa1aa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --chart-m1: #58a6ff;
+    --chart-m2: #2ea65c;
+    --chart-m3: #b083ea;
+    --chart-m4: #d4972a;
+    --chart-m5: #e65b77;
+    --chart-m6: #39b3bd;
+    --chart-other: #6e7681;
+  }
+}
+:root[data-theme="dark"] {
+  --chart-m1: #58a6ff;
+  --chart-m2: #2ea65c;
+  --chart-m3: #b083ea;
+  --chart-m4: #d4972a;
+  --chart-m5: #e65b77;
+  --chart-m6: #39b3bd;
+  --chart-other: #6e7681;
+}
 .usage-h {
   font-size: 13px;
   font-weight: 600;
@@ -1972,6 +2003,16 @@ select:focus {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.usage-chart-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.usage-chart-controls .chip-row {
+  align-items: center;
 }
 .usage-grid {
   display: grid;
@@ -2036,6 +2077,10 @@ select:focus {
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--bg);
+  margin: 0;
+}
+.usage-chart-caption {
+  margin-bottom: 6px;
 }
 .usage-chart-max {
   font-size: 11px;
@@ -2079,8 +2124,22 @@ select:focus {
 }
 .usage-legend {
   display: flex;
-  gap: 14px;
+  gap: 6px 14px;
+  flex-wrap: wrap;
   font-size: 11.5px;
+  margin-top: 6px;
+}
+.usage-chart-data {
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+.usage-chart-data summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.usage-chart-data-scroll {
+  max-height: 220px;
+  overflow: auto;
   margin-top: 6px;
 }
 .usage-dot {
@@ -2159,6 +2218,13 @@ select:focus {
 .usage-seg-opencode {
   background: #8c6ac8;
 }
+.usage-seg-m1 { background: var(--chart-m1); }
+.usage-seg-m2 { background: var(--chart-m2); }
+.usage-seg-m3 { background: var(--chart-m3); }
+.usage-seg-m4 { background: var(--chart-m4); }
+.usage-seg-m5 { background: var(--chart-m5); }
+.usage-seg-m6 { background: var(--chart-m6); }
+.usage-seg-other { background: var(--chart-other); }
 
 /* ---- task type switch (new task form) ---- */
 .seg {

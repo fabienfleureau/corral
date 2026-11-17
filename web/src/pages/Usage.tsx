@@ -14,14 +14,18 @@ const RANGES: { key: UsageRange; label: string }[] = [
   { key: "all", label: "All time" },
 ];
 type Metric = "cost" | "tokens";
+type ChartGroup = "agent" | "model";
+type ChartSeries = { key: string; label: string; className: string; values: number[] };
 const AGENT_LABEL: Record<AgentQuota["agent"], string> = { claude: "Claude", codex: "Codex", "opencode-go": "OpenCode Go" };
+const MAX_MODEL_SERIES = 6;
 
-function paramsFromHash(): { range: UsageRange; metric: Metric } {
+function paramsFromHash(): { range: UsageRange; metric: Metric; group: ChartGroup } {
   const q = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
   const range = q.get("range");
   return {
     range: RANGES.some((r) => r.key === range) ? (range as UsageRange) : "7d",
     metric: q.get("metric") === "tokens" ? "tokens" : "cost",
+    group: q.get("group") === "model" ? "model" : "agent",
   };
 }
 
@@ -125,14 +129,46 @@ function RateLimitCard({ rl }: { rl: PlatformRateLimit }) {
   );
 }
 
-function Timeline({ report, metric }: { report: UsageReport; metric: Metric }) {
-  const rows = report.timeline.map((b) => ({
-    start: b.start_ms,
-    claude: metric === "cost" ? b.claude : b.claude_tokens,
-    codex: metric === "cost" ? b.codex : b.codex_tokens,
-    opencode: metric === "cost" ? b.opencode_go : b.opencode_go_tokens,
-  }));
-  const max = Math.max(0, ...rows.map((r) => r.claude + r.codex + r.opencode));
+function Timeline({ report, metric, group }: { report: UsageReport; metric: Metric; group: ChartGroup }) {
+  const value = (cost_usd: number, tokenCount: number) => (metric === "cost" ? cost_usd : tokenCount);
+  let series: ChartSeries[];
+  if (group === "agent") {
+    series = ([
+      ["claude", "claude", "claude_tokens", "Claude", "usage-seg-claude"],
+      ["codex", "codex", "codex_tokens", "Codex", "usage-seg-codex"],
+      ["opencode", "opencode_go", "opencode_go_tokens", "OpenCode Go", "usage-seg-opencode"],
+    ] as const).map(([key, cost, costTokens, label, className]) => ({
+      key,
+      label,
+      className,
+      values: report.timeline.map((b) => (metric === "cost" ? b[cost] : b[costTokens])),
+    }));
+  } else {
+    const models = [...report.by_model].sort((a, b) =>
+      value(b.cost_usd, allTokens(b)) - value(a.cost_usd, allTokens(a)) || a.model.localeCompare(b.model));
+    const top = models.slice(0, MAX_MODEL_SERIES);
+    const topKeys = new Set(top.map((m) => `${m.agent}\u0000${m.model}`));
+    series = top.map((m, i) => ({
+      key: `${m.agent}\u0000${m.model}`,
+      label: `${AGENT_LABEL[m.agent]} · ${m.model}`,
+      className: `usage-seg-m${i + 1}`,
+      values: report.timeline.map((b) => {
+        const row = b.models.find((x) => x.agent === m.agent && x.model === m.model);
+        return row ? value(row.cost_usd, row.tokens) : 0;
+      }),
+    }));
+    if (models.length > top.length) {
+      series.push({
+        key: "other",
+        label: "Other models",
+        className: "usage-seg-other",
+        values: report.timeline.map((b) => b.models.reduce((n, m) =>
+          topKeys.has(`${m.agent}\u0000${m.model}`) ? n : n + value(m.cost_usd, m.tokens), 0)),
+      });
+    }
+  }
+  const rows = report.timeline.map((b, i) => ({ start: b.start_ms, total: series.reduce((n, s) => n + s.values[i], 0) }));
+  const max = Math.max(0, ...rows.map((r) => r.total));
   if (!rows.length || max === 0) return <div className="pane-note">No usage in this range.</div>;
   const fmt = metric === "cost" ? usd : tokens;
   const label = (ms: number) =>
@@ -141,35 +177,56 @@ function Timeline({ report, metric }: { report: UsageReport; metric: Metric }) {
       : new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
   const every = Math.max(1, Math.ceil(rows.length / 8));
   return (
-    <div className="usage-chart">
+    <figure className="usage-chart">
+      <figcaption className="muted usage-small">
+        {metric === "cost" ? "Estimated cost" : "Tokens"} by {group === "model" ? "model" : "agent"} · {report.bucket === "hour" ? "hourly" : "daily"} buckets
+      </figcaption>
       <div className="usage-chart-max muted">{fmt(max)}</div>
       <div className="usage-chart-bars">
-        {rows.map((r, i) => (
-          <div
-            key={r.start}
-            className="usage-chart-col"
-            title={`${label(r.start)} — Claude ${fmt(r.claude)}, Codex ${fmt(r.codex)}, OpenCode Go ${fmt(r.opencode)}`}
-          >
-            <div className="usage-chart-stack">
-              <div className="usage-seg usage-seg-opencode" style={{ height: `${(r.opencode / max) * 100}%` }} />
-              <div className="usage-seg usage-seg-codex" style={{ height: `${(r.codex / max) * 100}%` }} />
-              <div className="usage-seg usage-seg-claude" style={{ height: `${(r.claude / max) * 100}%` }} />
+        {rows.map((r, i) => {
+          const detail = `${label(r.start)} — ${series.map((s) => `${s.label} ${fmt(s.values[i])}`).join(", ")}`;
+          return (
+            <div key={r.start} className="usage-chart-col" role="img" aria-label={detail} title={detail}>
+              <div className="usage-chart-stack">
+                {[...series].reverse().map((s) => (
+                  <div key={s.key} className={`usage-seg ${s.className}`} style={{ height: `${(s.values[i] / max) * 100}%` }} />
+                ))}
+              </div>
+              <div className="usage-chart-x muted">{i % every === 0 ? label(r.start) : ""}</div>
             </div>
-            <div className="usage-chart-x muted">{i % every === 0 ? label(r.start) : ""}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="usage-legend muted">
-        <span><i className="usage-dot usage-seg-claude" /> Claude</span>
-        <span><i className="usage-dot usage-seg-codex" /> Codex</span>
-        <span><i className="usage-dot usage-seg-opencode" /> OpenCode Go</span>
+        {series.map((s) => <span key={s.key}><i className={`usage-dot ${s.className}`} /> {s.label}</span>)}
       </div>
-    </div>
+      <details className="usage-chart-data">
+        <summary>Chart data</summary>
+        <div className="usage-chart-data-scroll">
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th scope="col">{report.bucket === "hour" ? "Hour" : "Day"}</th>
+                {series.map((s) => <th scope="col" key={s.key}>{s.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.start}>
+                  <th scope="row">{label(r.start)}</th>
+                  {series.map((s) => <td className="num" key={s.key}>{fmt(s.values[i])}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </figure>
   );
 }
 
 export function UsagePage() {
-  const [{ range, metric }, setParams] = useState(paramsFromHash);
+  const [{ range, metric, group }, setParams] = useState(paramsFromHash);
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -203,10 +260,10 @@ export function UsagePage() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const update = (next: { range?: UsageRange; metric?: Metric }) => {
-    const p = { range, metric, ...next };
+  const update = (next: { range?: UsageRange; metric?: Metric; group?: ChartGroup }) => {
+    const p = { range, metric, group, ...next };
     setParams(p);
-    window.history.replaceState(null, "", `#/usage?range=${p.range}${p.metric === "tokens" ? "&metric=tokens" : ""}`);
+    window.history.replaceState(null, "", `#/usage?range=${p.range}&group=${p.group}${p.metric === "tokens" ? "&metric=tokens" : ""}`);
   };
 
   useEffect(() => {
@@ -338,16 +395,27 @@ export function UsagePage() {
 
             <div className="usage-section-head">
               <h2 className="usage-h">Over time</h2>
-              <div className="chip-row">
-                <button className={`chip ${metric === "cost" ? "chip-active" : ""}`} onClick={() => update({ metric: "cost" })}>
-                  Cost
-                </button>
-                <button className={`chip ${metric === "tokens" ? "chip-active" : ""}`} onClick={() => update({ metric: "tokens" })}>
-                  Tokens
-                </button>
+              <div className="usage-chart-controls">
+                <div className="chip-row">
+                  <span className="muted usage-small">Split</span>
+                  <button className={`chip ${group === "agent" ? "chip-active" : ""}`} onClick={() => update({ group: "agent" })}>
+                    Agent
+                  </button>
+                  <button className={`chip ${group === "model" ? "chip-active" : ""}`} onClick={() => update({ group: "model" })}>
+                    Model
+                  </button>
+                </div>
+                <div className="chip-row">
+                  <button className={`chip ${metric === "cost" ? "chip-active" : ""}`} onClick={() => update({ metric: "cost" })}>
+                    Cost
+                  </button>
+                  <button className={`chip ${metric === "tokens" ? "chip-active" : ""}`} onClick={() => update({ metric: "tokens" })}>
+                    Tokens
+                  </button>
+                </div>
               </div>
             </div>
-            <Timeline report={report} metric={metric} />
+            <Timeline report={report} metric={metric} group={group} />
 
             <h2 className="usage-h">By model</h2>
             {report.by_model.length === 0 ? (

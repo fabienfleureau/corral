@@ -48,7 +48,8 @@ inbox items (a ready PR, a PR needing work, a question), a Jira-imported
 task carrying its ticket link with an open question on it, so the inbox shows
 ticket provenance, a dispatched task whose prompt quotes a local Markdown path,
 and a Pull Requests listing (the human's own PR, a requested review,
-colleagues' PRs and a draft MR).
+colleagues' PRs and a draft MR). It also writes synthetic Claude session logs
+so the Usage chart has data.
 The script cleans up its server and temporary data on exit. Do not dispatch tasks
 or connect the fixture to real services.
 
