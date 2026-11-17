@@ -12,6 +12,8 @@ test("screenshot fixture includes representative synthetic task settings", () =>
     assert.ok(tasks.some(t => t.model && t.reasoning));
     assert.ok(tasks.some(t => t.model === null && t.reasoning === null));
     assert.ok(tasks.every(t => t.repo_path.startsWith("/sample/")));
+    assert.equal(db.getEpic("sample-epic")?.favorite_name, "Careful review", "the Epic page shows a saved favorite");
+    assert.equal(db.getEpic("sample-epic")?.repo_path, "/sample/example-project", "the Epic page shows a saved working directory");
     assert.ok(tasks.some(t => t.jira_key && t.jira_url), "a Jira-imported task carries its ticket link");
     assert.ok(db.listItems({ status: "open" }).some(i => i.task_id === "sample-running"), "an open item from that task");
     assert.equal(db.listItems({ kind: "launch" }).length, 0, "a ready epic task waits on the Epic page, not in the inbox");

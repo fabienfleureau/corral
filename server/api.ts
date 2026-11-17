@@ -14,6 +14,7 @@ import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncEpic } from "./epic.ts";
+import { createEpicRequestTask, EpicRequestError, saveEpicRequestSettings, type EpicRequestSettings } from "./epic-request.ts";
 import { orchestrationPrompt } from "./epic-orchestration.ts";
 import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "./epic-graph.ts";
 import { applyAmendment, impactedTaskIds, proposeAmendments, rejectAmendment, reviseDesign } from "./epic-design.ts";
@@ -856,6 +857,60 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const detail = epicDetail(params.id);
     if (!detail) return json(res, 404, { error: "epic not found" });
     json(res, 200, detail);
+  });
+
+  const epicRequestSettings = (body: unknown): EpicRequestSettings => {
+    const b = (body ?? {}) as { favorite_name?: unknown; repo_path?: unknown };
+    if (b.favorite_name !== undefined && typeof b.favorite_name !== "string") throw new EpicRequestError("favorite_name must be a string");
+    if (b.repo_path !== undefined && typeof b.repo_path !== "string") throw new EpicRequestError("repo_path must be a string");
+    const out: EpicRequestSettings = {};
+    if (b.favorite_name !== undefined) out.favorite_name = b.favorite_name;
+    if (b.repo_path !== undefined) out.repo_path = b.repo_path;
+    return out;
+  };
+
+  const epicRequestFailure = (res: ServerResponse, err: unknown) =>
+    json(res, err instanceof EpicRequestError ? 400 : 500, { error: String(err instanceof Error ? err.message : err) });
+
+  // The selectors are saved as soon as they change, so the next request on
+  // this epic starts from the same favorite and folder.
+  on("PATCH", "/api/epics/:id", (_req, res, { params, body }) => {
+    const epic = state.db.getEpic(params.id);
+    if (!epic) return json(res, 404, { error: "epic not found" });
+    try {
+      const input = epicRequestSettings(body);
+      const available = (state.cfg.favorites ?? []).filter((f) =>
+        (f.context ?? "professional") === (state.db.listRepos().find((r) => r.path === (input.repo_path ?? epic.repo_path))?.context ?? "professional"));
+      const storedFavorite = available.some((f) => f.name === (input.favorite_name ?? epic.favorite_name))
+        ? input.favorite_name ?? epic.favorite_name ?? ""
+        : "";
+      saveEpicRequestSettings(state.db, epic, {
+        favorite_name: storedFavorite,
+        repo_path: input.repo_path ?? epic.repo_path ?? "",
+      }, state.cfg.favorites ?? []);
+      state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));
+      json(res, 200, epicDetail(epic.id));
+    } catch (err) { epicRequestFailure(res, err); }
+  });
+
+  // One free-form field on the Epic page: every kind of request becomes a
+  // tracked task, with the epic's saved dispatch choices. Nothing is launched.
+  on("POST", "/api/epics/:id/requests", (_req, res, { params, body }) => {
+    const epic = state.db.getEpic(params.id);
+    if (!epic) return json(res, 404, { error: "epic not found" });
+    const b = (body ?? {}) as { request?: unknown };
+    if (typeof b.request !== "string") return json(res, 400, { error: "request required" });
+    try {
+      const input = epicRequestSettings(body);
+      const task = createEpicRequestTask(state.db, epic, {
+        request: b.request,
+        favorite_name: input.favorite_name ?? epic.favorite_name ?? "",
+        repo_path: input.repo_path ?? epic.repo_path ?? "",
+      }, state.cfg.favorites ?? [], state.cfg.reviewers ?? []);
+      state.hub.broadcast("task.updated", task);
+      state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));
+      json(res, 200, task);
+    } catch (err) { epicRequestFailure(res, err); }
   });
 
   // A ready epic task starts only when the human clicks on the Epic page.

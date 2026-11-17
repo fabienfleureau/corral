@@ -46,7 +46,8 @@ export function seedScreenshotData(db: Db): void {
  *  previous plan created. */
 /** One epic: a merged task, a PR ready, a task ready to launch (stacked) and a blocked one. */
 export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
-  db.insertEpic({ id: "sample-epic", jira_key: "EX-100", title: "Widget sizes across the platform", description: "Design v1", error: null, synced_ms: now, created_ms: now - 86_400_000 });
+  db.insertEpic({ id: "sample-epic", jira_key: "EX-100", title: "Widget sizes across the platform", description: "Design v1", error: null,
+    favorite_name: "Careful review", repo_path: "/sample/example-project", synced_ms: now, created_ms: now - 86_400_000 });
   const rows: { key: string; title: string; status: Task["status"]; repo: string; branch?: string; pr?: string }[] = [
     { key: "EX-101", title: "Add a size field to the widget API", status: "done", repo: "/sample/example-project", branch: "feat/widget-size-api", pr: "https://gitlab.com/example/platform/-/merge_requests/31" },
     { key: "EX-102", title: "Store widget sizes", status: "dispatched", repo: "/sample/example-project", branch: "feat/widget-size-store", pr: "https://gitlab.com/example/platform/-/merge_requests/32" },

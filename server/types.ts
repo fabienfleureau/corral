@@ -54,6 +54,9 @@ export interface Epic {
   error: string | null;
   /** Hash of the design block as Corral last wrote it into the epic description. */
   design_block_hash?: string | null;
+  /** Favorite and working directory picked on the Epic page, reused on later requests. */
+  favorite_name?: string | null;
+  repo_path?: string | null;
   synced_ms: number;
   created_ms: number;
 }

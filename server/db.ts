@@ -226,6 +226,8 @@ export class Db {
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
     const epicCols = this.raw.prepare("PRAGMA table_info(epics)").all() as { name: string }[];
     if (!epicCols.some((c) => c.name === "design_block_hash")) this.raw.exec(`ALTER TABLE epics ADD COLUMN design_block_hash TEXT`);
+    if (!epicCols.some((c) => c.name === "favorite_name")) this.raw.exec(`ALTER TABLE epics ADD COLUMN favorite_name TEXT`);
+    if (!epicCols.some((c) => c.name === "repo_path")) this.raw.exec(`ALTER TABLE epics ADD COLUMN repo_path TEXT NOT NULL DEFAULT ''`);
     const repoCols = this.raw.prepare("PRAGMA table_info(repos)").all() as { name: string }[];
     if (!repoCols.some((c) => c.name === "context")) this.raw.exec(`ALTER TABLE repos ADD COLUMN context TEXT`);
     // Task history arrived after tasks did: give every pre-existing task the one
@@ -346,11 +348,11 @@ export class Db {
   // ---- epics ----
 
   insertEpic(e: Epic): void {
-    this.stmt(`INSERT INTO epics (id, jira_key, title, description, error, synced_ms, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(e.id, e.jira_key, e.title, e.description, e.error, e.synced_ms, e.created_ms);
+    this.stmt(`INSERT INTO epics (id, jira_key, title, description, error, favorite_name, repo_path, synced_ms, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(e.id, e.jira_key, e.title, e.description, e.error, e.favorite_name ?? null, e.repo_path ?? "", e.synced_ms, e.created_ms);
   }
 
-  updateEpic(id: string, patch: Partial<Pick<Epic, "title" | "description" | "error" | "synced_ms" | "design_block_hash">>): void {
+  updateEpic(id: string, patch: Partial<Pick<Epic, "title" | "description" | "error" | "synced_ms" | "design_block_hash" | "favorite_name" | "repo_path">>): void {
     const keys = Object.keys(patch) as (keyof typeof patch)[];
     if (keys.length === 0) return;
     this.stmt(`UPDATE epics SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...keys.map((k) => patch[k] as never), id);
