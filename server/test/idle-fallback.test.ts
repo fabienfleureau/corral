@@ -63,6 +63,19 @@ function setup(outcome: WorkerRunOutcome | null, task: Partial<Task> = {}, lastS
 
 const said: WorkerRunOutcome = { kind: "message", text: "Committed locally, but the push was refused." };
 
+test("a completion report resolves an earlier stopped-run question", async () => {
+  const { db, status, capture } = setup(said);
+  try {
+    await status("idle");
+    const fallback = db.openQuestionItemForTerminal("s1");
+    assert.ok(fallback);
+    const report = await capture.createStructuredQuestion({ kind: "done", taskId: "task-1", title: "PR ready", body: "Finished." });
+    assert.equal(report.kind, "pr");
+    assert.equal(db.getItem(fallback.id)?.status, "resolved");
+    assert.equal(db.getTask("task-1")?.status, "done");
+  } finally { db.close(); }
+});
+
 test("a run that ends in a plain message without a report opens an inbox question", async () => {
   const { db, status } = setup(said);
   try {
