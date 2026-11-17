@@ -341,6 +341,8 @@ export class CaptureEngine {
           : opts.body.trim();
         // A merged PR already archived the task: keep it archived.
         this.db.updateTask(task.id, task.status === "archived" ? { handoff } : { status: "done", handoff });
+        const pending = address && address === task.terminal_address ? this.db.openQuestionItemForTerminal(address) : null;
+        if (pending?.task_id === task.id) this.resolveOpenQuestion(address!, "auto");
         logTaskEvent(this.db, task.id, "session", `Agent reported done: ${oneLine(opts.title, 100)}`, {
           report: opts.kind ?? "done",
           item_kind: itemKind,
