@@ -1,5 +1,4 @@
 import { Db } from "../server/db.ts";
-import { syncEpicLaunch } from "../server/epic-graph.ts";
 import type { Favorite } from "../server/favorites.ts";
 import { prItemBody, type PrInfo } from "../server/pr.ts";
 import type { Pull } from "../server/pulls.ts";
@@ -81,7 +80,6 @@ export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
   };
   db.insertItem(amendmentItem);
   db.insertAmendment({ id: "sample-amendment", epic_id: "sample-epic", task_id: "sample-epic-EX-104", design_version: 2, body: amendmentItem.body, status: "proposed", item_id: amendmentItem.id, created_ms: now });
-  syncEpicLaunch(db, { broadcast: () => undefined });
 }
 
 export function seedMultiRepo(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {

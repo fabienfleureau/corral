@@ -14,7 +14,7 @@ import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncEpic } from "./epic.ts";
-import { epicSummary, epicViews, syncEpicLaunch } from "./epic-graph.ts";
+import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "./epic-graph.ts";
 import { applyAmendment, impactedTaskIds, proposeAmendments, rejectAmendment, reviseDesign } from "./epic-design.ts";
 import { BlockConflict } from "./jira-blocks.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
@@ -571,7 +571,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         jira: state.jira ?? null,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
-      if (task.epic_id) syncEpicLaunch(state.db, state.hub);
+      if (task.epic_id) archiveEpicLaunchItems(state.db, state.hub);
       json(res, 200, result);
     } catch (err) {
       json(res, 500, { error: String(err) });
@@ -857,12 +857,39 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, detail);
   });
 
+  // A ready epic task starts only when the human clicks on the Epic page.
+  // Readiness is rechecked here: a stale page must not launch a blocked task.
+  on("POST", "/api/epics/:id/tasks/:taskId/launch", async (_req, res, { params }) => {
+    const epic = state.db.getEpic(params.id);
+    if (!epic) return json(res, 404, { error: "epic not found" });
+    if (epic.error) return json(res, 409, { error: epic.error });
+    const view = epicViews(
+      state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), state.db.listItems(),
+    ).find((v) => v.task.id === params.taskId);
+    if (!view) return json(res, 404, { error: "task not in epic" });
+    if (view.state !== "ready") return json(res, 409, { error: `task is ${view.state}, only ready tasks can be launched` });
+    const task = view.task;
+    if (!task.target) return json(res, 400, { error: "task has no harness — set one on the task before launching" });
+    if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — set one on the task before launching" });
+    stackEpicTaskOnPrerequisite(state.db, state.hub, view);
+    try {
+      const result = await dispatchTask(
+        state.db, state.cfg, state.backend, state.db.getTask(task.id)!, task.target, { jira: state.jira ?? null },
+      );
+      archiveEpicLaunchItems(state.db, state.hub);
+      state.hub.broadcast("task.updated", state.db.getTask(task.id));
+      json(res, 200, result);
+    } catch (err) {
+      json(res, 500, { error: String(err) });
+    }
+  });
+
   // Import by epic key, or resync when it is already known: the same call.
   const runEpicSync = async (res: ServerResponse, key: string) => {
     if (!state.jira?.configured) return json(res, 400, { error: "Jira is not configured" });
     try {
       const result = await syncEpic(state.db, state.jira, key);
-      syncEpicLaunch(state.db, state.hub);
+      archiveEpicLaunchItems(state.db, state.hub);
       state.hub.broadcast("epic.updated", result.epic);
       json(res, 200, { ...result, ...epicDetail(result.epic.id) });
     } catch (err) {
