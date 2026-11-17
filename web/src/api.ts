@@ -144,6 +144,19 @@ function query(params: Record<string, string | undefined>): string {
   return qs ? `?${qs}` : "";
 }
 
+// An old server answers the epic routes with valid JSON in an older shape
+// (`{epic, tasks, links}` or rows with `task_count`). The typed client trusts
+// it, then the page crashes on `detail.views.map` and React renders nothing.
+function staleEpicResponse(method: string, path: string): ApiError {
+  return new ApiError(200, `${method} ${path} returned an old epic response. The Corral server is older than this page — restart it and reload.`);
+}
+
+function checkEpicDetail<T>(value: T, method: string, path: string): T {
+  const d = value as EpicDetail | null;
+  if (!d || !Array.isArray(d.views) || !d.summary || typeof d.summary.total !== "number") throw staleEpicResponse(method, path);
+  return value;
+}
+
 export type DispatchResult = {
   address: string;
   worktreePath: string;
@@ -204,11 +217,16 @@ export const api = {
     post<Item>(`/api/items/${id}/snooze`, { until_ms: untilMs }),
 
   // ---- epics ----
-  listEpics: (): Promise<(Epic & { summary: EpicSummary })[]> => get("/api/epics"),
-  getEpic: (id: string): Promise<EpicDetail> => get(`/api/epics/${id}`),
-  importEpic: (key: string): Promise<EpicDetail> => post("/api/epics", { key }),
-  syncEpic: (id: string): Promise<EpicDetail> => post(`/api/epics/${id}/sync`),
-  reviseDesign: (id: string, input: { body: string; reason: string }): Promise<EpicDetail> => post(`/api/epics/${id}/design`, input),
+  listEpics: async (): Promise<(Epic & { summary: EpicSummary })[]> => {
+    const rows = await get<(Epic & { summary: EpicSummary })[]>("/api/epics");
+    if (!Array.isArray(rows) || rows.some((r) => !r?.summary || typeof r.summary.total !== "number")) throw staleEpicResponse("GET", "/api/epics");
+    return rows;
+  },
+  getEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await get(`/api/epics/${id}`), "GET", `/api/epics/${id}`),
+  importEpic: async (key: string): Promise<EpicDetail> => checkEpicDetail(await post("/api/epics", { key }), "POST", "/api/epics"),
+  syncEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await post(`/api/epics/${id}/sync`), "POST", `/api/epics/${id}/sync`),
+  reviseDesign: async (id: string, input: { body: string; reason: string }): Promise<EpicDetail> =>
+    checkEpicDetail(await post(`/api/epics/${id}/design`, input), "POST", `/api/epics/${id}/design`),
   applyAmendment: (itemId: string): Promise<Item> => post(`/api/items/${itemId}/amendment/apply`),
   rejectAmendment: (itemId: string): Promise<Item> => post(`/api/items/${itemId}/amendment/reject`),
 

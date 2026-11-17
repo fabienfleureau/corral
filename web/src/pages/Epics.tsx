@@ -28,6 +28,7 @@ const STATE_BADGE: Record<EpicTaskState, string> = {
 };
 
 export function summaryText(s: EpicSummary): string {
+  if (!s || typeof s.total !== "number") return "";
   const parts = [`${s.merged}/${s.total} merged`, `${s.testable} testable`];
   if (s.ready) parts.push(`${s.ready} ready to launch`);
   if (s.blocked) parts.push(`${s.blocked} blocked`);
@@ -85,7 +86,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
         <button className="btn btn-primary" type="submit" disabled={busy || !key.trim()}>{busy ? <Spinner /> : null}Import</button>
       </form>
       {error ? <p className="inline-error" role="alert">{error}</p> : null}
-      {epics.length === 0 && !error ? <p className="muted">No epic yet. Import one by its Jira key.</p> : null}
+      {epics.length === 0 && detail === null && !error && !busy ? <p className="muted">No epic yet. Import one by its Jira key.</p> : null}
       <ul className="epics-list">
         {epics.map((e) => (
           <li key={e.id}>
@@ -97,6 +98,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
       </ul>
       {detail ? (
         <article aria-label={`Epic ${detail.epic.jira_key}`}>
+          {detail.error ? <p className="inline-error" role="alert">{detail.error}. Restart the Corral server, then reload.</p> : null}
           <div className="epic-head">
             <h2>{detail.epic.jira_key} · {detail.epic.title}</h2>
             <button className="btn" type="button" disabled={busy} onClick={() => void run(() => api.syncEpic(detail.epic.id))}>Resync from Jira</button>
