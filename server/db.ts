@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
-import type { DailyActivity, Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
+import type { DailyActivity, Epic, EpicLink, Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
 import { logTaskChanges, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
@@ -99,6 +99,24 @@ CREATE TABLE IF NOT EXISTS task_events (
 );
 CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, ts);
 
+-- Epics: a Jira epic and its ordered tasks (see epic.ts). Jira owns the
+-- structure; links are "task_key is blocked by blocked_by_key".
+CREATE TABLE IF NOT EXISTS epics (
+  id TEXT PRIMARY KEY,
+  jira_key TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  error TEXT,
+  synced_ms INTEGER NOT NULL,
+  created_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS epic_links (
+  epic_id TEXT NOT NULL,
+  task_key TEXT NOT NULL,
+  blocked_by_key TEXT NOT NULL,
+  PRIMARY KEY (epic_id, task_key, blocked_by_key)
+);
+
 -- Files dropped on a task's prompt. The bytes wait here until dispatch hands
 -- them to the worker backend (see attachments.ts).
 CREATE TABLE IF NOT EXISTS task_attachments (
@@ -179,6 +197,8 @@ export class Db {
     if (!taskNames.has("review")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN review TEXT`);
     if (!taskNames.has("parent_task_id")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT`);
     if (!taskNames.has("spec")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN spec TEXT`);
+    if (!taskNames.has("epic_id")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN epic_id TEXT`);
+    if (!taskNames.has("epic_out")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN epic_out INTEGER NOT NULL DEFAULT 0`);
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
     const repoCols = this.raw.prepare("PRAGMA table_info(repos)").all() as { name: string }[];
     if (!repoCols.some((c) => c.name === "context")) this.raw.exec(`ALTER TABLE repos ADD COLUMN context TEXT`);
@@ -205,14 +225,14 @@ export class Db {
       .prepare(
         `INSERT INTO tasks (id, title, prompt, repo_path, target, target_state, base_branch, branch,
           worktree_path, assignee, jira_key, jira_url, jira_parent_key, jira_status, pr_url, pr_meta, handoff, status, terminal_address,
-          exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review, parent_task_id, spec)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review, parent_task_id, spec, epic_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         t.id, t.title, t.prompt, t.repo_path, t.target, t.target_state, t.base_branch, t.branch,
         t.worktree_path, t.assignee, t.jira_key, t.jira_url, t.jira_parent_key, t.jira_status ?? null, t.pr_url, t.pr_meta ?? null,
         t.handoff ?? null, t.status, t.terminal_address, t.exit_code, t.created_ms, t.updated_ms, t.model ?? null, t.reasoning ?? null, t.agent ?? null,
-        t.kind ?? "code", t.review ?? null, t.parent_task_id ?? null, t.spec ?? null,
+        t.kind ?? "code", t.review ?? null, t.parent_task_id ?? null, t.spec ?? null, t.epic_id ?? null,
       );
   }
 
@@ -295,6 +315,51 @@ export class Db {
       FROM task_events e JOIN tasks t ON t.id = e.task_id JOIN repos r ON r.path = t.repo_path
       WHERE COALESCE(r.context, 'professional') = 'professional' AND e.ts >= ? AND e.ts < ?
       ORDER BY e.ts, e.id`).all(start, end) as unknown as DailyActivity[];
+  }
+
+  // ---- epics ----
+
+  insertEpic(e: Epic): void {
+    this.stmt(`INSERT INTO epics (id, jira_key, title, description, error, synced_ms, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(e.id, e.jira_key, e.title, e.description, e.error, e.synced_ms, e.created_ms);
+  }
+
+  updateEpic(id: string, patch: Partial<Pick<Epic, "title" | "description" | "error" | "synced_ms">>): void {
+    const keys = Object.keys(patch) as (keyof typeof patch)[];
+    if (keys.length === 0) return;
+    this.stmt(`UPDATE epics SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...keys.map((k) => patch[k] as never), id);
+  }
+
+  getEpic(id: string): Epic | null {
+    return (this.stmt(`SELECT * FROM epics WHERE id = ?`).get(id) as unknown as Epic) ?? null;
+  }
+
+  getEpicByKey(key: string): Epic | null {
+    return (this.stmt(`SELECT * FROM epics WHERE jira_key = ?`).get(key) as unknown as Epic) ?? null;
+  }
+
+  listEpics(): Epic[] {
+    return this.stmt(`SELECT * FROM epics ORDER BY created_ms DESC`).all() as unknown as Epic[];
+  }
+
+  listEpicTasks(epicId: string): Task[] {
+    return this.stmt(`SELECT * FROM tasks WHERE epic_id = ? ORDER BY jira_key, created_ms`).all(epicId) as unknown as Task[];
+  }
+
+  listEpicLinks(epicId: string): EpicLink[] {
+    return this.stmt(`SELECT * FROM epic_links WHERE epic_id = ? ORDER BY task_key, blocked_by_key`).all(epicId) as unknown as EpicLink[];
+  }
+
+  replaceEpicLinks(epicId: string, links: { task_key: string; blocked_by_key: string }[]): void {
+    this.raw.exec("BEGIN");
+    try {
+      this.stmt(`DELETE FROM epic_links WHERE epic_id = ?`).run(epicId);
+      for (const l of links) this.stmt(`INSERT OR IGNORE INTO epic_links (epic_id, task_key, blocked_by_key) VALUES (?, ?, ?)`).run(epicId, l.task_key, l.blocked_by_key);
+      this.raw.exec("COMMIT");
+    } catch (err) {
+      this.raw.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   // ---- task history ----

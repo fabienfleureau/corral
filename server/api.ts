@@ -13,6 +13,7 @@ import type { Db } from "./db.ts";
 import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.ts";
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
+import { syncEpic } from "./epic.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
 import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
@@ -822,6 +823,47 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       console.error("corral: jira search failed:", String(err));
       json(res, 502, { error: String(err) });
     }
+  });
+
+  // ---- epics ----
+  const epicDetail = (id: string) => {
+    const epic = state.db.getEpic(id);
+    return epic ? { epic, tasks: state.db.listEpicTasks(id), links: state.db.listEpicLinks(id) } : null;
+  };
+
+  on("GET", "/api/epics", (_req, res) => {
+    json(res, 200, state.db.listEpics().map((epic) => ({ ...epic, task_count: state.db.listEpicTasks(epic.id).length })));
+  });
+
+  on("GET", "/api/epics/:id", (_req, res, { params }) => {
+    const detail = epicDetail(params.id);
+    if (!detail) return json(res, 404, { error: "epic not found" });
+    json(res, 200, detail);
+  });
+
+  // Import by epic key, or resync when it is already known: the same call.
+  const runEpicSync = async (res: ServerResponse, key: string) => {
+    if (!state.jira?.configured) return json(res, 400, { error: "Jira is not configured" });
+    try {
+      const result = await syncEpic(state.db, state.jira, key);
+      state.hub.broadcast("epic.updated", result.epic);
+      json(res, 200, { ...result, ...epicDetail(result.epic.id) });
+    } catch (err) {
+      console.error("corral: epic sync failed:", String(err));
+      json(res, 502, { error: String(err) });
+    }
+  };
+
+  on("POST", "/api/epics", async (_req, res, { body }) => {
+    const key = String((body as { key?: unknown } | null)?.key ?? "").trim().toUpperCase();
+    if (!/^[A-Z0-9]+-\d+$/.test(key)) return json(res, 400, { error: "key must be a Jira issue key, e.g. OPS-12" });
+    await runEpicSync(res, key);
+  });
+
+  on("POST", "/api/epics/:id/sync", async (_req, res, { params }) => {
+    const epic = state.db.getEpic(params.id);
+    if (!epic) return json(res, 404, { error: "epic not found" });
+    await runEpicSync(res, epic.jira_key);
   });
 
   on("POST", "/api/jira/import", async (req, res, { body }) => {

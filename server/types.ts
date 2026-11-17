@@ -44,6 +44,25 @@ export interface TaskAttachment {
   created_ms: number;
 }
 
+/** A Jira epic mirrored in Corral. `description` is the epic's text (design v1). */
+export interface Epic {
+  id: string;
+  jira_key: string;
+  title: string;
+  description: string;
+  /** Set when the last sync found a problem (a dependency cycle); null when fine. */
+  error: string | null;
+  synced_ms: number;
+  created_ms: number;
+}
+
+/** "task_key is blocked by blocked_by_key", both Jira keys of the same epic. */
+export interface EpicLink {
+  epic_id: string;
+  task_key: string;
+  blocked_by_key: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -77,6 +96,10 @@ export interface Task {
   parent_task_id?: string | null;
   /** Spec tasks only: JSON {@link TaskSpec}. */
   spec?: string | null;
+  /** The Epic this task belongs to (its ticket is a child of the epic in Jira). */
+  epic_id?: string | null;
+  /** 1 once the ticket left the epic in Jira: kept, but no longer in its graph. */
+  epic_out?: number;
   status: TaskStatus;
   terminal_address: string | null;
   exit_code: number | null;
