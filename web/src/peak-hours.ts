@@ -1,6 +1,6 @@
 // Peak-hour pricing: OpenCode bills DeepSeek models at twice the rate during
 // fixed UTC windows, Monday to Friday. Pure functions of a clock reading; the
-// UI passes `now` in so a favorite can turn red while the window is open.
+// UI passes `now` in so a peak tag appears while the window is open.
 
 /** Half-open UTC hour ranges [startHour, endHour) when the rate doubles. */
 export const PEAK_WINDOWS: readonly { startHour: number; endHour: number }[] = [

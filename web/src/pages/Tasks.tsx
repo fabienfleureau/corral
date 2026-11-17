@@ -632,7 +632,7 @@ export function ModelFactsLine({ report }: { report: ModelFactsReport }) {
     <div className="model-facts" title={report.title}>
       <span className="model-facts-label">Model facts</span>
       <span className={`model-facts-values${report.hasFacts ? "" : " muted"}`}>{report.summary}</span>
-      {report.peak ? <span className="badge badge-urgent" title={`Peak hours: the rate is doubled until ${report.peak.until}`}>2× peak until {report.peak.until}</span> : null}
+      {report.peak ? <span className="badge badge-peak" title={`Peak hours: the rate is doubled until ${report.peak.until}`}>2× peak until {report.peak.until}</span> : null}
       {report.retention ?
         <span className={`badge retention-${report.retention}`} title={`Data retention: ${retentionLabel(report.retention)}`}>retention {retentionLabel(report.retention)}</span> : null}
       {report.warnings.map((warning) => (
@@ -648,14 +648,14 @@ function FavoriteChip({ favorite, disabled, report, onPick }: { favorite: Favori
   return (
     <button
       type="button"
-      className={`chip chip-favorite${report.peak ? " chip-peak" : ""}`}
+      className="chip chip-favorite"
       disabled={disabled}
       title={disabled ? `Harness unavailable\n${report.title}` : report.title}
       onClick={onPick}
     >
       <span className="chip-name">{favorite.name}</span>
       <span className="chip-facts">{report.summary}</span>
-      {report.peak ? <span className="badge badge-urgent" title={`Peak hours: the rate is doubled until ${report.peak.until}`}>2× peak</span> : null}
+      {report.peak ? <span className="badge badge-peak" title={`Peak hours: the rate is doubled until ${report.peak.until}`}>2× peak</span> : null}
       {report.retention ? <span className={`badge retention-${report.retention}`} title={`Data retention: ${retentionLabel(report.retention)}`}>{retentionLabel(report.retention)}</span> : null}
       {report.warnings.map((warning) => (
         <span key={warning.key} className="badge badge-warn" title={warning.message}>⚠ {warning.label}</span>

@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /** One favorite per context, plus more professional ones, to show the task form filter
- *  and (the OpenCode DeepSeek one) the peak-hours highlight. */
+ *  and (the OpenCode DeepSeek one) the peak-hours tag. */
 export const screenshotFavorites: Favorite[] = [
   { name: "Careful review", harness: "claude", agent: "", model: "opus", reasoning: "high", context: "professional", review: "cubic" },
   { name: "Quick fix", harness: "codex", agent: "", model: "gpt-6.1-sol", reasoning: "low", context: "professional", review: "" },
