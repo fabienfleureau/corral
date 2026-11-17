@@ -225,6 +225,8 @@ export const api = {
   getEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await get(`/api/epics/${id}`), "GET", `/api/epics/${id}`),
   importEpic: async (key: string): Promise<EpicDetail> => checkEpicDetail(await post("/api/epics", { key }), "POST", "/api/epics"),
   syncEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await post(`/api/epics/${id}/sync`), "POST", `/api/epics/${id}/sync`),
+  launchEpicTask: (epicId: string, taskId: string): Promise<DispatchResult> =>
+    post<DispatchResult>(`/api/epics/${epicId}/tasks/${taskId}/launch`),
   reviseDesign: async (id: string, input: { body: string; reason: string }): Promise<EpicDetail> =>
     checkEpicDetail(await post(`/api/epics/${id}/design`, input), "POST", `/api/epics/${id}/design`),
   applyAmendment: (itemId: string): Promise<Item> => post(`/api/items/${itemId}/amendment/apply`),

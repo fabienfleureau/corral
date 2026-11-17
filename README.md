@@ -59,8 +59,9 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   ticket becomes a task, Jira "blocks / is blocked by" links become dependencies, and a
   `Repo:` line in the ticket picks the repo. The page shows what is blocked, ready to
   launch, running, PR-ready or merged, and a summary such as "3/7 merged · 2 testable".
-  A task whose prerequisites are ready lands in the inbox as **Ready to launch** (never
-  dispatched on its own); in the same repo it stacks on its prerequisite's branch.
+  A task whose prerequisites are ready waits on the Epics page: nothing is added to the
+  inbox and nothing runs until you click **Launch** there. In the same repo it stacks on
+  its prerequisite's branch only when launched. Decision: [ADR 0002](docs/adr/0002-epic-tasks-start-from-epic-page.md).
   A ticket's `Préconditions` are checked by the agent before it starts. The epic's
   **design** is versioned: publishing a revision writes the current version into the
   Jira epic, marks started tasks **impacted**, and an assistant proposes an

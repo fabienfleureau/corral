@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import type { Epic, EpicDetail, EpicSummary, EpicTaskState, Repo } from "../types";
+import type { Epic, EpicDetail, EpicSummary, EpicTaskState, Repo, Task } from "../types";
 import { Spinner } from "../ui";
 import { errText } from "../util";
 
@@ -42,6 +42,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [repos, setRepos] = useState<Repo[]>([]);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
+  const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +79,17 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     }
   }, [refresh]);
 
+  // Launching is explicit: a task whose blockers cleared stays on this page
+  // until the human starts it. Without a harness or repo, send them to its form.
+  const launch = (task: Task, epicId: string) => {
+    if (!task.target || !task.repo_path) {
+      window.location.hash = `/tasks?task=${encodeURIComponent(task.id)}`;
+      return;
+    }
+    setLaunchingId(task.id);
+    void run(async () => { await api.launchEpicTask(epicId, task.id); }).finally(() => setLaunchingId(null));
+  };
+
   return (
     <section>
       <h1>Epics</h1>
@@ -106,6 +118,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
           <label className="epic-summary" htmlFor="epic-progress">{summaryText(detail.summary)}</label>
           <progress id="epic-progress" className="epic-progress" value={detail.summary.merged} max={Math.max(detail.summary.total, 1)} />
           {detail.epic.error ? <p className="inline-error" role="alert">{detail.epic.error}. Nothing in the cycle can be launched.</p> : null}
+          <p className="muted">Ready tasks wait here until you launch them. Nothing is added to the inbox on its own.</p>
           <ol className="epic-tasks">
             {detail.views.map((v) => (
               <li key={v.task.id} className="epic-task" data-state={v.state}>
@@ -114,6 +127,19 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
                   <span className={STATE_BADGE[v.state]}>{STATE_LABEL[v.state]}</span>
                   {v.testable ? <span className="badge badge-ready">testable</span> : null}
                   {v.impacted ? <span className="badge badge-wait" title="Started on an older design and not merged yet">impacted by design change</span> : null}
+                  {v.state === "ready" && !detail.epic.error ? (
+                    <button
+                      className="btn btn-primary"
+                      type="button"
+                      aria-label={`Launch ${v.task.jira_key ?? v.task.title}`}
+                      title={v.task.target && v.task.repo_path ? "Start the agent on this task" : "Pick a harness and a repository on the task first"}
+                      disabled={busy || launchingId !== null}
+                      onClick={() => launch(v.task, detail.epic.id)}
+                    >
+                      {launchingId === v.task.id ? <Spinner /> : null}
+                      {v.task.target && v.task.repo_path ? "Launch" : "Configure"}
+                    </button>
+                  ) : null}
                   <select
                     aria-label={`Repository of ${v.task.jira_key ?? v.task.title}`}
                     value={v.task.repo_path}

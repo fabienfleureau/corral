@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "../db.ts";
-import { epicSummary, epicViews, syncEpicLaunch } from "../epic-graph.ts";
+import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "../epic-graph.ts";
 import type { EpicLink, Item, Task } from "../types.ts";
 
 const task = (key: string, over: Partial<Task> = {}): Task => ({
@@ -67,7 +67,7 @@ test("a dependency cycle does not hang ordering", () => {
   assert.equal(views.length, 2);
 });
 
-test("launch items: one per ready task, archived once started, base branch stacked", () => {
+test("no launch items are created; stale ones archive and stacking waits for the click", () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-epic-g-"));
   const db = new Db(join(dir, "t.db"));
   const hub = { broadcast: () => undefined };
@@ -76,18 +76,24 @@ test("launch items: one per ready task, archived once started, base branch stack
     db.insertTask(task("A-1", { status: "dispatched", branch: "feat/a1", pr_url: "u", terminal_address: "s" }));
     db.insertTask(task("A-2"));
     db.replaceEpicLinks("e", [{ task_key: "A-2", blocked_by_key: "A-1" }]);
-    syncEpicLaunch(db, hub);
-    assert.equal(db.listItems({ kind: "launch" }).length, 0, "blocked: nothing to launch");
+    archiveEpicLaunchItems(db, hub);
+    assert.equal(db.listItems({ kind: "launch" }).length, 0);
     db.insertItem(pr("A-1", { ready: 1 }));
-    syncEpicLaunch(db, hub);
-    syncEpicLaunch(db, hub);
-    const items = db.listItems({ kind: "launch" });
-    assert.equal(items.length, 1, "deduplicated on refresh");
-    assert.equal(items[0].task_id, "A-2");
+    archiveEpicLaunchItems(db, hub);
+    archiveEpicLaunchItems(db, hub);
+    assert.equal(db.listItems({ kind: "launch" }).length, 0, "ready creates no item");
+    assert.equal(db.getTask("A-2")!.base_branch, null, "ready does not edit the task");
+    // A launch item saved by an older Corral stays until the click starts the task.
+    const legacy = pr("A-2", { id: "old-launch", kind: "launch", title: "Ready to launch: A-2 t" });
+    db.insertItem(legacy);
+    archiveEpicLaunchItems(db, hub);
+    assert.equal(db.getItem(legacy.id)!.status, "open");
+    const view = epicViews(db.listEpicTasks("e"), db.listEpicLinks("e"), db.listItems()).find((v) => v.task.id === "A-2")!;
+    stackEpicTaskOnPrerequisite(db, hub, view);
     assert.equal(db.getTask("A-2")!.base_branch, "feat/a1");
     db.updateTask("A-2", { status: "dispatched", terminal_address: "s2" });
-    syncEpicLaunch(db, hub);
-    assert.equal(db.listItems({ kind: "launch" })[0].status, "archived");
+    archiveEpicLaunchItems(db, hub);
+    assert.equal(db.getItem(legacy.id)!.status, "archived");
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

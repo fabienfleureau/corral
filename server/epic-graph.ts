@@ -1,8 +1,7 @@
 // What an Epic looks like right now: the state of each task, what blocks it,
-// and which tasks are ready to launch. Pure over rows, so it is easy to test;
-// `syncEpicLaunch` turns "ready" into inbox items and the stacked-branch base.
+// and which tasks can be launched. Pure over rows, so it is easy to test;
+// starting a task is an explicit action on the Epic page, never a sync side effect.
 
-import { randomUUID } from "node:crypto";
 import type { Hub } from "./capture.ts";
 import type { Db } from "./db.ts";
 import { isJiraDone } from "./epic.ts";
@@ -114,44 +113,36 @@ export function epicSummary(views: EpicTaskView[]): EpicSummary {
 }
 
 /**
- * Keep one open "ready to launch" inbox item per ready task, and archive it
- * once the task has started or is blocked again. Also sets the stacked base
- * branch of an unstarted task. Never dispatches anything.
+ * Older Corral versions created an open "Ready to launch" inbox item per
+ * ready task. Syncs no longer create those items: starting an epic task is an
+ * explicit action on the Epic page. Archive leftovers once their task is no
+ * longer ready, so the inbox never offers to launch something stale.
  */
-export function syncEpicLaunch(db: Db, hub: Hub): void {
+export function archiveEpicLaunchItems(db: Db, hub: Hub): void {
   const items = db.listItems();
   for (const epic of db.listEpics()) {
     const views = epicViews(db.listEpicTasks(epic.id), db.listEpicLinks(epic.id), items);
     for (const v of views) {
       const existing = items.find((i) => i.kind === "launch" && i.task_id === v.task.id && i.status === "open");
-      if (v.state === "ready") {
-        const t = db.getTask(v.task.id)!;
-        const blockerBranches = new Set(v.blockers.map((b) => (b.task_id ? db.getTask(b.task_id)?.branch : null)).filter(Boolean));
-        if (t.base_branch !== v.stack_on && (t.base_branch === null || blockerBranches.has(t.base_branch))) {
-          db.updateTask(t.id, { base_branch: v.stack_on }, false);
-          hub.broadcast("task.updated", db.getTask(t.id));
-        }
-        if (existing) continue;
-        const body = [
-          `Every prerequisite of **${v.task.title}** is ready (PR green and ready, or merged).`,
-          v.blockers.length ? `\nPrerequisites: ${v.blockers.map((b) => b.key).join(", ")}` : "",
-          v.stack_on ? `\nStacked on branch \`${v.stack_on}\`.` : "",
-          !v.task.repo_path ? "\nNo repository yet: pick one on the task before launching." : "",
-        ].join("");
-        const now = Date.now();
-        const item: Item = {
-          id: randomUUID(), kind: "launch", status: "open", title: `Ready to launch: ${v.task.title}`,
-          summary: `Epic ${epic.jira_key}`, body, context: "", options: null, ready: 1, handling: 0,
-          source_ref: null, task_id: v.task.id, structured: 1,
-          created_ms: now, updated_ms: now, resolved_ms: null, snooze_until_ms: null,
-        };
-        db.insertItem(item);
-        db.recordMetric("item.created", item.id, { kind: "launch", capture: "epic", task_id: v.task.id });
-        hub.broadcast("item.created", item);
-      } else if (existing) {
-        db.updateItem(existing.id, { status: "archived", resolved_ms: Date.now() });
-        hub.broadcast("item.updated", db.getItem(existing.id));
-      }
+      if (!existing || v.state === "ready") continue;
+      db.updateItem(existing.id, { status: "archived", resolved_ms: Date.now() });
+      hub.broadcast("item.updated", db.getItem(existing.id));
     }
   }
+}
+
+/**
+ * Stack a ready task on the branch of its only unmerged same-repo prerequisite.
+ * Done at launch, not during sync: merely becoming ready must not edit a task.
+ */
+export function stackEpicTaskOnPrerequisite(db: Db, hub: Hub, view: EpicTaskView): void {
+  if (!view.stack_on) return;
+  const task = db.getTask(view.task.id);
+  if (!task || task.base_branch === view.stack_on) return;
+  const blockerBranches = new Set(
+    view.blockers.map((b) => (b.task_id ? db.getTask(b.task_id)?.branch : null)).filter(Boolean),
+  );
+  if (task.base_branch !== null && !blockerBranches.has(task.base_branch)) return;
+  db.updateTask(task.id, { base_branch: view.stack_on }, false);
+  hub.broadcast("task.updated", db.getTask(task.id));
 }

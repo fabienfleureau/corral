@@ -12,7 +12,7 @@ _Avoid_: contract (the contract is one part of a design).
 One unit of work inside an Epic, mapped to a Jira ticket and run against one repository.
 
 **Dependency**
-A "blocked by" relation between two tasks, taken from the Jira issue links. A task is unblocked when the prerequisite's PR is green and ready (or merged, or its ticket is Done in Jira).
+A "blocked by" relation between two tasks, taken from the Jira issue links. A task is unblocked when the prerequisite's PR is green and ready (or merged, or its ticket is Done in Jira). An unblocked task waits on the Epic page until a human launches it.
 
 **Precondition**
 A condition written in a ticket that is not a Jira link (for example "library X is built"). The agent checks it before starting; if unmet, the task waits for the human.
