@@ -92,9 +92,11 @@ export function DailyPage({ eventVersion }: { eventVersion: number }) {
         {summaryError ? <p className="inline-error" role="alert">{summaryError}</p> : null}
         {summaryDone ? <p className="inline-ok" role="status">Summary task started. <a href="#/inbox">Open inbox</a></p> : null}
         {error ? <p className="inline-error" role="alert">{error}</p> : null}
-        {loading ? <p>Loading activity…</p> : null}
+        {loading && events.length === 0 ? <p>Loading activity…</p> : null}
         {!loading && date && !error && groups.size === 0 ? <p className="muted">No professional task activity recorded for this day.</p> : null}
-        {!loading && [...groups.values()].map((items) => {
+        {/* Keep the last activity visible while refreshing: removing it collapses
+            the scroll container and sends the reader back to the top. */}
+        {[...groups.values()].map((items) => {
           const task = items[0];
           const title = task.title.trim() || task.prompt.trim().split("\n")[0].slice(0, 80) || "Untitled task";
           return <article className="daily-task" key={task.task_id}>
