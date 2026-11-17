@@ -14,6 +14,7 @@ import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.
 import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncEpic } from "./epic.ts";
+import { orchestrationPrompt } from "./epic-orchestration.ts";
 import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "./epic-graph.ts";
 import { applyAmendment, impactedTaskIds, proposeAmendments, rejectAmendment, reviseDesign } from "./epic-design.ts";
 import { BlockConflict } from "./jira-blocks.ts";
@@ -881,6 +882,20 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       json(res, 200, result);
     } catch (err) {
       json(res, 500, { error: String(err) });
+    }
+  });
+
+  on("POST", "/api/epics/:id/orchestrate", async (_req, res, { params, body }) => {
+    const detail = epicDetail(params.id);
+    if (!detail) return json(res, 404, { error: "epic not found" });
+    const request = (body as { request?: unknown } | null)?.request;
+    if (typeof request !== "string" || !request.trim() || request.length > 8000) return json(res, 400, { error: "request must be between 1 and 8000 characters" });
+    const tasks = detail.views.map((v) => ({ key: v.task.jira_key ?? v.task.id, title: v.task.title, description: v.task.prompt, repo: v.task.repo_path, state: v.state, blockers: v.blockers.filter((b) => !b.satisfied).map((b) => b.key) }));
+    try {
+      const proposal = await llmComplete(state.cfg, orchestrationPrompt(DATA_NOT_INSTRUCTIONS, request.trim(), detail.epic, detail.design?.body ?? detail.epic.description, tasks), 180_000);
+      json(res, 200, { proposal });
+    } catch (err) {
+      json(res, 502, { error: `Assistant failed: ${String(err)}` });
     }
   });
 
