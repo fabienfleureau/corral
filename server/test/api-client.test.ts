@@ -19,6 +19,8 @@ type ApiModule = {
     listEpics: () => Promise<unknown>;
     getEpic: (id: string) => Promise<unknown>;
     importEpic: (key: string) => Promise<unknown>;
+    orchestrateEpic: (id: string, request: string) => Promise<unknown>;
+    createEpicRequest: (id: string, input: unknown) => Promise<unknown>;
   };
   ApiError: new (status: number, message: string) => Error & { status: number };
 };
@@ -113,4 +115,26 @@ test("a current epic detail still parses", async () => {
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+// The Epic form has two actions with different side effects. Both use the same
+// text field, but they must call different routes.
+test("planning and task creation hit different epic routes", async () => {
+  const calls: { url: string; method: string; body: string }[] = [];
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    calls.push({ url, method: init.method ?? "GET", body: String(init.body) });
+    return new Response(JSON.stringify({ proposal: "plan" }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    await api.orchestrateEpic("e-1", "review the design");
+    await api.createEpicRequest("e-1", { request: "review the design", favorite_name: "", repo_path: "" });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(calls.map((c) => [c.method, c.url]), [
+    ["POST", "/api/epics/e-1/orchestrate"],
+    ["POST", "/api/epics/e-1/requests"],
+  ]);
+  assert.match(calls[0].body, /review the design/);
+  assert.match(calls[1].body, /favorite_name/);
 });

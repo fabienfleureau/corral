@@ -2502,7 +2502,10 @@ select:focus {
 .epic-request h3 { margin: 0; }
 .epic-request form { display: grid; gap: .5rem; max-inline-size: 48rem; }
 .epic-request textarea { font: inherit; }
-.epic-request button { justify-self: start; }
+.epic-request-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .epic-request-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; margin-block: .5rem; }
 .epic-request-created { margin-block: .5rem 0; }
 .epic-request-help { display: block; margin-top: .25rem; }
+.epic-proposal { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .75rem; }
+.epic-proposal h4 { margin: 0; }
+.epic-proposal p { white-space: pre-wrap; overflow-wrap: anywhere; }
