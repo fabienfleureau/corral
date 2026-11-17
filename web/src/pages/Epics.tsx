@@ -41,6 +41,8 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [repos, setRepos] = useState<Repo[]>([]);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -56,6 +58,10 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     api.getEpic(selectedId).then((d) => { if (!cancelled) setDetail(d); }).catch((e) => { if (!cancelled) setError(errText(e)); });
     return () => { cancelled = true; };
   }, [selectedId, eventVersion]);
+
+  // The editor starts from the current design and follows a new version.
+  const designVersion = detail?.design?.version ?? 0;
+  useEffect(() => { setDraft(detail?.design?.body ?? ""); setReason(""); }, [detail?.epic.id, designVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = useCallback(async (fn: () => Promise<EpicDetail | void>) => {
     setBusy(true);
@@ -105,6 +111,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
                   <span className="epic-task-title">{v.task.title}</span>
                   <span className={STATE_BADGE[v.state]}>{STATE_LABEL[v.state]}</span>
                   {v.testable ? <span className="badge badge-ready">testable</span> : null}
+                  {v.impacted ? <span className="badge badge-wait" title="Started on an older design and not merged yet">impacted by design change</span> : null}
                   <select
                     aria-label={`Repository of ${v.task.jira_key ?? v.task.title}`}
                     value={v.task.repo_path}
@@ -125,6 +132,18 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
               </li>
             ))}
           </ol>
+          <section aria-labelledby="epic-design-title" className="epic-design">
+            <h3 id="epic-design-title">Design v{detail.design?.version ?? 1}</h3>
+            {detail.amendments.length ? <p className="muted">{detail.amendments.length} amendment{detail.amendments.length > 1 ? "s" : ""} waiting in the inbox.</p> : null}
+            <form onSubmit={(e) => { e.preventDefault(); if (draft.trim()) void run(() => api.reviseDesign(detail.epic.id, { body: draft, reason })); }}>
+              <label htmlFor="epic-design-body">Edit, then publish a new version. Only the current version is written to the Jira epic.</label>
+              <textarea id="epic-design-body" rows={8} value={draft} onChange={(e) => setDraft(e.target.value)} />
+              <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why does the design change?" aria-label="Reason for the revision" />
+              <button className="btn btn-primary" type="submit" disabled={busy || !draft.trim() || draft.trim() === (detail.design?.body ?? "").trim()}>
+                {busy ? <Spinner /> : null}Publish revision
+              </button>
+            </form>
+          </section>
         </article>
       ) : null}
     </section>

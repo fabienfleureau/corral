@@ -363,7 +363,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             <div className="pane-note">{statusFilter === "open" ? "Nothing needs you." : "Nothing here."}</div>
           ) : (
             items.map((item) => {
-              const needsYou = item.status === "open" && (item.kind === "question" || item.kind === "plan" || item.kind === "launch");
+              const needsYou = item.status === "open" && (item.kind === "question" || item.kind === "plan" || item.kind === "launch" || item.kind === "amendment");
               const snoozed = item.snooze_until_ms !== null && item.snooze_until_ms > Date.now();
               const rowTask = item.task_id ? tasksById[item.task_id] : undefined;
               const rowPr = itemPrUrl(item.body, rowTask?.pr_url);
@@ -578,6 +578,16 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     {linkedTask.target && linkedTask.repo_path ? "Launch" : "Open task"}
                   </button>
                 ) : null}
+                {selected.kind === "amendment" && selected.status === "open" ? (
+                  <>
+                    <button className="btn btn-primary" disabled={actionBusy} title="Write this amendment into the Jira ticket and onto the task"
+                      onClick={() => void runAction(() => api.applyAmendment(selected.id))}>
+                      {actionBusy ? <Spinner /> : null}Apply to Jira
+                    </button>
+                    <button className="btn" disabled={actionBusy}
+                      onClick={() => void runAction(() => api.rejectAmendment(selected.id))}>Reject</button>
+                  </>
+                ) : null}
                 {selected.kind === "pr" && linkedTask?.branch ? <ForcePrRefresh task={linkedTask} onChecked={refresh} /> : null}
                 {linkedTask ? <RequestArtifact key={linkedTask.id} task={linkedTask} /> : null}
                 {linkedTask ? <TaskHistoryButton taskId={linkedTask.id} title={linkedTask.title || linkedTask.prompt.trim().split("\n")[0] || "Untitled task"} version={eventVersion} /> : null}
@@ -625,7 +635,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 </div>
               ) : null}
 
-              {selected.kind === "launch" ? null : <div className="reply-block">
+              {selected.kind === "launch" || selected.kind === "amendment" ? null : <div className="reply-block">
                 {replyQuestions(selected.elicitation).length > 0 ? <>
                   <QuestionReply key={selected.id + selected.elicitation}
                     questions={replyQuestions(selected.elicitation)} disabled={replyBusy || selected.status !== "open"}

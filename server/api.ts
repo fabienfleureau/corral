@@ -15,13 +15,15 @@ import type { CaptureEngine, Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncEpic } from "./epic.ts";
 import { epicSummary, epicViews, syncEpicLaunch } from "./epic-graph.ts";
+import { applyAmendment, impactedTaskIds, proposeAmendments, rejectAmendment, reviseDesign } from "./epic-design.ts";
+import { BlockConflict } from "./jira-blocks.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
 import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
 import { isInterval } from "./analysis-schedule.ts";
-import { dispatchTask } from "./dispatch.ts";
+import { DATA_NOT_INSTRUCTIONS, dispatchTask } from "./dispatch.ts";
 import { dailySummaryPrompt } from "./daily-summary.ts";
 import { checkAttachments, MAX_TASK_BODY_BYTES } from "./attachments.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
@@ -832,8 +834,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const epic = state.db.getEpic(id);
     if (!epic) return null;
     const tasks = state.db.listEpicTasks(id), links = state.db.listEpicLinks(id);
-    const views = epicViews(tasks, links, state.db.listItems());
-    return { epic, tasks, links, views, summary: epicSummary(views) };
+    const impacted = impactedTaskIds(state.db, id);
+    const views = epicViews(tasks, links, state.db.listItems()).map((v) => ({ ...v, impacted: impacted.has(v.task.id) }));
+    return {
+      epic, tasks, links, views, summary: epicSummary(views),
+      design: state.db.latestDesign(id), design_versions: state.db.listDesigns(id).length,
+      amendments: state.db.listAmendments(id, "proposed"),
+    };
   };
 
   on("GET", "/api/epics", (_req, res) => {
@@ -869,6 +876,56 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!/^[A-Z0-9]+-\d+$/.test(key)) return json(res, 400, { error: "key must be a Jira issue key, e.g. OPS-12" });
     await runEpicSync(res, key);
   });
+
+  // Publish a new design version. The human submitting it is the validation:
+  // the version goes into the epic's Jira description, then an assistant
+  // proposes amendments for the unstarted tasks (inbox items to apply or reject).
+  on("POST", "/api/epics/:id/design", async (_req, res, { body, params }) => {
+    const epic = state.db.getEpic(params.id);
+    if (!epic) return json(res, 404, { error: "epic not found" });
+    const b = body as { body?: unknown; reason?: unknown } | null;
+    const text = typeof b?.body === "string" ? b.body.trim() : "";
+    if (!text) return json(res, 400, { error: "body required" });
+    if (!state.jira?.configured) return json(res, 400, { error: "Jira is not configured" });
+    const reason = typeof b?.reason === "string" ? b.reason : "";
+    try {
+      const design = await reviseDesign(state.db, state.jira, epic, { body: text, reason });
+      void proposeAmendments(state.db, state.hub, epic, design.version, reason, DATA_NOT_INSTRUCTIONS, (prompt) => llmComplete(state.cfg, prompt, 180_000))
+        .catch((err) => console.error("corral: amendment proposals failed:", String(err)));
+      state.hub.broadcast("epic.updated", epic);
+      json(res, 200, epicDetail(epic.id));
+    } catch (err) {
+      if (err instanceof BlockConflict) return json(res, 409, { error: err.message, conflict: true });
+      console.error("corral: design revision failed:", String(err));
+      json(res, 502, { error: String(err) });
+    }
+  });
+
+  // The UI holds the inbox item, the API the amendment: both address the same one.
+  const amendmentOf = (id: string, byItem: boolean) => (byItem ? state.db.getAmendmentByItem(id) : state.db.getAmendment(id));
+  for (const [prefix, byItem] of [["/api/amendments/:id", false], ["/api/items/:id/amendment", true]] as const) {
+    on("POST", `${prefix}/apply`, async (_req, res, { params }) => {
+      const a = amendmentOf(params.id, byItem);
+      if (!a) return json(res, 404, { error: "amendment not found" });
+      if (a.status !== "proposed") return json(res, 409, { error: `amendment already ${a.status}` });
+      if (!state.jira?.configured) return json(res, 400, { error: "Jira is not configured" });
+      try {
+        await applyAmendment(state.db, state.hub, state.jira, a);
+        json(res, 200, byItem ? state.db.getItem(params.id) : state.db.getAmendment(a.id));
+      } catch (err) {
+        if (err instanceof BlockConflict) return json(res, 409, { error: err.message, conflict: true });
+        json(res, 502, { error: String(err) });
+      }
+    });
+
+    on("POST", `${prefix}/reject`, (_req, res, { params }) => {
+      const a = amendmentOf(params.id, byItem);
+      if (!a) return json(res, 404, { error: "amendment not found" });
+      if (a.status !== "proposed") return json(res, 409, { error: `amendment already ${a.status}` });
+      rejectAmendment(state.db, state.hub, a);
+      json(res, 200, byItem ? state.db.getItem(params.id) : state.db.getAmendment(a.id));
+    });
+  }
 
   on("POST", "/api/epics/:id/sync", async (_req, res, { params }) => {
     const epic = state.db.getEpic(params.id);

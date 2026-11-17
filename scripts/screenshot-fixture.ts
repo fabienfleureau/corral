@@ -70,6 +70,17 @@ export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
     options: null, ready, handling: 0, source_ref: null, task_id: `sample-epic-${key}`, structured: 1, created_ms: now, updated_ms: now, resolved_ms: null, snooze_until_ms: null,
   });
   db.insertItem(pr("EX-102", 1));
+  // The design changed after EX-102 started: it is impacted; EX-104 has a proposed amendment.
+  db.insertDesign({ epic_id: "sample-epic", version: 1, body: "Widgets get a `size` field (small, medium, large).", reason: "Imported from Jira", author: "jira", created_ms: now - 86_400_000 });
+  db.insertDesign({ epic_id: "sample-epic", version: 2, body: "Widgets get a numeric `size` in millimetres instead of named sizes.", reason: "Named sizes were too coarse", author: "human", created_ms: now - 3_600_000 });
+  db.updateTask("sample-epic-EX-102", { design_version: 1 }, false);
+  const amendmentItem: Item = {
+    id: "sample-epic-amendment", kind: "amendment", status: "open", title: "Amend EX-104 Document widget sizes", summary: "Epic EX-100, design v2",
+    body: "Document `size` as a number of millimetres, not small/medium/large. Update the examples and the API reference accordingly.", context: "", options: null, ready: 1, handling: 0,
+    source_ref: null, task_id: "sample-epic-EX-104", structured: 1, created_ms: now, updated_ms: now, resolved_ms: null, snooze_until_ms: null,
+  };
+  db.insertItem(amendmentItem);
+  db.insertAmendment({ id: "sample-amendment", epic_id: "sample-epic", task_id: "sample-epic-EX-104", design_version: 2, body: amendmentItem.body, status: "proposed", item_id: amendmentItem.id, created_ms: now });
   syncEpicLaunch(db, { broadcast: () => undefined });
 }
 

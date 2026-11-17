@@ -41,7 +41,7 @@ export type Task = {
 
 export type Item = {
   id: string;
-  kind: "question" | "pr" | "digest" | "plan" | "launch";
+  kind: "question" | "pr" | "digest" | "plan" | "launch" | "amendment";
   status: "open" | "resolved" | "archived";
   title: string;
   summary: string; // structured summary ("" until summarized)
@@ -303,6 +303,20 @@ export type EpicTaskView = {
   alert: string | null;
   testable: boolean;
   stack_on: string | null;
+  /** Started on an older design than the current one, and not merged. */
+  impacted?: boolean;
 };
 
-export type EpicDetail = { epic: Epic; tasks: Task[]; links: { task_key: string; blocked_by_key: string }[]; views: EpicTaskView[]; summary: EpicSummary };
+export type EpicDesign = { epic_id: string; version: number; body: string; reason: string; author: string; created_ms: number };
+
+export type EpicDetail = {
+  epic: Epic;
+  tasks: Task[];
+  links: { task_key: string; blocked_by_key: string }[];
+  views: EpicTaskView[];
+  summary: EpicSummary;
+  design: EpicDesign | null;
+  design_versions: number;
+  /** Proposed amendments waiting in the inbox. */
+  amendments: { id: string; task_id: string; design_version: number; body: string }[];
+};

@@ -15,6 +15,7 @@ import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 import { gitToplevel } from "./repos.ts";
 import { contractBlock, isDirectory } from "./multi-repo.ts";
+import { epicContext } from "./epic-design.ts";
 import { logTaskEvent, promptData } from "./task-events.ts";
 import type { WorkerBackend, WorkerSession } from "./worker.ts";
 import { taskLabel, type Task } from "./types.ts";
@@ -216,7 +217,7 @@ export async function dispatchTask(
   if (review) taskContext.push(`Review this PR/MR: ${task.pr_url}`);
   // A Jira-imported task's title and description are the ticket's own text:
   // frame the block as data before the conventions, which are Corral's rules.
-  const taskText = [task.jira_url || task.jira_key ? DATA_NOT_INSTRUCTIONS : "", taskContext.join("\n\n"), contractBlock(db, task), epicBlock(cfg, task)]
+  const taskText = [task.jira_url || task.jira_key ? DATA_NOT_INSTRUCTIONS : "", taskContext.join("\n\n"), contractBlock(db, task), epicContext(db, task), epicBlock(cfg, task)]
     .filter(Boolean)
     .join("\n\n");
 
@@ -284,6 +285,7 @@ export async function dispatchTask(
     worktree_path: useWorktree && session.cwd ? session.cwd : null,
     terminal_address: session.address,
     review: reviewCommand,
+    ...(task.epic_id ? { design_version: db.latestDesign(task.epic_id)?.version ?? 1 } : {}),
   });
   db.upsertTerminal({
     address: session.address,

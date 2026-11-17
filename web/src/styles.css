@@ -2472,3 +2472,6 @@ select:focus {
 .epic-task-title { flex: 1 1 14rem; font-weight: 600; }
 .epic-task-sub { color: var(--muted); font-size: .85rem; }
 .epic-task select { max-inline-size: 14rem; }
+.epic-design { margin-top: 1.5rem; }
+.epic-design form { display: grid; gap: .5rem; max-inline-size: 48rem; }
+.epic-design textarea { font: inherit; }
