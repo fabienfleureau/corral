@@ -77,8 +77,9 @@ administrator; a workflow file alone does not prevent merging.
 
 Explain the problem and resulting behavior, the decision/documentation impact,
 verified checks and gaps, risk, rollback, and manual acceptance steps. Use the
-[PR template](.github/pull_request_template.md). Mention overlapping open PRs.
-Keep the title and description current after each push.
+`pr-description` skill for the title and body format, including the ADR reference
+or no-ADR explanation within that format. Mention overlapping open PRs. Keep the
+title and description current after each push.
 
 For visible UI changes, use the isolated fixture and comparable before/after
 captures described in [AGENTS.md](AGENTS.md#repeatable-ui-screenshots). Inspect

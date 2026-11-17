@@ -24,6 +24,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup and review,
   views in the PR description. If screenshots cannot be captured or included,
   explain why.
 - Say explicitly if your PR overlaps another open PR.
+- Use the `pr-description` skill for PR titles and bodies. Keep its format;
+  do not introduce a repository PR template that overrides it.
 
 ## Dev loop
 

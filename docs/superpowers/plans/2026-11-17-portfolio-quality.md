@@ -51,13 +51,13 @@
 
 ### Task 3: Contribution workflow and delivery
 
-**Files:** `CONTRIBUTING.md`, `AGENTS.md`, `.github/pull_request_template.md`, `.github/workflows/ci.yml`.
+**Files:** `CONTRIBUTING.md`, `AGENTS.md`, `.github/workflows/ci.yml`.
 
 **Interfaces:** Consumes Task 1 documentation and Task 2 `npm run check:adr`.
 
 - [x] Align agent and contributor rules: an ADR reference or a specific no-ADR explanation is mandatory in review.
-- [x] Add a short PR template and read-only CI on PRs/main using Node 22 and official actions pinned to commits.
-- [x] Manually check that the template does not imply semantic ADR enforcement or branch protection.
+- [x] Keep PR descriptions in the existing `pr-description` skill format and add read-only CI on PRs/main using Node 22 and official actions pinned to commits.
+- [x] Manually check that the contribution rules do not imply semantic ADR enforcement or branch protection.
 - [x] Run `npm test`, both TypeScript checks, `npm run build`, `npm run check:adr`, and `git diff --check` (expected: all pass).
 - [x] Obtain a whole-branch independent review; fix material findings and rerun relevant checks.
 Delivery: commit logical changes, push `docs/portfolio-quality`, open a PR, verify its body, and send the Corral completion report with handoff. The completion report records the resulting PR URL.

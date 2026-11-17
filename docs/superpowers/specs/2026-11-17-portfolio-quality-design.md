@@ -49,9 +49,9 @@ choices below follow the repository's existing conventions.
 - `AGENTS.md`: point to canonical guides and enforce the same ADR policy for
   agents. Preserve product decisions, integration seams, screenshot procedure,
   and the human merge requirement. Remove the duplicated fixture sentence.
-- `.github/pull_request_template.md`: problem/result, validation, risk/rollback,
-  documentation impact, and a required ADR reference or a specific explanation
-  of why this change needs none. Keep the review checklist short.
+- PR descriptions use the existing `pr-description` skill format. Include an
+  ADR reference or a specific explanation of why this change needs none within
+  that format. Per the owner's review feedback, do not add a repository PR template.
 - `.github/workflows/ci.yml`: PR and main-branch checks with read-only repository
   permissions, Node 22, `npm ci`, tests, both TypeScript projects, build, and ADR
   validation. Use standard GitHub-hosted runners and no application credentials.
