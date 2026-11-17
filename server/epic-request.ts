@@ -24,9 +24,10 @@ export function resolveEpicRequestSettings(
 ): { favorite: Favorite | null; repoPath: string } {
   const favoriteName = typeof input.favorite_name === "string" ? input.favorite_name.trim() : "";
   const repoPath = typeof input.repo_path === "string" ? input.repo_path.trim() : "";
-  if (repoPath && !repos.some((r) => r.path === repoPath)) throw new EpicRequestError("unknown working directory");
+  // Any path is allowed, as on the task form. Registered repos are only used
+  // to pick the favorite context; an unregistered path uses professional.
   const repo = repos.find((r) => r.path === repoPath);
-  const context = repo ? repo.context ?? "professional" : null;
+  const context = repo?.context ?? "professional";
   const available = context ? favorites.filter((f) => (f.context ?? "professional") === context) : favorites;
   const favorite = favoriteName ? available.find((f) => f.name === favoriteName) ?? null : null;
   if (favoriteName && !favorite) throw new EpicRequestError("favorite is not configured for this working directory");

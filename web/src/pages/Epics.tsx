@@ -28,6 +28,9 @@ const STATE_BADGE: Record<EpicTaskState, string> = {
   blocked: "badge badge-wait",
 };
 
+// Read the board left to right: what is stuck first, what shipped last.
+const GROUP_ORDER: EpicTaskState[] = ["blocked", "ready", "running", "pr_open", "pr_ready", "merged", "out"];
+
 export function summaryText(s: EpicSummary): string {
   if (!s || typeof s.total !== "number") return "";
   const parts = [`${s.merged}/${s.total} merged`, `${s.testable} testable`];
@@ -88,12 +91,23 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     saveSettings(name, repoPath);
   };
 
+  // The folder is typed, not picked: save it when the field is left, not on
+  // every keystroke. A custom path uses the professional favorite context.
   const changeRepo = (path: string) => {
-    const allowed = favoritesFor(favorites, repoContext(repos, path));
+    const allowed = favoritesFor(favorites, repoContext(repos, path.trim()));
     const nextFavorite = favorite && allowed.some((f) => f.name === favorite) ? favorite : "";
     setRepoPath(path);
     setFavorite(nextFavorite);
-    saveSettings(nextFavorite, path);
+  };
+
+  const saveRepo = () => {
+    const path = repoPath.trim();
+    setRepoPath(path);
+    if (!detail || (path === (detail.epic.repo_path ?? "") && favorite === (detail.epic.favorite_name ?? ""))) return;
+    setCreatedTask(null);
+    void api.patchEpicSettings(detail.epic.id, { favorite_name: favorite, repo_path: path })
+      .then((d) => { setDetail(d); refresh(); })
+      .catch((e) => setError(errText(e)));
   };
 
   const run = useCallback(async (fn: () => Promise<EpicDetail | void>) => {
@@ -157,28 +171,44 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
               e.preventDefault();
               const text = request.trim();
               if (!text) return;
+              const path = repoPath.trim();
+              const allowed = favoritesFor(favorites, repoContext(repos, path));
+              const chosenFavorite = favorite && allowed.some((f) => f.name === favorite) ? favorite : "";
               void run(async () => {
-                const task = await api.createEpicRequest(detail.epic.id, { request: text, favorite_name: favorite, repo_path: repoPath });
+                const task = await api.createEpicRequest(detail.epic.id, { request: text, favorite_name: chosenFavorite, repo_path: path });
                 setRequest("");
                 setCreatedTask(task);
               });
             }}>
               <label htmlFor="epic-request-text">What needs to happen?</label>
-              <textarea id="epic-request-text" value={request} onChange={(e) => setRequest(e.target.value)} rows={3} maxLength={8000} required />
+              <textarea id="epic-request-text" name="request" value={request} onChange={(e) => setRequest(e.target.value)} rows={3} maxLength={8000} required />
               <div className="epic-request-choices">
                 <div className="field">
                   <label htmlFor="epic-request-favorite">Favorite</label>
-                  <select id="epic-request-favorite" value={favorite} disabled={busy} onChange={(e) => changeFavorite(e.target.value)}>
+                  <select id="epic-request-favorite" name="favorite_name" value={favorite} disabled={busy} onChange={(e) => changeFavorite(e.target.value)}>
                     <option value="">No favorite — pick one when launching</option>
                     {shownFavorites.map((f) => <option key={f.name} value={f.name}>{f.name} — {f.harness}</option>)}
                   </select>
                 </div>
                 <div className="field">
                   <label htmlFor="epic-request-repo">Working directory</label>
-                  <select id="epic-request-repo" value={repoPath} disabled={busy} onChange={(e) => changeRepo(e.target.value)}>
-                    <option value="">No working directory</option>
+                  <input
+                    id="epic-request-repo"
+                    name="repo_path"
+                    list="epic-request-repos"
+                    value={repoPath}
+                    onChange={(e) => changeRepo(e.target.value)}
+                    onBlur={saveRepo}
+                    placeholder="/path/to/repo"
+                    aria-describedby="epic-request-repo-help"
+                    disabled={busy}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <datalist id="epic-request-repos">
                     {repos.map((r) => <option key={r.id} value={r.path}>{r.name}</option>)}
-                  </select>
+                  </datalist>
+                  <small id="epic-request-repo-help" className="muted epic-request-help">Any folder path works. Registered repositories are suggested.</small>
                 </div>
               </div>
               <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? <Spinner /> : null}Create task</button>
@@ -187,7 +217,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
             {favorites.length === 0 ? <p className="muted">Add a favorite in <a href="#/settings">Settings</a> to set the harness, agent and model on new tasks.</p> : null}
           </section>
           <div className="epic-groups">
-            {(Object.keys(STATE_LABEL) as EpicTaskState[]).map((state) => {
+            {GROUP_ORDER.map((state) => {
               const views = detail.views.filter((view) => view.state === state);
               if (!views.length) return null;
               return <section key={state} className="epic-group" aria-label={STATE_LABEL[state]}>
@@ -196,7 +226,13 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
             {views.map((v) => (
               <li key={v.task.id} className="epic-task" data-state={v.state}>
                 <div className="epic-task-line">
-                  <span className="epic-task-title">{v.task.title}</span>
+                  <h4 className="epic-task-title">
+                    {v.task.jira_url ? (
+                      <a className="card-link" href={v.task.jira_url} target="_blank" rel="noopener noreferrer" title={`Open ${v.task.jira_key ?? "Jira ticket"} in Jira`}>{v.task.title}</a>
+                    ) : (
+                      <a className="card-link" href={`#/tasks?task=${encodeURIComponent(v.task.id)}`} title="Open this task">{v.task.title}</a>
+                    )}
+                  </h4>
                   <span className={STATE_BADGE[v.state]}>{STATE_LABEL[v.state]}</span>
                   {v.testable ? <span className="badge badge-ready">testable</span> : null}
                   {v.impacted ? <span className="badge badge-wait" title="Started on an older design and not merged yet">impacted by design change</span> : null}

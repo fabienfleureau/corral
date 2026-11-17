@@ -90,14 +90,30 @@ test("epic request: bad input is refused without leaving a task behind", () => w
   for (const body of [
     { request: "" },
     { request: "x".repeat(8001) },
-    { request: "do it", repo_path: "/not/registered" },
     { request: "do it", favorite_name: "Missing" },
     { request: "do it", favorite_name: "Work", repo_path: home.path },
+    { request: "do it", favorite_name: "Home", repo_path: "/some/custom/checkout" },
     { request: "do it", favorite_name: 12 },
   ]) {
     const res = await send("POST", "/api/epics/e/requests", body);
     assert.equal(res.status, 400, JSON.stringify({ body, res: res.body }));
   }
   assert.equal(db.listTasks().length, 0);
-  assert.equal((await send("PATCH", "/api/epics/e", { repo_path: "/not/registered" })).status, 400);
+}));
+
+test("epic request: a working directory is free text, not a repo pick", () => withApi(async (send, db) => {
+  const saved = await send("PATCH", "/api/epics/e", { repo_path: "/some/custom/checkout" });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.epic.repo_path, "/some/custom/checkout");
+
+  const created = await send("POST", "/api/epics/e/requests", {
+    request: "Follow up in a folder Corral does not know yet",
+    repo_path: "  /another/custom/checkout  ",
+    favorite_name: "Work",
+  });
+  assert.equal(created.status, 200, JSON.stringify(created.body));
+  assert.equal(created.body.repo_path, "/another/custom/checkout");
+  assert.equal(created.body.target, "claude", "a custom path uses the professional favorite context");
+  assert.equal(db.getEpic("e")!.repo_path, "/another/custom/checkout");
+  assert.equal(db.listRepos().some((r) => r.path === "/another/custom/checkout"), false, "a typed path does not register a repo");
 }));
