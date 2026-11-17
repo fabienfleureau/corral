@@ -62,6 +62,14 @@ test("order follows dependencies, summary counts merged and testable", () => {
   assert.deepEqual(epicSummary(views), { total: 3, merged: 1, testable: 2, ready: 1, blocked: 0 });
 });
 
+test("the board lists only Jira tickets, not tasks created from a request", () => {
+  const jira = task("A-1");
+  const request = task("request-1", { jira_key: null, title: "Draft release notes" });
+  const views = epicViews([request, jira], [], []);
+  assert.deepEqual(views.map((v) => v.task.id), ["A-1"]);
+  assert.deepEqual(epicSummary(views), { total: 1, merged: 0, testable: 0, ready: 1, blocked: 0 });
+});
+
 test("a dependency cycle does not hang ordering", () => {
   const views = epicViews([task("A-1"), task("A-2")], [link("A-1", "A-2"), link("A-2", "A-1")], []);
   assert.equal(views.length, 2);

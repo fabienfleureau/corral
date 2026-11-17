@@ -65,6 +65,16 @@ export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
     jira_parent_key: "EX-100", jira_status: null, pr_url: r.pr ?? null, pr_meta: null, status: r.status, terminal_address: null, exit_code: null,
     created_ms: now - (10 - i) * 60_000, updated_ms: now - (10 - i) * 60_000, epic_id: "sample-epic",
   }));
+  // A task created from the Epic page's request field: tracked on the Tasks
+  // page, but it has no Jira ticket and must not appear on the epic board.
+  db.insertTask({
+    id: "sample-epic-request", title: "Draft a note on widget sizes", prompt: "Draft a note on widget sizes",
+    repo_path: "/sample/example-project", target: "claude", target_state: "confirmed",
+    base_branch: null, branch: null, worktree_path: null, assignee: null, jira_key: null,
+    jira_url: null, jira_parent_key: null, jira_status: null, pr_url: null, pr_meta: null,
+    status: "open", terminal_address: null, exit_code: null,
+    created_ms: now - 30_000, updated_ms: now - 30_000, epic_id: "sample-epic",
+  });
   db.replaceEpicLinks("sample-epic", [
     { task_key: "EX-102", blocked_by_key: "EX-101" },
     { task_key: "EX-103", blocked_by_key: "EX-102" },

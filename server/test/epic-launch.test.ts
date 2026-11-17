@@ -51,6 +51,10 @@ test("epic launch: only a ready task starts, from the Epic page", async () => {
     });
     return { status: res.status, body: await res.json() as { error?: string } };
   };
+  const get = async (path: string) => {
+    const res = await fetch(url + path, { headers: { Authorization: "Bearer test" } });
+    return { status: res.status, body: await res.json() as { tasks: { id: string }[]; views: { task: { id: string } }[] } };
+  };
   try {
     const now = Date.now();
     db.insertEpic({ id: "e", jira_key: "E-1", title: "E", description: "", error: null, synced_ms: now, created_ms: now });
@@ -64,6 +68,7 @@ test("epic launch: only a ready task starts, from the Epic page", async () => {
     db.insertTask(task("E-1", { status: "dispatched", branch: "feat/e1", terminal_address: "s0", pr_url: "u" }));
     db.insertTask(task("E-2"));
     db.insertTask(task("E-3"));
+    db.insertTask(task("request-1", { jira_key: null, title: "Draft release notes" }));
     db.replaceEpicLinks("e", [
       { task_key: "E-2", blocked_by_key: "E-1" },
       { task_key: "E-3", blocked_by_key: "E-2" },
@@ -79,7 +84,17 @@ test("epic launch: only a ready task starts, from the Epic page", async () => {
     };
     db.insertItem(legacy);
 
+    const detail = await get("/api/epics/e");
+    assert.equal(detail.status, 200);
+    assert.ok(!detail.body.tasks.some((t) => t.id === "request-1"), "a prompt task is not board data");
+    assert.ok(!detail.body.views.some((v) => v.task.id === "request-1"), "a prompt task is not a board view");
+
     assert.equal(db.listItems({ kind: "launch" }).filter((i) => i.status === "open").length, 1, "only the legacy item exists");
+    const notJira = await post("/api/epics/e/tasks/request-1/launch");
+    assert.equal(notJira.status, 409);
+    assert.match(notJira.body.error ?? "", /Jira/);
+    assert.equal(started.length, 0, "a prompt task never launches from the epic");
+
     const blocked = await post("/api/epics/e/tasks/E-3/launch");
     assert.equal(blocked.status, 409);
     assert.match(blocked.body.error ?? "", /blocked/);

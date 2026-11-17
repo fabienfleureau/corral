@@ -50,19 +50,22 @@ function prItemByTask(items: Item[]): Map<string, Item> {
 }
 
 export function epicViews(tasks: Task[], links: EpicLink[], items: Item[]): EpicTaskView[] {
-  const byKey = new Map(tasks.filter((t) => t.jira_key).map((t) => [t.jira_key!, t]));
+  // The board mirrors Jira tickets. A task made from a request on the Epic
+  // page has no ticket, so it stays on the Tasks page instead of this board.
+  const boardTasks = tasks.filter((t) => t.jira_key);
+  const byKey = new Map(boardTasks.map((t) => [t.jira_key!, t]));
   const prs = prItemByTask(items);
   const prReady = (t: Task) => { const i = prs.get(t.id); return Boolean(i && i.status === "open" && i.ready === 1); };
   const closedUnmerged = (t: Task) => { const i = prs.get(t.id); return Boolean(t.pr_url && i && i.status === "resolved" && !isMerged(t)); };
   const satisfied = (t: Task) => t.epic_out === 1 || isMerged(t) || prReady(t);
 
-  const views = tasks.map((task): EpicTaskView => {
+  const views = boardTasks.map((task): EpicTaskView => {
     const blockers = links
       .filter((l) => l.task_key === task.jira_key)
       .map((l) => ({ key: l.blocked_by_key, t: byKey.get(l.blocked_by_key) }))
       .map(({ key, t }): EpicBlocker => ({ key, task_id: t?.id ?? null, satisfied: t ? satisfied(t) : true }));
     const blocked = blockers.filter((b) => !b.satisfied);
-    const closed = blockers.find((b) => { const t = b.task_id ? tasks.find((x) => x.id === b.task_id) : null; return t ? closedUnmerged(t) : false; });
+    const closed = blockers.find((b) => { const t = b.task_id ? boardTasks.find((x) => x.id === b.task_id) : null; return t ? closedUnmerged(t) : false; });
     const item = prs.get(task.id);
     let state: EpicTaskState;
     if (task.epic_out === 1) state = "out";
@@ -75,7 +78,7 @@ export function epicViews(tasks: Task[], links: EpicLink[], items: Item[]): Epic
     // Stack on the prerequisite's branch only when exactly one same-repo
     // prerequisite is still unmerged; otherwise the default branch.
     const open = blockers
-      .map((b) => (b.task_id ? tasks.find((t) => t.id === b.task_id)! : null))
+      .map((b) => (b.task_id ? boardTasks.find((t) => t.id === b.task_id)! : null))
       .filter((t): t is Task => Boolean(t) && !isMerged(t!) && t!.epic_out !== 1);
     const sameRepo = open.filter((t) => t.repo_path && t.repo_path === task.repo_path && t.branch);
     const stack_on = open.length === 1 && sameRepo.length === 1 ? sameRepo[0].branch : null;
