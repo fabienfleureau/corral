@@ -394,7 +394,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                         item.handling === 1 ? (
                           <span className="badge badge-mine">agent working</span>
                         ) : item.ready === 1 ? (
-                          <span className="badge badge-ready">{item.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
+                          <span className={`badge ${item.summary === "ready to merge" ? "badge-ready" : "badge-mine"}`}>{item.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
                         ) : (
                           <span className="badge badge-wait">needs work</span>
                         )
@@ -493,7 +493,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   selected.handling === 1 ? (
                     <span className="badge badge-mine">agent working — {selected.summary || "PR loop"}</span>
                   ) : selected.ready === 1 ? (
-                    <span className="badge badge-ready">{selected.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
+                    <span className={`badge ${selected.summary === "ready to merge" ? "badge-ready" : "badge-mine"}`}>{selected.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
                   ) : (
                     <span className="badge badge-wait">needs work — {selected.summary || "see body"}</span>
                   )
