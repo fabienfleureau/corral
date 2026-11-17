@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Db } from "../db.ts";
-import { dispatchTask, slugify } from "../dispatch.ts";
+import { branchName, dispatchTask, slugify } from "../dispatch.ts";
 import type { Config } from "../config.ts";
 import { addRepo, isGitRepo, jiraKeyPrefix, scanWorkspaceRepos } from "../repos.ts";
 import { prReady, prItemBody, prReviewLabel, syncTaskPr, syncAllPrs, findPr, type PrInfo } from "../pr.ts";
@@ -95,6 +95,30 @@ test("slugify produces url-safe names", () => {
   assert.ok(slugify("x".repeat(100)).length <= 40);
 });
 
+test("branchName keeps whole words and groups ticket tasks under their key", () => {
+  assert.equal(
+    branchName(makeTask({
+      id: "447281f8-a690-4bf9-b3e5-294fdaabdaf0",
+      title: "When I check the MR/PR created by corral, the branch name is always badly named.",
+      prompt: "When I check the MR/PR created by corral, the branch name is always badly named.",
+    })),
+    "corral/check-mr-pr-created-branch-447281",
+  );
+  assert.equal(
+    branchName(makeTask({
+      title: "QOV-2543 [Custom domains] Organization domains list",
+      jira_key: "QOV-2543",
+    })),
+    "qov-2543/custom-domains-organization-list",
+  );
+  assert.equal(branchName(makeTask({ title: "PROJ-42 Fix issue", jira_key: "PROJ-42" })), "proj-42/fix-issue");
+  assert.equal(branchName(makeTask({ title: "", prompt: "Add a force refresh button on the usage page", id: "abcdef123456" })), "corral/add-force-refresh-button-usage-abcdef");
+  // A slug never ends in a cut-off word, even with a long or accented title.
+  const long = branchName(makeTask({ title: "Résumé de la conférence — très très long titre avec beaucoup de mots", id: "abcdef123456" }));
+  assert.equal(long, "corral/resume-conference-tres-long-titre-abcdef");
+  assert.match(long, /^[a-z0-9-]+\/[a-z0-9-]+$/);
+});
+
 test("dispatch retries a branch collision and saves the successful branch", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-collision-"));
   const db = new Db(join(dir, "test.db"));
@@ -111,7 +135,7 @@ test("dispatch retries a branch collision and saves the successful branch", asyn
     };
     const result = await dispatchTask(db, { configDir: dir, host: "localhost", port: 4787, token: "" } as Config, backend, task, "codex");
     assert.equal(attempts, 3);
-    assert.notEqual(result.branch, "add-caching-task-1");
+    assert.match(result.branch, /^corral\/add-caching-task-1-[0-9a-f]{8}$/);
     assert.equal(db.getTask(task.id)?.branch, result.branch);
     assert.equal(started[0].git?.branch, result.branch);
   } finally {
