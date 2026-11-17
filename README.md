@@ -53,6 +53,21 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
   (inside the folder, a repository root, no duplicate). Each child's prompt
   carries the contract, so the repos cannot drift apart. A spec task reads only:
   no branch, no commit, no PR. Children show a `from <spec title>` badge.
+- **Epics** — a Jira epic and its tickets as an ordered piece of work, across one or
+  several repos, over several days. Import it by key on the Epics page: each child
+  ticket becomes a task, Jira "blocks / is blocked by" links become dependencies, and a
+  `Repo:` line in the ticket picks the repo. The page shows what is blocked, ready to
+  launch, running, PR-ready or merged, and a summary such as "3/7 merged · 2 testable".
+  A task whose prerequisites are ready lands in the inbox as **Ready to launch** (never
+  dispatched on its own); in the same repo it stacks on its prerequisite's branch.
+  A ticket's `Préconditions` are checked by the agent before it starts. The epic's
+  **design** is versioned: publishing a revision writes the current version into the
+  Jira epic, marks started tasks **impacted**, and an assistant proposes an
+  **amendment** per unstarted task, which you apply (written to the Jira ticket) or
+  reject from the inbox. Jira stays the source of truth; Corral only writes its own
+  delimited `[corral:begin:…]` blocks. The `epic-brainstorm` skill turns a
+  brainstorming into an epic in that format. Vocabulary: [`GLOSSARY.md`](GLOSSARY.md),
+  decision: [ADR 0001](docs/adr/0001-jira-source-of-truth-for-epics.md).
 - **Question inbox** — dispatched agents are given `skills/question-report.md`,
   which tells them to POST a clean question via `$CORRAL_URL/api/reports`. Structured
   question batches and permission requests are answered from the item. Snooze

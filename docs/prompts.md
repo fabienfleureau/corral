@@ -50,6 +50,10 @@ Review this PR/MR: <pr url>      # only for a review task
 | `skills/review.md` | **replaces** the two files above when `task.kind === "review"` — a review must not commit, push or open a PR | `{pr_url}`, `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Review the PR/MR. Do not change code. Ask before posting any comment."* |
 | `skills/clarify.md` | **never injected** — a companion skill the human runs by hand to turn a Jira ticket into subtasks | — | — |
 
+`.agents/skills/epic-brainstorm/SKILL.md` (linked from `.claude/skills/`) is a Claude
+Code skill the human runs, never sent by Corral: it fixes the Jira conventions an epic
+must follow to be imported (design in the epic, `Repo:`, `Préconditions`, "blocked by" links).
+
 What each one is for:
 
 - **`question-report.md`** — the report contract: commit, push, open the PR/MR,
