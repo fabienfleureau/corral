@@ -26,6 +26,10 @@ export type Task = {
   jira_url: string | null;
   jira_parent_key: string | null;
   pr_url: string | null;
+  jira_status?: string | null;
+  epic_id?: string | null;
+  /** 1 once the ticket left its epic in Jira. */
+  epic_out?: number;
   /** Resolved review command, frozen at dispatch; null when none. */
   review: string | null;
   status: "open" | "dispatched" | "done" | "archived";
@@ -37,7 +41,7 @@ export type Task = {
 
 export type Item = {
   id: string;
-  kind: "question" | "pr" | "digest" | "plan";
+  kind: "question" | "pr" | "digest" | "plan" | "launch" | "amendment";
   status: "open" | "resolved" | "archived";
   title: string;
   summary: string; // structured summary ("" until summarized)
@@ -277,3 +281,42 @@ export type PlatformRateLimit = {
 
 export interface PrAdditionsGroup { key: string; additions: number; available: number; total: number }
 
+
+export type EpicTaskState = "out" | "merged" | "pr_ready" | "pr_open" | "running" | "ready" | "blocked";
+
+export type EpicSummary = { total: number; merged: number; testable: number; ready: number; blocked: number };
+
+export type Epic = {
+  id: string;
+  jira_key: string;
+  title: string;
+  description: string;
+  error: string | null;
+  synced_ms: number;
+  created_ms: number;
+};
+
+export type EpicTaskView = {
+  task: Task;
+  state: EpicTaskState;
+  blockers: { key: string; task_id: string | null; satisfied: boolean }[];
+  alert: string | null;
+  testable: boolean;
+  stack_on: string | null;
+  /** Started on an older design than the current one, and not merged. */
+  impacted?: boolean;
+};
+
+export type EpicDesign = { epic_id: string; version: number; body: string; reason: string; author: string; created_ms: number };
+
+export type EpicDetail = {
+  epic: Epic;
+  tasks: Task[];
+  links: { task_key: string; blocked_by_key: string }[];
+  views: EpicTaskView[];
+  summary: EpicSummary;
+  design: EpicDesign | null;
+  design_versions: number;
+  /** Proposed amendments waiting in the inbox. */
+  amendments: { id: string; task_id: string; design_version: number; body: string }[];
+};

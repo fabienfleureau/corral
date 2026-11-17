@@ -187,6 +187,11 @@ export class JiraClient {
     return this.runJql(`parent = ${epicKey} ORDER BY key ASC`, 100);
   }
 
+  /** Replace an issue's description with an ADF document. */
+  async updateDescription(key: string, description: unknown): Promise<void> {
+    await this.request("PUT", `/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: { description } });
+  }
+
   async transitions(key: string): Promise<JiraTransition[]> {
     const res = await this.request<{ transitions: JiraTransition[] }>(
       "GET",

@@ -60,6 +60,15 @@ const paths: Record<string, ReactNode> = {
       <circle cx="8" cy="17" r="2" />
     </>
   ),
+  epics: (
+    <>
+      <circle cx="6" cy="5" r="2" />
+      <circle cx="6" cy="19" r="2" />
+      <circle cx="18" cy="12" r="2" />
+      <path d="M6 7v10" />
+      <path d="M6 12h10" />
+    </>
+  ),
   errors: (
     <>
       <path d="M10.3 3.9 2.4 17.5A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
