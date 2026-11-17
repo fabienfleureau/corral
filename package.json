@@ -1,7 +1,7 @@
 {
   "name": "corral",
   "version": "0.1.0",
-  "description": "Feed work to your herdr workers; review and answer from one inbox.",
+  "description": "Delegate coding tasks and review agent work from one inbox.",
   "private": true,
   "type": "module",
   "bin": {
@@ -13,6 +13,7 @@
     "dev": "node server/index.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "build": "vite build --config web/vite.config.ts",
+    "check:adr": "node scripts/check-adr.ts",
     "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p web/tsconfig.json",
     "test": "node --test server/test/*.test.ts"
   },

@@ -6,19 +6,26 @@ Server: Node 22 TypeScript, no runtime dependencies. UI: React + Vite + plain
 CSS. Agents run through the `WorkerBackend` seam (`server/worker.ts`), today
 backed by `server/omnigent.ts`.
 
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup and review,
+[docs/architecture.md](docs/architecture.md) for system boundaries, and
+[docs/adr/README.md](docs/adr/README.md) for accepted decisions.
+
 ## Workflow — every change ships as a PR
 
 - **Never push directly to `main`.** Branch, commit, push the branch, open a PR
   (`gh pr create`). The human reviews and merges (squash).
 - Branch names: `<type>/<short-slug>` — `feat/…`, `fix/…`, `docs/…`.
 - Before pushing, all green: `npm test`, `npx tsc --noEmit -p
-  tsconfig.server.json`, `npx tsc --noEmit -p web/tsconfig.json`, `npm run build`.
+  tsconfig.server.json`, `npx tsc --noEmit -p web/tsconfig.json`, `npm run build`,
+  and `npm run check:adr`.
 - Keep PRs small and single-purpose. The description says **what changed, why,
   and how to test it** (including UI deep links like `#/pulls?color=red`).
 - For UI changes, include labeled before-and-after screenshots of comparable
   views in the PR description. If screenshots cannot be captured or included,
   explain why.
 - Say explicitly if your PR overlaps another open PR.
+- Use the `pr-description` skill for PR titles and bodies. Keep its format;
+  do not introduce a repository PR template that overrides it.
 
 ## Dev loop
 
@@ -35,7 +42,6 @@ backed by `server/omnigent.ts`.
 Use the fixture in this checkout, never the live app. It starts a server with a
 fresh temporary home, config, database, and browser profile; GitHub refresh is
 disabled and the agent backend points to an unavailable local address. It seeds
-synthetic open, dispatched, and done tasks with pinned and default model settings,
 synthetic open, dispatched, and done tasks with pinned and default model settings,
 plus a professional and a personal repo, favorites in both contexts, open
 inbox items (a ready PR, a PR needing work, a question), a Jira-imported
@@ -128,6 +134,18 @@ import). On failure the last frame is saved next to the output as
   Claude Code. Baseline target: Baseline Widely available. Refresh with
   `npx skills update`.
 
+## Decision records and documentation
+
+- Every PR must reference applicable ADRs or explain specifically why none is
+  needed. Add an ADR in the same PR for a consequential architectural, product
+  boundary or lasting technology decision; follow [the policy](docs/adr/README.md).
+- Preserve ADR filenames and reasoning. Supersede an accepted decision with a new
+  record and links; never silently rewrite it or invent historical alternatives.
+- Update [docs/architecture.md](docs/architecture.md) when boundaries or flows
+  change, and the README/product guide when user workflows change.
+- CI validates ADR structure and index links. Human review judges whether the
+  change needs a record and whether its trade-offs are explained.
+
 ## Layout
 
 | | |
@@ -135,6 +153,9 @@ import). On failure the last frame is saved next to the output as
 | `server/` | API (`api.ts`), worker seam (`worker.ts`, `omnigent.ts`), PR loop (`pr.ts`), inbox lifecycle (`capture.ts`), dispatch (`dispatch.ts`), task history (`task-events.ts`) |
 | `web/` | React UI, hash-routed pages (`#/inbox`, `#/tasks`, `#/pulls`, `#/sessions`, `#/improve`, `#/settings`); the task history modal is `TaskHistory.tsx` |
 | `skills/` | Prompt conventions for dispatched agents (question reports, PR loop, handoff) |
+| `docs/architecture.md` | Source-linked system diagram, responsibilities, flows and limits |
+| `docs/adr/` | Decision records, index, policy and template |
+| `docs/product-guide.md` | Feature, configuration and CLI reference |
 | `docs/prompts.md` | Registry of every prompt Corral sends — the place to look first |
 | `API.md` | HTTP contract — keep in sync with `server/api.ts` |
 
