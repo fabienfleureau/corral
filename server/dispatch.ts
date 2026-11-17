@@ -31,6 +31,39 @@ export function slugify(s: string, max = 40): string {
   return slug || "task";
 }
 
+// Sentence openers say nothing about the work. Dropping them keeps the words
+// a human scans for instead of `when-i-check-the-mr-pr-created-by...`.
+const BRANCH_FILLER = new Set([
+  "a", "an", "and", "always", "au", "aux", "by", "corral", "dans", "de",
+  "des", "du", "et", "for", "i", "il", "in", "is", "it", "je", "la",
+  "le", "les", "need", "on", "or", "ou", "pas", "pour", "que", "qui",
+  "si", "that", "the", "this", "to", "un", "une", "we", "when", "with",
+  "y",
+]);
+
+/**
+ * Branch for an auto-created worktree. Ticket tasks are grouped under their
+ * Jira key; other tasks get a `corral/` namespace and a short task id. Slugs
+ * keep whole words only, so a long title never ends in a cut-off word.
+ */
+export function branchName(task: Pick<Task, "id" | "title" | "prompt" | "jira_key">): string {
+  const key = task.jira_key?.trim() ? slugify(task.jira_key, 24) : "";
+  const keyWords = key ? key.split("-") : [];
+  let words = slugify(taskLabel(task), 200).split("-").filter((w) => w && !BRANCH_FILLER.has(w));
+  // Jira titles often repeat their own key ("PROJ-42 Fix the thing").
+  if (keyWords.length && keyWords.every((w, i) => words[i] === w)) words = words.slice(keyWords.length);
+  const kept: string[] = [];
+  let length = 0;
+  for (const word of words) {
+    if (kept.includes(word)) continue;
+    if (kept.length >= 5 || length + word.length + (kept.length ? 1 : 0) > 36) break;
+    kept.push(word);
+    length += word.length + (kept.length > 1 ? 1 : 0);
+  }
+  const slug = kept.join("-") || "task";
+  return key ? `${key}/${slug}` : `corral/${slug}-${task.id.slice(0, 6)}`;
+}
+
 /**
  * Framing for text Corral copies out of another system (a Jira ticket body, a PR
  * comment) and injects verbatim. It is quoted data about the task, not part of
@@ -207,7 +240,7 @@ export async function dispatchTask(
   }
   // A review reads the MR head without checking it out: no worktree, no branch.
   const useWorktree = !review && !spec && !analysis && opts.useWorktree !== false;
-  const originalBranch = task.branch ?? `${slugify(taskLabel(task), 32)}-${task.id.slice(0, 6)}`;
+  const originalBranch = task.branch ?? branchName(task);
   let branch = originalBranch;
 
   // Untitled task: send no title so omnigent generates one; capture adopts it.

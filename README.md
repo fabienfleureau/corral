@@ -32,7 +32,9 @@ omnigent owns the *agents* (sessions, worktrees, models). Agents run through the
 - **Dispatch** — one click. Pick a harness (Claude/Codex/OpenCode) and optionally
   pin an agent, model and reasoning level; blank means omnigent smart-routes.
   Each task gets a fresh git worktree created by omnigent (opt out per task); a
-  `review` or `spec` task runs in place, with no branch.
+  `review` or `spec` task runs in place, with no branch. Automatic branches are
+  `<jira-key>/<short-slug>` for a ticket, `corral/<short-slug>-<task-id>`
+  otherwise: whole words only, no mid-word truncation.
   **Favorites** save a harness/model/reasoning combination, scoped to a
   professional or personal repo context. A favorite on an OpenCode DeepSeek
   model shows a pale red **2× peak** tag during its doubled-rate peak hours
