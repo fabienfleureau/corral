@@ -2,14 +2,18 @@
 // strings — so agent-supplied content cannot inject markup or scripts.
 // Supported: headings, paragraphs (hard breaks), fenced code, inline code,
 // bold / italic / strikethrough, links (http/https/mailto only), ordered and
-// unordered lists, blockquotes, pipe tables, horizontal rules.
+// unordered lists, blockquotes, pipe tables, horizontal rules. Absolute
+// Markdown paths are buttons that open the file viewer.
 
 import type { ReactNode } from "react";
+import { isMarkdownPath } from "./markdown-path";
+import { useOpenMarkdownFile } from "./markdown-file-context";
+import type { OpenMarkdownFile } from "./markdown-file-context";
 
 const INLINE_RE =
-  /(<(?:b|strong|code)>[^<\n]*<\/(?:b|strong|code)>)|(!\[[^\]\n]*\]\([^)\s]+\))|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<>"']+)/g;
+  /(<(?:b|strong|code)>[^<\n]*<\/(?:b|strong|code)>)|(!\[[^\]\n]*\]\([^)\s]+\))|(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\n]+\*)|(_[^_\n]+_)|(\[[^\]\n]*\]\([^)\s]+\))|(\/[\w.~+@%$-]+(?:\/[\w.~+@%$-]+)*\.(?:md|markdown)\b)|(https?:\/\/[^\s<>"']+)/g;
 
-function inline(text: string, keyBase = "i"): ReactNode[] {
+function inline(text: string, openFile: OpenMarkdownFile, keyBase = "i"): ReactNode[] {
   const nodes: ReactNode[] = [];
   let last = 0;
   let k = 0;
@@ -23,7 +27,7 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
     const tok = m[0];
     const key = `${keyBase}-${k++}`;
     if (/^<(b|strong)>/i.test(tok)) {
-      nodes.push(<strong key={key}>{inline(tok.replace(/^<[^>]+>|<\/[^>]+>$/g, ""), key)}</strong>);
+      nodes.push(<strong key={key}>{inline(tok.replace(/^<[^>]+>|<\/[^>]+>$/g, ""), openFile, key)}</strong>);
     } else if (tok.startsWith("<code>")) {
       nodes.push(<code key={key}>{tok.slice(6, -7)}</code>);
     } else if (tok.startsWith("![")) {
@@ -32,9 +36,12 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
       const url = image?.[2] ?? "";
       nodes.push(/^https?:\/\//i.test(url) ? <img key={key} src={url} alt={alt} loading="lazy" /> : <span key={key}>{alt}</span>);
     } else if (tok.startsWith("`")) {
-      nodes.push(<code key={key}>{tok.slice(1, -1)}</code>);
+      const code = tok.slice(1, -1);
+      nodes.push(isMarkdownPath(code) ? (
+        <button type="button" key={key} className="md-file-link md-file-code" title={`Open ${code}`} onClick={() => openFile(code.trim())}>{code}</button>
+      ) : <code key={key}>{code}</code>);
     } else if (tok.startsWith("**") || tok.startsWith("__")) {
-      nodes.push(<strong key={key}>{inline(tok.slice(2, -2), key)}</strong>);
+      nodes.push(<strong key={key}>{inline(tok.slice(2, -2), openFile, key)}</strong>);
     } else if (tok.startsWith("~~")) {
       nodes.push(<del key={key}>{tok.slice(2, -2)}</del>);
     } else if (tok.startsWith("[")) {
@@ -51,6 +58,10 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
           <span key={key}>{label}</span>
         ),
       );
+    } else if (tok.startsWith("/") && isMarkdownPath(tok)) {
+      nodes.push(
+        <button type="button" className="md-file-link" key={key} title={`Open ${tok}`} onClick={() => openFile(tok)}>{tok}</button>,
+      );
     } else if (tok.startsWith("http")) {
       // Bare URL, autolinked. Trailing punctuation stays outside the link.
       const trailing = /[.,;:!?)\]}]+$/.exec(tok);
@@ -62,7 +73,7 @@ function inline(text: string, keyBase = "i"): ReactNode[] {
       );
       if (trailing) nodes.push(trailing[0]);
     } else {
-      nodes.push(<em key={key}>{inline(tok.slice(1, -1), key)}</em>);
+      nodes.push(<em key={key}>{inline(tok.slice(1, -1), openFile, key)}</em>);
     }
     last = m.index + tok.length;
   }
@@ -217,6 +228,7 @@ function parseBlocks(src: string): Block[] {
 }
 
 export function Markdown({ text, className }: { text: string; className?: string }) {
+  const openFile = useOpenMarkdownFile();
   const blocks = parseBlocks(text);
   return (
     <div className={className ? `md ${className}` : "md"}>
@@ -224,7 +236,7 @@ export function Markdown({ text, className }: { text: string; className?: string
         const key = `b${bi}`;
         switch (block.type) {
           case "details":
-            return <details key={key}><summary>{inline(block.summary, key)}</summary><Markdown text={block.lines.join("\n")} /></details>;
+            return <details key={key}><summary>{inline(block.summary, openFile, key)}</summary><Markdown text={block.lines.join("\n")} /></details>;
           case "code":
             return (
               <pre key={key} className="md-code">
@@ -233,7 +245,7 @@ export function Markdown({ text, className }: { text: string; className?: string
             );
           case "heading": {
             const Tag = (`h${Math.min(block.level + 1, 6)}`) as "h2" | "h3" | "h4" | "h5" | "h6";
-            return <Tag key={key}>{inline(block.text, key)}</Tag>;
+            return <Tag key={key}>{inline(block.text, openFile, key)}</Tag>;
           }
           case "hr":
             return <hr key={key} />;
@@ -249,7 +261,7 @@ export function Markdown({ text, className }: { text: string; className?: string
                 {item.map((line, li) => (
                   <span key={li}>
                     {li > 0 ? <br /> : null}
-                    {inline(line, `${key}-${ii}-${li}`)}
+                    {inline(line, openFile, `${key}-${ii}-${li}`)}
                   </span>
                 ))}
               </li>
@@ -263,7 +275,7 @@ export function Markdown({ text, className }: { text: string; className?: string
                   <tr>
                     {block.header.map((h, hi) => (
                       <th key={hi} style={{ textAlign: block.align[hi] ?? undefined }}>
-                        {inline(h, `${key}-h${hi}`)}
+                        {inline(h, openFile, `${key}-h${hi}`)}
                       </th>
                     ))}
                   </tr>
@@ -273,7 +285,7 @@ export function Markdown({ text, className }: { text: string; className?: string
                     <tr key={ri}>
                       {row.map((cell, ci) => (
                         <td key={ci} style={{ textAlign: block.align[ci] ?? undefined }}>
-                          {inline(cell, `${key}-${ri}-${ci}`)}
+                          {inline(cell, openFile, `${key}-${ri}-${ci}`)}
                         </td>
                       ))}
                     </tr>
@@ -287,7 +299,7 @@ export function Markdown({ text, className }: { text: string; className?: string
                 {block.lines.map((line, li) => (
                   <span key={li}>
                     {li > 0 ? <br /> : null}
-                    {inline(line, `${key}-${li}`)}
+                    {inline(line, openFile, `${key}-${li}`)}
                   </span>
                 ))}
               </p>

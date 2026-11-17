@@ -7,6 +7,9 @@ import type { TaskEvent } from "../server/task-events.ts";
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
+/** Written by scripts/capture-screenshot.sh so the Markdown-path link has a file. */
+export const SCREENSHOT_MARKDOWN_PATH = "/tmp/corral-screenshot-plan.md";
+
 /** One favorite per context, plus more professional ones, to show the task form filter
  *  and (the OpenCode DeepSeek one) the peak-hours tag. */
 export const screenshotFavorites: Favorite[] = [
@@ -28,7 +31,9 @@ export function seedScreenshotData(db: Db): void {
   ];
   const now = Date.UTC(2025, 0, 15, 12);
   rows.forEach((row, index) => db.insertTask({
-    ...row, prompt: row.title, repo_path: "/sample/example-project", target_state: "confirmed",
+    ...row,
+    prompt: row.id === "sample-running" ? `${row.title}\n\nSpec: ${SCREENSHOT_MARKDOWN_PATH}` : row.title,
+    repo_path: "/sample/example-project", target_state: "confirmed",
     base_branch: "main", branch: row.branch ?? null, worktree_path: null, assignee: null, jira_key: row.jira_key ?? null,
     jira_url: row.jira_url ?? null, jira_parent_key: null, pr_url: row.pr_url ?? null, pr_meta: null, terminal_address: null,
     exit_code: null, created_ms: now - index * 60000, updated_ms: now - index * 60000,

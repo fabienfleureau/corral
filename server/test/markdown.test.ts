@@ -23,3 +23,17 @@ test("renders safe screenshot images and rejects unsafe image URLs", () => {
   assert.match(html, /<img[^>]*src="https:\/\/example.com\/before.png"[^>]*alt="Before"|<img[^>]*alt="Before"[^>]*src="https:\/\/example.com\/before.png"/);
   assert.doesNotMatch(html, /src="javascript:/);
 });
+
+test("absolute Markdown paths become viewer buttons in prose and inline code", () => {
+  const path = "/Users/ffleureau/workspace/qovery/e2e-custom-domains-org-list.md";
+  const plain = render(`Read ${path} first.`);
+  assert.ok(plain.includes(`<button type="button" class="md-file-link" title="Open ${path}">${path}</button>`));
+  const code = render(`Read \`${path}\` first.`);
+  assert.match(code, /class="md-file-link md-file-code"/);
+});
+
+test("URLs and other file extensions are not turned into local file buttons", () => {
+  const html = render("https://example.com/notes.md and /tmp/notes.txt");
+  assert.match(html, /<a href="https:\/\/example.com\/notes.md"/);
+  assert.doesNotMatch(html, /md-file-link/);
+});

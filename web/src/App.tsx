@@ -9,6 +9,7 @@ import type { Item } from "./types";
 import { useVisibleInboxItems } from "./use-visible-inbox-items";
 import { Spinner } from "./ui";
 import { SelectionToTask } from "./SelectionToTask";
+import { MarkdownFileProvider } from "./MarkdownFileDialog";
 import { openInboxItems } from "./inbox-selection";
 import { rememberInboxItems, unseenInboxItems } from "./inbox-seen";
 import { NavIcon } from "./nav-icons";
@@ -196,6 +197,7 @@ export function App() {
   if (unauthorized) return <TokenScreen />;
 
   return (
+    <MarkdownFileProvider>
     <div className="app">
       <aside
         className={`sidebar ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
@@ -288,6 +290,7 @@ export function App() {
       </main>
       <SelectionToTask />
     </div>
+    </MarkdownFileProvider>
   );
 }
 
