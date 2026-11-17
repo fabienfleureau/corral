@@ -3,7 +3,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import type { Epic, EpicDetail, EpicSummary, EpicTaskState, Repo, Task } from "../types";
+import { favoritesFor, repoContext } from "../favorite-context";
+import type { Epic, EpicDetail, EpicSummary, EpicTaskState, Favorite, Repo, Task } from "../types";
 import { Spinner } from "../ui";
 import { errText } from "../util";
 
@@ -40,19 +41,21 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<EpicDetail | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [reason, setReason] = useState("");
   const [request, setRequest] = useState("");
-  const [proposal, setProposal] = useState("");
+  const [favorite, setFavorite] = useState("");
+  const [repoPath, setRepoPath] = useState("");
+  const [createdTask, setCreatedTask] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     api.listEpics().then((rows) => { if (!cancelled) { setEpics(rows); setSelectedId((id) => id ?? rows[0]?.id ?? null); } }).catch((e) => { if (!cancelled) setError(errText(e)); });
     api.listRepos().then((rows) => { if (!cancelled) setRepos(rows); }).catch(() => undefined);
+    api.getConfig().then((cfg) => { if (!cancelled) setFavorites(cfg.favorites ?? []); }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [eventVersion]);
 
@@ -63,11 +66,35 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     return () => { cancelled = true; };
   }, [selectedId, eventVersion]);
 
-  useEffect(() => { setRequest(""); setProposal(""); }, [selectedId]);
+  // A different epic brings its own saved favorite and working directory.
+  useEffect(() => {
+    if (!detail) return;
+    setFavorite(detail.epic.favorite_name ?? "");
+    setRepoPath(detail.epic.repo_path ?? "");
+    setRequest("");
+    setCreatedTask(null);
+  }, [detail?.epic.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The editor starts from the current design and follows a new version.
-  const designVersion = detail?.design?.version ?? 0;
-  useEffect(() => { setDraft(detail?.design?.body ?? ""); setReason(""); }, [detail?.epic.id, designVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shownFavorites = favoritesFor(favorites, repoContext(repos, repoPath));
+
+  const saveSettings = (nextFavorite: string, nextRepoPath: string) => {
+    setCreatedTask(null);
+    if (!detail) return;
+    void run(() => api.patchEpicSettings(detail.epic.id, { favorite_name: nextFavorite, repo_path: nextRepoPath }));
+  };
+
+  const changeFavorite = (name: string) => {
+    setFavorite(name);
+    saveSettings(name, repoPath);
+  };
+
+  const changeRepo = (path: string) => {
+    const allowed = favoritesFor(favorites, repoContext(repos, path));
+    const nextFavorite = favorite && allowed.some((f) => f.name === favorite) ? favorite : "";
+    setRepoPath(path);
+    setFavorite(nextFavorite);
+    saveSettings(nextFavorite, path);
+  };
 
   const run = useCallback(async (fn: () => Promise<EpicDetail | void>) => {
     setBusy(true);
@@ -123,15 +150,41 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
           <progress id="epic-progress" className="epic-progress" value={detail.summary.merged} max={Math.max(detail.summary.total, 1)} />
           {detail.epic.error ? <p className="inline-error" role="alert">{detail.epic.error}. Nothing in the cycle can be launched.</p> : null}
           <p className="muted">Ready tasks wait here until you launch them. Nothing is added to the inbox on its own.</p>
-          <section className="epic-orchestration" aria-labelledby="epic-orchestration-title">
-            <h3 id="epic-orchestration-title">Plan with the assistant</h3>
-            <p className="muted">Ask for design changes, task coordination or test coverage. Review the proposal before making changes.</p>
-            <form aria-labelledby="epic-orchestration-title" onSubmit={(e) => { e.preventDefault(); if (request.trim()) void run(async () => { const result = await api.orchestrateEpic(detail.epic.id, request); setProposal(result.proposal); }); }}>
-              <label htmlFor="epic-request">What would you like to change?</label>
-              <textarea id="epic-request" value={request} onChange={(e) => setRequest(e.target.value)} rows={3} maxLength={8000} required />
-              <button className="btn btn-primary" disabled={busy} type="submit">{busy ? <Spinner /> : null}Propose a plan</button>
+          <section className="epic-request" aria-labelledby="epic-request-title">
+            <h3 id="epic-request-title">Ask for work on this epic</h3>
+            <p className="muted">Any request becomes a Corral task for follow-up. It stays open until you launch it.</p>
+            <form aria-labelledby="epic-request-title" onSubmit={(e) => {
+              e.preventDefault();
+              const text = request.trim();
+              if (!text) return;
+              void run(async () => {
+                const task = await api.createEpicRequest(detail.epic.id, { request: text, favorite_name: favorite, repo_path: repoPath });
+                setRequest("");
+                setCreatedTask(task);
+              });
+            }}>
+              <label htmlFor="epic-request-text">What needs to happen?</label>
+              <textarea id="epic-request-text" value={request} onChange={(e) => setRequest(e.target.value)} rows={3} maxLength={8000} required />
+              <div className="epic-request-choices">
+                <div className="field">
+                  <label htmlFor="epic-request-favorite">Favorite</label>
+                  <select id="epic-request-favorite" value={favorite} disabled={busy} onChange={(e) => changeFavorite(e.target.value)}>
+                    <option value="">No favorite — pick one when launching</option>
+                    {shownFavorites.map((f) => <option key={f.name} value={f.name}>{f.name} — {f.harness}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="epic-request-repo">Working directory</label>
+                  <select id="epic-request-repo" value={repoPath} disabled={busy} onChange={(e) => changeRepo(e.target.value)}>
+                    <option value="">No working directory</option>
+                    {repos.map((r) => <option key={r.id} value={r.path}>{r.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? <Spinner /> : null}Create task</button>
             </form>
-            {proposal ? <div className="epic-proposal" role="status"><h4>Proposal</h4><p>{proposal}</p><p className="muted">This proposal has not changed the epic or its tasks.</p></div> : null}
+            {createdTask ? <p className="epic-request-created" role="status">Task created: <a href={`#/tasks?task=${encodeURIComponent(createdTask.id)}`}>{createdTask.title}</a></p> : null}
+            {favorites.length === 0 ? <p className="muted">Add a favorite in <a href="#/settings">Settings</a> to set the harness, agent and model on new tasks.</p> : null}
           </section>
           <div className="epic-groups">
             {(Object.keys(STATE_LABEL) as EpicTaskState[]).map((state) => {
@@ -185,15 +238,9 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
           </div>
           <section aria-labelledby="epic-design-title" className="epic-design">
             <h3 id="epic-design-title">Design v{detail.design?.version ?? 1}</h3>
+            {detail.design?.body ? <p className="epic-design-body">{detail.design.body}</p> : <p className="muted">No design text yet.</p>}
             {detail.amendments.length ? <p className="muted">{detail.amendments.length} amendment{detail.amendments.length > 1 ? "s" : ""} waiting in the inbox.</p> : null}
-            <form onSubmit={(e) => { e.preventDefault(); if (draft.trim()) void run(() => api.reviseDesign(detail.epic.id, { body: draft, reason })); }}>
-              <label htmlFor="epic-design-body">Edit, then publish a new version. Only the current version is written to the Jira epic.</label>
-              <textarea id="epic-design-body" rows={8} value={draft} onChange={(e) => setDraft(e.target.value)} />
-              <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why does the design change?" aria-label="Reason for the revision" />
-              <button className="btn btn-primary" type="submit" disabled={busy || !draft.trim() || draft.trim() === (detail.design?.body ?? "").trim()}>
-                {busy ? <Spinner /> : null}Publish revision
-              </button>
-            </form>
+            <p className="muted">The current design and its amendments stay on the epic. Ask for a change with the request field above.</p>
           </section>
         </article>
       ) : null}

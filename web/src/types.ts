@@ -292,6 +292,9 @@ export type Epic = {
   title: string;
   description: string;
   error: string | null;
+  /** Favorite and working directory saved for requests on this epic. */
+  favorite_name?: string | null;
+  repo_path?: string | null;
   synced_ms: number;
   created_ms: number;
 };

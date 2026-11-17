@@ -223,6 +223,10 @@ export const api = {
     return rows;
   },
   orchestrateEpic: (id: string, request: string): Promise<{ proposal: string }> => post(`/api/epics/${id}/orchestrate`, { request }),
+  patchEpicSettings: async (id: string, input: { favorite_name: string; repo_path: string }): Promise<EpicDetail> =>
+    checkEpicDetail(await patch(`/api/epics/${id}`, input), "PATCH", `/api/epics/${id}`),
+  createEpicRequest: (id: string, input: { request: string; favorite_name: string; repo_path: string }): Promise<Task> =>
+    post(`/api/epics/${id}/requests`, input),
   getEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await get(`/api/epics/${id}`), "GET", `/api/epics/${id}`),
   importEpic: async (key: string): Promise<EpicDetail> => checkEpicDetail(await post("/api/epics", { key }), "POST", "/api/epics"),
   syncEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await post(`/api/epics/${id}/sync`), "POST", `/api/epics/${id}/sync`),
