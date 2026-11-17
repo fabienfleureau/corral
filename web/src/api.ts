@@ -255,6 +255,9 @@ export const api = {
     post<DispatchResult>(`/api/tasks/${id}/dispatch`, input),
   cleanupTask: (id: string): Promise<{ ok: boolean }> => post<{ ok: boolean }>(`/api/tasks/${id}/cleanup`),
   taskEvents: (id: string): Promise<TaskEvent[]> => get<TaskEvent[]>(`/api/tasks/${id}/events`),
+  /** Read a local Markdown file referenced in a task description. */
+  markdownFile: (path: string): Promise<{ path: string; content: string }> =>
+    get<{ path: string; content: string }>(`/api/markdown-file?path=${encodeURIComponent(path)}`),
   checkPr: (id: string, opts: { force?: boolean } = {}): Promise<CheckPrResult> =>
     post<CheckPrResult>(`/api/tasks/${id}/check-pr`, opts.force ? { force: true } : undefined),
 

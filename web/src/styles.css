@@ -1614,6 +1614,27 @@ select:focus {
   text-underline-offset: 2px;
 }
 
+.md-file-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.md-file-code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
 /* context drawer + quick replies */
 .context-drawer {
   margin: 12px 0 0;
@@ -2270,6 +2291,28 @@ select:focus {
   background: rgba(16, 20, 26, 0.42);
   overflow: hidden;
   overscroll-behavior: contain;
+}
+
+.markdown-file-dialog {
+  width: min(820px, calc(100vw - 32px));
+  max-height: min(82vh, 900px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgba(16, 20, 26, 0.22);
+  overscroll-behavior: contain;
+}
+.markdown-file-dialog::backdrop {
+  background: rgba(16, 20, 26, 0.42);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+.markdown-file-body {
+  padding: 4px 20px 22px;
+  max-height: calc(min(82vh, 900px) - 66px);
+  overflow-y: auto;
 }
 
 .history-head {

@@ -28,6 +28,7 @@ import { isInterval } from "./analysis-schedule.ts";
 import { DATA_NOT_INSTRUCTIONS, dispatchTask } from "./dispatch.ts";
 import { dailySummaryPrompt } from "./daily-summary.ts";
 import { checkAttachments, MAX_TASK_BODY_BYTES } from "./attachments.ts";
+import { MarkdownFileError, readMarkdownFile } from "./markdown-file.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
 import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
@@ -491,6 +492,17 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     state.db.updateTask(task.id, patch);
     state.hub.broadcast("task.updated", state.db.getTask(task.id));
     json(res, 200, state.db.getTask(task.id));
+  });
+
+  // Local Markdown paths in task text are opened on demand, never fetched
+  // from the text itself. Token auth and the .md-only check live here.
+  on("GET", "/api/markdown-file", (_req, res, { url }) => {
+    try {
+      json(res, 200, readMarkdownFile(url.searchParams.get("path")));
+    } catch (err) {
+      if (err instanceof MarkdownFileError) return json(res, err.status, { error: err.message });
+      json(res, 500, { error: "cannot read Markdown file" });
+    }
   });
 
   on("GET", "/api/tasks/:id/events", (_req, res, { params, url }) => {

@@ -16,6 +16,8 @@ if [ ! -f "$checkout/web/dist/index.html" ] || [ ! -x "$chrome" ]; then
 fi
 case "$output" in /*) ;; *) echo "Use an absolute output path outside the checkout." >&2; exit 2;; esac
 if [ -e "$output" ]; then echo "Output already exists: $output" >&2; exit 2; fi
+# The fixture's in-progress task quotes this absolute Markdown path.
+printf '# Search ranking plan\n\nRank by recency and show why a result matched.\n' > /tmp/corral-screenshot-plan.md
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/corral-screenshot.XXXXXX")
 server_pid=
 cleanup() {
