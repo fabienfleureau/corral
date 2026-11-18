@@ -471,7 +471,7 @@ export class CaptureEngine {
   /** Verify the PR gate right after a completion report (best effort). */
   private syncPrSoon(taskId: string): void {
     const task = this.db.getTask(taskId);
-    if (!task?.branch) return;
+    if (!task) return;
     void syncTaskPr(this.db, this.hub, task, { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira }).catch(() => undefined);
   }
 }

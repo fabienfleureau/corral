@@ -287,7 +287,10 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
 }
 
 export async function findPr(repoPath: string, branch: string): Promise<PrInfo | null> {
-  if (!repoPath || !branch) return null;
+  // A reported PR URL is enough on its own: gh/glab can look it up without a
+  // local checkout. A bare branch still needs a repo to resolve it against.
+  const urlRef = /^https?:\/\//.test(branch);
+  if (!branch || (!repoPath && !urlRef)) return null;
   try {
     return await findPrGitHub(repoPath, branch);
   } catch {
@@ -566,6 +569,10 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   }
 
   const { ready, reasons } = prReady(pr);
+  // A live PR item can belong to a task whose session was archived or which
+  // left the queue. Its status still needs following, but no agent should be
+  // respawned for work on a task nobody is running.
+  const agentTask = task.status === "dispatched" || task.status === "done";
   const existing = db.listItems({ kind: "pr" }).find((i) => i.task_id === task.id) ?? null;
   const shouldResolve = pr.state !== "OPEN";
   const merged = pr.state === "MERGED";
@@ -588,7 +595,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   if (meta.conflict && (shouldResolve || pr.mergeable === "MERGEABLE")) {
     patchMeta(db, task.id, { conflict: false });
   }
-  if (!shouldResolve && opts.backend && opts.cfg && !delivering.has(task.id)) {
+  if (!shouldResolve && agentTask && opts.backend && opts.cfg && !delivering.has(task.id)) {
     const sig = threadSignature(pr);
     const work: PrWork = {
       // A forced refresh re-hands work the loop already pushed: the human asked
@@ -797,7 +804,13 @@ export function startSyncAllPrs(
   return (async () => {
     try {
       const reportedTasks = new Set(db.listItems({ kind: "pr" }).filter((i) => i.status !== "archived").map((i) => i.task_id));
-      const tasks = prCandidateTasks(db).filter((t) => !opts.knownPrsOnly || t.pr_url || reportedTasks.has(t.id));
+      const candidates = prCandidateTasks(db);
+      const known = new Set(candidates.map((t) => t.id));
+      // A task with a live PR item must keep following it even after its
+      // session was archived or its branch was cleared. Otherwise a merge
+      // leaves an open "ready for review" item nobody checks again.
+      const followed = db.listTasks().filter((t) => reportedTasks.has(t.id) && !known.has(t.id));
+      const tasks = [...candidates, ...followed].filter((t) => !opts.knownPrsOnly || t.pr_url || reportedTasks.has(t.id));
       await mapLimit(tasks, 4, (task) => syncTaskPr(db, hub, task, opts).catch(() => null));
       try { archiveEpicLaunchItems(db, hub); } catch (err) { console.error("corral: epic launch cleanup failed:", String(err)); }
     } finally {
