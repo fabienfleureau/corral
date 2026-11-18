@@ -126,7 +126,8 @@ export interface WorkerBackend {
   /** Start an agent for a task (worktrees included when start.git is set). */
   start(start: WorkerStart): Promise<WorkerSession>;
   list(): Promise<WorkerSession[]>;
-  get(address: string): Promise<WorkerSession | null>;
+  /** Strict lookup propagates backend failures and uses null for a missing session. */
+  get(address: string, options?: { strict?: boolean }): Promise<WorkerSession | null>;
   /** Original prompt if the first turn failed before the worker started. */
   initialFailurePrompt?(address: string): Promise<string | null>;
   /** The newest thing in the session when it is the agent's (closing message or

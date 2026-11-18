@@ -44,6 +44,13 @@ const paths: Record<string, ReactNode> = {
       <path d="M22 20H2" />
     </>
   ),
+  kpis: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1" />
+    </>
+  ),
   improve: (
     <>
       <path d="m3 17 6-6 4 4 8-8" />

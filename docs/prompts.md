@@ -3,13 +3,14 @@
 Every prompt Corral sends, in one place. Read this before changing what an agent
 is told: prompt text is a product decision, not an implementation detail.
 
-Four families of prompt exist:
+Prompt families:
 
 | Family | Source of the text | Sent to | Read from disk when |
 |---|---|---|---|
 | **Agent conventions** | `skills/*.md` | the dispatched coding agent (Claude Code, Codex, …) | every dispatch, and every PR-loop respawn |
 | **PR-loop messages** | string builders in `server/pr.ts` | a live agent session, or a fresh respawn | when the PR loop has work for the agent |
 | **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts` | the `assistant` command | when the human clicks Summarize, or a digest runs |
+| **KPI analysis** | `kpiPrompt()` in `server/kpi.ts` | the selected Omnigent agent | every manual or scheduled KPI cycle |
 | **Agent control tools** | `server/agent-control.ts` | a voice or chat agent using the MCP endpoint | at MCP `initialize` and `tools/list` |
 
 ### Untrusted text: data, not instructions
@@ -184,3 +185,12 @@ Add a prompt → add its row here in the same PR.
 ### Claude artifact request (`server/api.ts`)
 
 The inbox action asks the active Claude session to create a private artifact explaining the task and report its URL. The user controls sharing in Claude.
+
+## KPI monitoring
+
+`kpiPrompt()` in `server/kpi.ts` sends the operator's metric definition, unit,
+source references, context and previous validated report to a fresh worker session. The prompt asks the
+agent to treat collected evidence and prior output as data, use authorised
+read-only connectors, and return a JSON report with a sourced measurement or
+an explicit gap, product questions, evidence-backed proposals and a bounded
+research memory. KPI sessions use their own report contract.

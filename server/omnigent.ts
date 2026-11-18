@@ -188,6 +188,15 @@ export function normalizeElicitations(raw: unknown): WorkerElicitation[] {
   return out;
 }
 
+class OmnigentHttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 export class OmnigentBackend implements WorkerBackend {
   name = "omnigent";
   private cfg: OmnigentConfig;
@@ -229,7 +238,7 @@ export class OmnigentBackend implements WorkerBackend {
         res.status === 404
           ? " (is the omnigent host online? `omnigent host status`)"
           : "";
-      throw new Error(`omnigent ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}${hint}`);
+      throw new OmnigentHttpError(res.status, `omnigent ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}${hint}`);
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
@@ -548,11 +557,12 @@ export class OmnigentBackend implements WorkerBackend {
     return rows.map((r) => this.normalize(r as Record<string, unknown>));
   }
 
-  async get(address: string): Promise<WorkerSession | null> {
+  async get(address: string, options?: { strict?: boolean }): Promise<WorkerSession | null> {
     try {
       const raw = await this.request<Record<string, unknown>>("GET", `/v1/sessions/${address}`);
       return this.normalize(raw);
-    } catch {
+    } catch (err) {
+      if (options?.strict && !(err instanceof OmnigentHttpError && err.status === 404)) throw err;
       return null;
     }
   }

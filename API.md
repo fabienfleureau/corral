@@ -62,6 +62,20 @@ type Item = {
 
 ## Endpoints
 
+### KPI monitoring
+
+The contract types live in [`shared/kpis.ts`](shared/kpis.ts). Supported IDs are
+`kpi-1` and `kpi-2`. Both slots start empty.
+
+- `GET /api/kpis` → `KpiView[]` — settings, cycle state, Omnigent session link, latest validated report and last sourced measurement for both KPIs. This reads SQLite.
+- `PUT /api/kpis/:id` `{name, definition, unit, sources, agent, harness, repo, intervalHours, context}` → `KpiView` — saves the metric definition, its optional display unit and source references, then the agent settings and operator context. A schedule (1 hourly, 24 daily, 0 off) requires a name, definition, agent and absolute workspace path. Changing the definition or unit resets the previous report and is allowed between cycles. 400 for invalid settings, 404 for an unknown slot.
+- `POST /api/kpis/:id/run` → `202 KpiView` — starts one cycle using saved settings. 409 when required settings are missing or a cycle is active, 404 for an unknown KPI.
+
+A report includes the summary, optional numeric measurement with UTC window
+and source references, data needs, product questions, proposals with evidence,
+and a research memory. A missing measurement is `null`. A failed cycle leaves
+the previous report available.
+
 ### Daily activity
 - `GET /api/daily?start=<ms>&end=<ms>` → task history events in the half-open timestamp interval, joined to registered professional repositories (including legacy null contexts). Each event carries the task title, prompt, repo name/path, Jira and PR links, terminal address and `session_url` (omnigent's session inspect URL when available). The interval must be positive and at most 25 hours. Tasks with an unknown repository are excluded.
 - `POST /api/daily/summarize` `{start, end, date, favorite}` → `{task}` — starts an `analysis` task that summarizes the day's activity and reports the markdown to the inbox. `favorite` must name a configured professional favorite; its harness, agent, model and reasoning are used for the dispatch. The task runs without a worktree in the repository of the day's first event. 400 for an invalid interval/date/favorite, 409 when the day has no activity.

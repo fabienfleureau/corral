@@ -197,3 +197,25 @@ Env overrides: `CORRAL_PORT`, `CORRAL_HOST`, `CORRAL_TOKEN`, `CORRAL_DATA_DIR`.
 - **next** — routing suggestions (quota headroom + editable rules)
 - **later** — auto-dispatch queue, agent-fed intake, remote machines, fuller
   Jira sync (comments back)
+
+## KPI monitoring
+
+Open [KPI](#/kpis) and choose **KPI 1** or **KPI 2**. Both start empty.
+Give the metric a name and describe its calculation, what to include and its
+reporting window. Add a display unit and references to expected connectors,
+dashboards or queries when known. Save the definition to name the tab.
+
+Select an Omnigent profile with read-only connector access and a registered
+repository as its workspace. Save the settings and use **Run now**, or set
+**Hourly** or **Daily** for automatic analysis. Scheduling starts off.
+Corral and the Omnigent runner must stay online for unattended cycles. After
+a restart Corral resumes checking the active session or starts a due cycle.
+
+Each tab shows the last report, measurement window and evidence, missing
+data, product questions and proposals. The last sourced value stays visible
+if a newer cycle lacks a measurement. Use **Product context and answers** to
+reply to questions. The next cycle reads the prior report and research memory.
+**Draft task** opens the editable Tasks form for a proposal.
+
+Changing the calculation or unit starts a fresh report and memory for the slot.
+Edits to the name, sources and product context preserve the current research.

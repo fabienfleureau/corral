@@ -1,3 +1,4 @@
+import type { KpiId, KpiSettings, KpiView } from "../../shared/kpis";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
@@ -312,6 +313,10 @@ export const api = {
 
   getRateLimits: (refresh = false): Promise<{ limits: PlatformRateLimit[]; fetched_ms: number }> =>
     get<{ limits: PlatformRateLimit[]; fetched_ms: number }>(`/api/rate-limits${refresh ? "?refresh=1" : ""}`),
+
+  listKpis: (): Promise<KpiView[]> => get("/api/kpis"),
+  configureKpi: (id: KpiId, settings: KpiSettings): Promise<KpiView> => put(`/api/kpis/${id}`, settings),
+  runKpi: (id: KpiId): Promise<KpiView> => post(`/api/kpis/${id}/run`),
 
   analysisRepo: (): Promise<{ repo: string }> => get<{ repo: string }>("/api/analysis-repo"),
   setAnalysisRepo: (repo: string): Promise<{ repo: string }> => put<{ repo: string }>("/api/analysis-repo", { repo }),
