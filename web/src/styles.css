@@ -1180,6 +1180,13 @@ select:focus {
   padding: 16px 28px 24px;
 }
 
+/* A round of interview questions must not squeeze the description above it. */
+.detail-actions.grill-actions {
+  max-height: min(56vh, 470px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
 .action-row {
   display: flex;
   gap: 8px;
@@ -2223,6 +2230,165 @@ select:focus {
 .question-choice input {
   width: auto;
   margin: 0;
+}
+
+/* ---- grill round: one question card at a time ---- */
+.grill-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.grill-reply-head,
+.grill-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.grill-progress {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.grill-nav,
+.grill-markers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.grill-nav .btn,
+.grill-marker {
+  min-height: 32px;
+  padding: 5px 12px;
+  touch-action: manipulation;
+}
+
+.grill-marker {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.grill-marker:hover {
+  background: var(--bg-hover);
+}
+
+.grill-marker[aria-current="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.grill-track {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  touch-action: manipulation;
+  padding-bottom: 6px;
+}
+
+.grill-slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+}
+
+.grill-slide-inner {
+  max-height: min(26vh, 240px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+}
+
+.grill-slide-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.grill-prompt p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.grill-prompt p:last-child {
+  margin-bottom: 0;
+}
+
+.grill-recommendation {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.grill-slide fieldset {
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.grill-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 5px 7px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.grill-choice:hover {
+  background: var(--bg-hover);
+}
+
+.grill-choice input {
+  width: auto;
+  margin: 2px 0 0;
+}
+
+.grill-custom {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.grill-custom input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .grill-track { scroll-behavior: smooth; }
 }
 
 .usage-seg-opencode {

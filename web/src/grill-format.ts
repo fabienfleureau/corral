@@ -8,9 +8,11 @@ export function parseGrillRound(text: string): GrillQuestion[] {
     const body = text.slice(match.index! + match[0].length, matches[index + 1]?.index ?? text.length).replace(/\n\s*---\s*$/, '').trim();
     const [question, ...recommendation] = body.split(/➡️?/);
     const lines = question.split('\n');
-    const choices = lines.filter((line) => /^\s*(?:[-*]\s*)?\([a-z]\)\s+/i.test(line)).map((line) => line.trim().replace(/^[-*]\s*/, ''));
-    const prompt = lines.filter((line) => !/^\s*(?:[-*]\s*)?\([a-z]\)\s+/i.test(line)).join('\n').trim();
-    return { id: match[1].toUpperCase(), prompt, choices, multiple: /\b(?:one or more|multiple|select all|choose all)\b/i.test(prompt), recommendation: recommendation.join('➡️').trim() };
+    // Agents write choices as (a), A., 1. and their dash/bullet variants.
+    const choice = /^\s*(?:[-*]\s*)?(?:\([a-z0-9]+\)|\b[a-z0-9]{1,2}[.)])\s+\S/i;
+    const choices = lines.filter((line) => choice.test(line)).map((line) => line.trim().replace(/^[-*]\s*/, ''));
+    const prompt = lines.filter((line) => !choice.test(line)).join('\n').trim();
+    return { id: match[1].toUpperCase(), prompt, choices, multiple: /\b(?:one or more|multiple|select all|choose all|plusieurs choix)\b/i.test(prompt), recommendation: recommendation.join('➡️').trim() };
   }).filter((q) => q.prompt);
 }
 
