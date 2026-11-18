@@ -1,3 +1,4 @@
+import type { KpiReport, KpiSettings } from "../shared/kpis.ts";
 import { Db } from "../server/db.ts";
 import type { Favorite } from "../server/favorites.ts";
 import { prItemBody, type PrInfo } from "../server/pr.ts";
@@ -46,6 +47,45 @@ export function seedScreenshotData(db: Db): void {
   seedEpic(db, now);
   seedTaskHistory(db, now);
   seedPulls(db, now);
+  seedKpis(db, now);
+}
+
+/** Previous reports are synthetic and the schedules stay off. */
+function seedKpis(db: Db, now: number): void {
+  const settings: KpiSettings = {
+    agent: "deployment-reliability", harness: "codex", repo: "/sample/example-project", intervalHours: 0,
+    context: "Use the deployment quality dashboard and the CRM Tier 1 cohort.",
+  };
+  const from = "2024-12-18", to = "2025-01-15";
+  const reports: Record<string, KpiReport> = {
+    "qovery-side": {
+      summary: "Qovery-side failures accounted for 1.4% of eligible attempts. Runner provisioning timeouts were the largest confirmed contributor.",
+      measurement: { value: 1.4, from, to, sources: ["Deployment quality dashboard · Failure attribution"] },
+      dataNeeds: ["Runner pool capacity events for the same window. Add the infrastructure metrics connector to match timeouts to capacity."],
+      productQuestions: ["Should retries of a single deployment count as separate attempts?"],
+      proposals: [{
+        title: "Instrument runner provisioning timeouts",
+        rationale: "Break provisioning timeouts down by runner pool and zone so capacity issues can be distinguished from startup regressions.",
+        evidence: "Deployment quality dashboard · Provisioning timeouts accounted for 38 of 112 Qovery-side failures.",
+      }],
+      memory: "Track the runner-pool timeout breakdown first. Keep the retry denominator question open until confirmed.",
+    },
+    tier1: {
+      summary: "The deployment counts are available. The authoritative Tier 1 cohort is still missing for this window.",
+      measurement: null,
+      dataNeeds: ["Connect the CRM Tier 1 cohort with organisation ID and tier effective dates for the last 28 days."],
+      productQuestions: ["Should organisations with no eligible deployments be shown separately?"],
+      proposals: [],
+      memory: "Deployment events have an organisation ID. Join to the CRM cohort once the connector is available.",
+    },
+  };
+  const insert = db.raw.prepare(`
+    INSERT INTO kpi_monitors (id, settings, run_state, address, started_ms, finished_ms, report, report_ms, last_measurement)
+    VALUES (?, ?, 'complete', ?, ?, ?, ?, ?, ?)`);
+  for (const [id, report] of Object.entries(reports)) {
+    insert.run(id, JSON.stringify(settings), `fixture-${id}`, now - 90_000, now,
+      JSON.stringify(report), now, report.measurement ? JSON.stringify(report.measurement) : null);
+  }
 }
 
 /** A multi-repo spec with its plan waiting for approval, and a code task a

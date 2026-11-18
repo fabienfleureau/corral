@@ -26,9 +26,10 @@ import { SettingsPage } from "./pages/Settings";
 import { UsagePage } from "./pages/Usage";
 import { DailyPage } from "./pages/Daily";
 import { ProgressPage, ProgressCelebration } from "./pages/Progress";
+import { KpisPage } from "./pages/Kpis";
 import { ImprovePage } from "./pages/Improve";
 
-type Tab = "progress" | "daily" | "inbox" | "tasks" | "epics" | "pulls" | "sessions" | "usage" | "improve" | "settings" | "errors";
+type Tab = "progress" | "daily" | "inbox" | "tasks" | "epics" | "pulls" | "sessions" | "usage" | "improve" | "kpis" | "settings" | "errors";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "inbox", label: "Inbox" },
@@ -40,6 +41,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "sessions", label: "Sessions" },
   { key: "usage", label: "Usage" },
   { key: "improve", label: "Improve" },
+  { key: "kpis", label: "KPI" },
   { key: "settings", label: "Settings" },
   { key: "errors", label: "Errors" },
 ];
@@ -284,6 +286,7 @@ export function App() {
         {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
         {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
         {tab === "usage" ? <UsagePage /> : null}
+        {tab === "kpis" ? <KpisPage /> : null}
         {tab === "improve" ? <ImprovePage /> : null}
         {tab === "settings" ? <SettingsPage /> : null}
         {tab === "errors" ? <section><h1>Error center</h1><p className="muted">Current background synchronization errors. Errors clear after a successful refresh.</p>{errors.length === 0 ? <p>No current errors.</p> : errors.map((error) => <div className="inline-error" key={error.source}><strong>{error.source}</strong><p>{error.message}</p><small>{new Date(error.updated_ms).toLocaleString()}</small></div>)}</section> : null}

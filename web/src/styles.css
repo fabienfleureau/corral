@@ -2633,3 +2633,70 @@ select:focus {
 .epic-proposal { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .75rem; }
 .epic-proposal h4 { margin: 0; }
 .epic-proposal p { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* KPI monitoring */
+.kpi-page { overflow-wrap: anywhere; }
+.kpi-tabs {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+.kpi-tabs a {
+  flex: none;
+  padding: 9px 2px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  text-decoration: none;
+}
+.kpi-tabs a[aria-current="page"] {
+  border-bottom-color: currentColor;
+  color: var(--accent-ink);
+}
+.kpi-tabs a:focus-visible { outline-offset: -2px; }
+.kpi-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 340px);
+  gap: 16px;
+  align-items: start;
+}
+.kpi-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+.kpi-overview { padding: 18px 20px; }
+.kpi-value,
+.kpi-unavailable {
+  margin: 0;
+  font-size: 27px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+}
+.kpi-value { font-size: 38px; font-variant-numeric: tabular-nums; }
+.kpi-value small { font-size: 14px; font-weight: 500; letter-spacing: normal; }
+.kpi-copy { margin: 0; white-space: pre-wrap; }
+.kpi-meta { margin: 0; font-size: 12px; }
+.kpi-list { margin: 0; padding-inline-start: 18px; }
+.kpi-list li + li { margin-top: 5px; }
+.kpi-previous { border-top: 1px solid var(--border); padding-top: 10px; }
+.kpi-previous .kpi-value { font-size: 22px; margin: 3px 0; }
+.kpi-agent-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kpi-state { font-size: 12px; color: var(--muted); }
+.kpi-agent textarea { resize: vertical; }
+.kpi-proposals { list-style: none; margin: 0; padding: 0; }
+.kpi-proposals li { padding-top: 10px; }
+.kpi-proposals li + li { margin-top: 10px; border-top: 1px solid var(--border); }
+.kpi-proposals h3 { margin: 0 0 4px; font-size: 13px; }
+.kpi-proposals p + p, .kpi-proposals a { margin-top: 4px; }
+.kpi-proposals a { display: inline-block; }
+.kpi-main summary { cursor: pointer; }
+.kpi-main details p { margin-top: 8px; }
+
+@media (max-width: 1000px) {
+  .kpi-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .kpi-inputs { grid-template-columns: minmax(0, 1fr); }
+}

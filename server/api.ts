@@ -24,6 +24,8 @@ import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
+import { KPI_IDS } from "../shared/kpis.ts";
+import { KpiMonitor } from "./kpi.ts";
 import { isInterval } from "./analysis-schedule.ts";
 import { DATA_NOT_INSTRUCTIONS, dispatchTask } from "./dispatch.ts";
 import { dailySummaryPrompt } from "./daily-summary.ts";
@@ -66,6 +68,7 @@ export interface AppState {
   /** Skills analysis (installed skills vs. session use); created on first use when absent. */
   skills?: SkillsAnalysis;
   engineeringSkills?: ImprovementAnalysis;
+  kpis?: KpiMonitor;
   usage?: UsageScanner;
   /** Cached OpenCode Go quota snapshot (external HTTPS call, polled by the UI). */
   goQuota?: GoQuotaCache;
@@ -202,6 +205,21 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     );
     routes.push({ method, pattern, keys, handler, bodyLimit });
   };
+
+  const kpis = state.kpis ??= new KpiMonitor(state.db, state.backend);
+  on("GET", "/api/kpis", (_req, res) => json(res, 200, KPI_IDS.map((id) => kpis.view(id))));
+  on("PUT", "/api/kpis/:id", (_req, res, { params, body }) => {
+    const id = KPI_IDS.find((value) => value === params.id);
+    if (!id) return json(res, 404, { error: "Unknown KPI" });
+    try { json(res, 200, kpis.configure(id, body)); }
+    catch (err) { json(res, 400, { error: (err as Error).message }); }
+  });
+  on("POST", "/api/kpis/:id/run", (_req, res, { params }) => {
+    const id = KPI_IDS.find((value) => value === params.id);
+    if (!id) return json(res, 404, { error: "Unknown KPI" });
+    try { json(res, 202, kpis.runNow(id)); }
+    catch (err) { json(res, 409, { error: (err as Error).message }); }
+  });
 
   const analysisAgent = new AnalysisAgent(state.db, state.hub, state.cfg, state.backend);
   on("GET", "/api/analysis-repo", (_req, res) => json(res, 200, { repo: analysisAgent.repo() }));

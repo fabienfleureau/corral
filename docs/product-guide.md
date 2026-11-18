@@ -197,3 +197,26 @@ Env overrides: `CORRAL_PORT`, `CORRAL_HOST`, `CORRAL_TOKEN`, `CORRAL_DATA_DIR`.
 - **next** — routing suggestions (quota headroom + editable rules)
 - **later** — auto-dispatch queue, agent-fed intake, remote machines, fuller
   Jira sync (comments back)
+
+## KPI monitoring
+
+Open [KPI](#/kpis) and choose **Qovery-side deployment failure rate** or
+**Tier 1 organisations above 2% failed deployments (4 weeks)**. Each tab
+shows the latest report, measurement window and evidence, missing data,
+product questions and proposed improvements. A previous sourced measurement
+stays visible if the latest cycle cannot measure the KPI. **Draft task**
+opens the editable Tasks form.
+
+For each KPI, choose an Omnigent agent profile with read-only connector access
+and a registered repository as its workspace. Save the settings and use **Run
+now**, or set **Hourly** or **Daily** for automatic analysis. Scheduling is
+off by default. Keep Corral and the Omnigent runner online for unattended cycles.
+After a restart Corral checks the active session or starts a due cycle.
+A cycle can run until it finishes. If a harness blocks, open the session link
+to review the pending request.
+
+Use **KPI context and answers** for authoritative definitions, dashboard or
+query references and answers to product questions. Add connector credentials
+to the Omnigent profile through its normal configuration. Each new cycle reads
+the last validated report and its research memory for this KPI. It can spend
+a cycle investigating and return data needs without proposing any work.

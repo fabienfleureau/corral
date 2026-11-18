@@ -7,6 +7,19 @@ import type { DailyActivity, Epic, EpicAmendment, EpicDesign, EpicLink, Item, It
 import { logTaskChanges, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS kpi_monitors (
+  id TEXT PRIMARY KEY,
+  settings TEXT NOT NULL,
+  run_name TEXT,
+  run_state TEXT,
+  address TEXT,
+  started_ms INTEGER,
+  finished_ms INTEGER,
+  error TEXT,
+  report TEXT,
+  report_ms INTEGER,
+  last_measurement TEXT
+);
 CREATE TABLE IF NOT EXISTS reward_events (
   kind TEXT NOT NULL, ref TEXT NOT NULL, created_ms INTEGER NOT NULL,
   PRIMARY KEY (kind, ref)
