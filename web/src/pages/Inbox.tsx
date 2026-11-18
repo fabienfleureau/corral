@@ -13,7 +13,7 @@ import { inboxTitle, itemDisplayTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
 import { parseGrillRound, formatGrillAnswers } from "../grill-format";
 import { QuestionReply } from "../QuestionReply";
-import { GrillRoundReply } from "../GrillRoundReply";
+import { GrillRoundDialog } from "../GrillRoundDialog";
 import { TaskHistoryButton } from "../TaskHistory";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePaneWidth } from "../use-pane-size";
@@ -127,8 +127,12 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [actionError, setActionError] = useState<string | null>(null);
   const [openBusy, setOpenBusy] = useState(false);
   const [attachCmd, setAttachCmd] = useState<string | null>(null);
+  const [grillOpen, setGrillOpen] = useState(false);
 
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // A different item must not inherit an open interview round.
+  useEffect(() => { setGrillOpen(false); }, [selected?.id]);
 
   useEffect(() => {
     if (!active) return;
@@ -231,6 +235,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
       const res = answers ? await api.replyAnswers(selected.id, answers) : permission ? await api.replyPermission(selected.id, permission) : await api.replyItem(selected.id, text);
       setReplyOk(`Sent to ${res.sent_to}`);
       setReplyText("");
+      setGrillOpen(false);
       applyItem({ ...selected, status: "resolved", resolved_ms: Date.now() });
     } catch (err) {
       setReplyError(errText(err));
@@ -636,8 +641,20 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
 
               {selected.kind === "launch" || selected.kind === "amendment" ? null : <div className="reply-block">
                 {grillRound.length > 0 ? <>
-                  <GrillRoundReply key={selected.id + selected.updated_ms} questions={grillRound} disabled={replyBusy || selected.status !== "open"} onSend={(answers) => sendReply(formatGrillAnswers(grillRound, answers))} />
-                  {replyError ? <span className="inline-error">{replyError}</span> : null}
+                  <button type="button" className="btn btn-primary"
+                    title="Open the interview round in a modal"
+                    onClick={() => setGrillOpen(true)}>
+                    {selected.status === "open" ? "Answer" : "View"} questions ({grillRound.length})
+                  </button>
+                  {grillOpen ? <GrillRoundDialog
+                    key={selected.id + selected.updated_ms}
+                    questions={grillRound}
+                    title={linkedTask?.title || itemDisplayTitle(selected.title)}
+                    disabled={replyBusy || selected.status !== "open"}
+                    error={replyError}
+                    onSend={(answers) => sendReply(formatGrillAnswers(grillRound, answers))}
+                    onClose={() => setGrillOpen(false)}
+                  /> : null}
                 </> : replyQuestions(selected.elicitation).length > 0 ? <>
                   <QuestionReply key={selected.id + selected.elicitation}
                     questions={replyQuestions(selected.elicitation)} disabled={replyBusy || selected.status !== "open"}

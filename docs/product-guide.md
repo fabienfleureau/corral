@@ -196,7 +196,7 @@ Env overrides: `CORRAL_PORT`, `CORRAL_HOST`, `CORRAL_TOKEN`, `CORRAL_DATA_DIR`.
 
 ## Interview tasks
 
-Choose **Grill me** to interview about an idea without changing files, or **Grill with docs** to record domain decisions in a repository worktree and prepare a PR. The inbox shows each reported round as one question card at a time: use **Previous** / **Next**, the question markers, or swipe sideways to move between questions. Each card scrolls on its own if the question or its choices are long, and the description above stays visible. Answer every question, then send the round together; the agent continues with the next round.
+Choose **Grill me** to interview about an idea without changing files, or **Grill with docs** to record domain decisions in a repository worktree and prepare a PR. The inbox shows an **Answer questions** button on each reported round; the card opens in a modal over the detail pane. Use **Previous** / **Next**, the question markers, or swipe sideways to move between questions. Each card scrolls on its own if the question or its choices are long. Answer every question, then send the round together; the modal closes and the agent continues with the next round. Acknowledged rounds keep a **View questions** button for a read-only look at the card.
 
 ## Roadmap
 
