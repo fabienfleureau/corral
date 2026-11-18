@@ -247,7 +247,10 @@ export const api = {
   approvePlan: (taskId: string): Promise<{ children: Task[] }> => post<{ children: Task[] }>(`/api/tasks/${taskId}/approve-plan`),
   patchTask: (id: string, input: Partial<Task>): Promise<Task> => patch<Task>(`/api/tasks/${id}`, input),
   requestArtifact: (id: string): Promise<{ ok: boolean }> => post(`/api/tasks/${id}/artifact`),
-  archiveTaskSession: (id: string): Promise<Task> => post<Task>(`/api/tasks/${id}/archive-session`),
+  /** Archive a task with its session when it has one; otherwise just archive the task. */
+  archiveTask: (task: Pick<Task, "id" | "terminal_address">): Promise<Task> => task.terminal_address
+    ? post<Task>(`/api/tasks/${task.id}/archive-session`)
+    : patch<Task>(`/api/tasks/${task.id}`, { status: "archived" }),
   dispatchTask: (
     id: string,
     input: { target?: string; use_worktree?: boolean; agent?: string | null; model?: string | null; reasoning?: string | null; review?: string | null },

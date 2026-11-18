@@ -21,6 +21,7 @@ type ApiModule = {
     importEpic: (key: string) => Promise<unknown>;
     orchestrateEpic: (id: string, request: string) => Promise<unknown>;
     createEpicRequest: (id: string, input: unknown) => Promise<unknown>;
+    archiveTask: (task: { id: string; terminal_address: string | null }) => Promise<unknown>;
   };
   ApiError: new (status: number, message: string) => Error & { status: number };
 };
@@ -115,6 +116,24 @@ test("a current epic detail still parses", async () => {
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test("archiving a task always clears its session when it has one", async () => {
+  const calls: { method: string; url: string }[] = [];
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    calls.push({ method: init.method ?? "GET", url });
+    return new Response(JSON.stringify({ id: "task" }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    await api.archiveTask({ id: "task-1", terminal_address: "session-1" });
+    await api.archiveTask({ id: "task-2", terminal_address: null });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(calls, [
+    { method: "POST", url: "/api/tasks/task-1/archive-session" },
+    { method: "PATCH", url: "/api/tasks/task-2" },
+  ]);
 });
 
 // The Epic form has two actions with different side effects. Both use the same
