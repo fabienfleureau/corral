@@ -33,6 +33,6 @@ export function QuestionReply({ questions, disabled, onSend }: {
         }} />
       </label>
     </fieldset>)}
-    <button className="btn btn-primary" type="submit" disabled={disabled || !complete}>Send answers & resolve</button>
+    <button className="btn btn-primary" type="submit" disabled={disabled || !complete}>Send answers & acknowledge</button>
   </form>;
 }

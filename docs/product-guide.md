@@ -67,8 +67,10 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   decision: [ADR 0001](adr/0001-jira-source-of-truth-for-epics.md).
 - **Question inbox** — dispatched agents are given `skills/question-report.md`,
   which tells them to POST a clean question via `$CORRAL_URL/api/reports`. Structured
-  question batches and permission requests are answered from the item. Snooze
-  (1h, 4h, tomorrow) and archive sit on top. A run that stops without a report —
+  question batches and permission requests are answered from the item. Acknowledge,
+  snooze (1h, 4h, tomorrow) and archive sit on top. Archiving a task from the
+  inbox also archives its session in Omnigent when it has one. A run that stops
+  without a report —
   a plain closing message, or a backend error — is surfaced as a question item
   carrying that last message, instead of sitting "in progress" forever.
 - **PR loop** — Corral watches each task's PR/MR. Review comments and merge

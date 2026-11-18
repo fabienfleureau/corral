@@ -252,12 +252,12 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
     }
   };
 
-  const archiveTask = async (task: Task, cleanSession = false) => {
+  const archiveTask = async (task: Task) => {
     if (actionBusy) return;
     setActionBusy(true);
     setActionError(null);
     try {
-      const updated = cleanSession ? await api.archiveTaskSession(task.id) : await api.patchTask(task.id, { status: "archived" });
+      const updated = await api.archiveTask(task);
       setTasks((prev) => prev.map((entry) => entry.id === updated.id ? updated : entry));
       setSelectedTaskId(null);
       refresh();
@@ -459,14 +459,10 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 <RequestArtifact key={selectedTask.id} task={selectedTask} />
                 <TaskHistoryButton taskId={selectedTask.id} title={selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"} version={eventVersion} />
                 {selectedTask.branch ? <ForcePrRefresh task={selectedTask} onChecked={refresh} /> : null}
-                <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask)} title="Archive this task; its session keeps running">
+                <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask)} title="Archive this task and its session in Omnigent when it has one">
                   Archive task
                 </button>
-                {selectedTask.terminal_address ? <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask, true)} title="Archive this task and its session">
-                  Archive &amp; clean session
-                </button> : null}
               </div>
-              <div className="muted">Archive task leaves the session running. Archive &amp; clean session archives it in Omnigent.</div>
               {actionError ? <div className="inline-error">{actionError}</div> : null}
             </div>
           </>
@@ -499,7 +495,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   )
                 ) : null}
                 <span className={`chip chip-static status-${selectedInProgress ? "dispatched" : selected.status}`}>
-                  {selectedInProgress ? "in progress" : selected.status}
+                  {selectedInProgress ? "in progress" : selected.status === "resolved" ? "acknowledged" : selected.status}
                 </span>
                 {linkedTask ? (
                   <span className="meta-task">
@@ -596,7 +592,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   onClick={() => void runAction(() => api.resolveItem(selected.id))}
                   disabled={actionBusy || selected.status === "resolved"}
                 >
-                  Resolve
+                  Acknowledge
                 </button>
                 <button
                   className="btn"
@@ -695,7 +691,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 <div className="reply-foot">
                   <button className="btn btn-primary" onClick={() => void sendReply()} disabled={replyBusy || !replyText.trim()}>
                     {replyBusy ? <Spinner /> : null}
-                    {replyBusy ? "Sending…" : "Send & resolve"}
+                    {replyBusy ? "Sending…" : "Send & acknowledge"}
                   </button>
                   {replyOk ? <span className="inline-ok">{replyOk}</span> : null}
                   {replyError ? <span className="inline-error">{replyError}</span> : null}
