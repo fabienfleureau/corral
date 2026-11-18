@@ -71,12 +71,42 @@ function date(value: unknown): number {
   return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value ? time : NaN;
 }
 
-export function parseKpiReport(message: string, now: number): KpiReport {
-  if (message.length > 32_000) throw new Error("KPI report is too long");
-  const raw = object(JSON.parse(message.replace(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/i, "$1")));
+/** The report may be the whole message, a fenced block, or one object inside prose. */
+function reportCandidates(message: string): string[] {
+  const fenced = [...message.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1].trim());
+  const objects: string[] = [];
+  for (let start = message.indexOf("{"); start !== -1; start = message.indexOf("{", start + 1)) {
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let i = start; i < message.length; i++) {
+      const char = message[i];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') quoted = false;
+        continue;
+      }
+      if (char === '"') quoted = true;
+      else if (char === "{") depth++;
+      else if (char === "}") {
+        depth--;
+        if (!depth) {
+          objects.push(message.slice(start, i + 1));
+          break;
+        }
+      }
+    }
+  }
+  // The prompt asks for the report at the end of the message.
+  return [...new Set([...fenced.reverse(), ...objects.reverse()])];
+}
+
+function validatedReport(raw: unknown, now: number): KpiReport {
+  const body = object(raw);
   let measurement: KpiMeasurement | null = null;
-  if (raw.measurement !== null) {
-    const { value, from, to, sources } = object(raw.measurement);
+  if (body.measurement !== null) {
+    const { value, from, to, sources } = object(body.measurement);
     const first = date(from), end = date(to);
     const references = list(sources, "measurement sources", (source) => text(source, "source", 800));
     if (typeof value !== "number" || !Number.isFinite(value) || !(first < end && end <= now) || references.length === 0) {
@@ -84,7 +114,7 @@ export function parseKpiReport(message: string, now: number): KpiReport {
     }
     measurement = { value, from: from as string, to: to as string, sources: references };
   }
-  const proposals = list(raw.proposals, "proposals", (entry) => {
+  const proposals = list(body.proposals, "proposals", (entry) => {
     const proposal = object(entry);
     return {
       title: text(proposal.title, "proposal title", 160),
@@ -94,13 +124,27 @@ export function parseKpiReport(message: string, now: number): KpiReport {
   });
   if (!measurement && proposals.length) throw new Error("Proposals require a sourced measurement");
   return {
-    summary: text(raw.summary, "summary", 2000),
+    summary: text(body.summary, "summary", 2000),
     measurement,
-    dataNeeds: list(raw.dataNeeds, "data needs", (entry) => text(entry, "data need", 800)),
-    productQuestions: list(raw.productQuestions, "product questions", (entry) => text(entry, "product question", 800)),
+    dataNeeds: list(body.dataNeeds, "data needs", (entry) => text(entry, "data need", 800)),
+    productQuestions: list(body.productQuestions, "product questions", (entry) => text(entry, "product question", 800)),
     proposals,
-    memory: text(raw.memory, "memory", 3500, true),
+    memory: text(body.memory, "memory", 3500, true),
   };
+}
+
+export function parseKpiReport(message: string, now: number): KpiReport {
+  if (message.length > 32_000) throw new Error("KPI report is too long");
+  for (const candidate of reportCandidates(message)) {
+    let raw: unknown;
+    try { raw = JSON.parse(candidate); }
+    catch { continue; }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const keys = ["summary", "measurement", "dataNeeds", "productQuestions", "proposals", "memory"];
+    if (!keys.some((key) => key in raw)) continue;
+    return validatedReport(raw, now);
+  }
+  throw new Error("No KPI report JSON in the agent output");
 }
 
 function kpiPrompt(settings: KpiSettings, previous: KpiReport | null, startedMs: number): string {

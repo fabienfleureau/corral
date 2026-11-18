@@ -41,6 +41,49 @@ test("validates generic measurements, windows and evidence in agent output", () 
   }), start), /proposals/i);
 });
 
+test("reads a report wrapped in agent prose", () => {
+  const fenced = [
+    "Measured the metric from the dashboard.",
+    "",
+    "```json",
+    JSON.stringify(report),
+    "```",
+    "",
+    "The JSON is also saved on disk.",
+  ].join("\n");
+  assert.deepEqual(parseKpiReport(fenced, start), report);
+  assert.deepEqual(parseKpiReport(`Notes\n${JSON.stringify(report)}\nThanks`, start), report);
+  const earlier = { ...report, measurement: { ...report.measurement, value: 1 } };
+  assert.equal(parseKpiReport(`${JSON.stringify(earlier)}\n${JSON.stringify(report)}`, start).measurement?.value, 0);
+  const invalid = { ...report, measurement: { ...report.measurement, from: "2026-11-31" } };
+  assert.throws(() => parseKpiReport([...fenced.split("\n").slice(0, 3), JSON.stringify(invalid), "```"].join("\n"), start), /measurement/i);
+  assert.throws(() => parseKpiReport("No structured report in this message", start), /No KPI report JSON/i);
+});
+
+test("a KPI cycle accepts a report wrapped in agent prose", async () => {
+  const db = new Db(":memory:");
+  try {
+    let session: WorkerSession | null = null;
+    const output = ["Here is the report.", "```json", JSON.stringify(report), "```"].join("\n");
+    const worker = {
+      start: async (input: WorkerStart) => {
+        session = { address: "prose-session", name: input.name, status: "working", state: "live" } as WorkerSession;
+        return session;
+      },
+      get: async () => session,
+      list: async () => session ? [session] : [],
+      lastRunOutcome: async () => ({ kind: "message" as const, text: output }),
+    };
+    const service = new KpiMonitor(db, worker, deps, () => start);
+    service.configure("kpi-1", { ...metric, ...agentSettings, intervalHours: 0, context: "" });
+    await service.runNow("kpi-1");
+    session = { ...session!, status: "done" };
+    await service.tick();
+    assert.equal(service.view("kpi-1").runState, "complete");
+    assert.deepEqual(service.view("kpi-1").report, report);
+  } finally { db.close(); }
+});
+
 test("schedules opted-in KPIs independently and resumes their reports and memory", async () => {
   const db = new Db(":memory:");
   try {
