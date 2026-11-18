@@ -48,7 +48,7 @@ through the API. The diagram groups responsibilities, not separate services.
 | Jira and epics | [`server/jira.ts`](../server/jira.ts) handles Jira HTTP; [`server/jira-status.ts`](../server/jira-status.ts) advances lifecycle stages; [`server/epic-orchestration.ts`](../server/epic-orchestration.ts) coordinates epic launch |
 | Persistence | [`server/db.ts`](../server/db.ts) owns schema, migrations and queries; [`server/task-events.ts`](../server/task-events.ts) records task history |
 | Agent instructions | [`skills/`](../skills) holds injected conventions; [`docs/prompts.md`](prompts.md) registers file-based and inline prompts |
-| KPI monitoring | [`server/kpi.ts`](../server/kpi.ts) schedules opted-in, independent KPI analysis cycles, collects typed evidence from worker outcomes and stores report memory in SQLite ([ADR 0005](adr/0005-kpi-scheduling-and-memory.md)) |
+| KPI monitoring | [`server/kpi.ts`](../server/kpi.ts) schedules opted-in, independent KPI analysis cycles, collects typed evidence from worker outcomes and stores report memory in SQLite ([ADR 0005](adr/0005-kpi-scheduling-and-memory.md)); a cycle's agent comes from a configured favorite and an arbitrary working directory ([ADR 0007](adr/0007-kpi-favorite-and-working-directory.md)) |
 | Agent control | [`server/agent-control.ts`](../server/agent-control.ts) exposes three MCP tools (`corral_next`, `corral_create_task`, `corral_instruct`) through `POST /api/mcp`; results are one short line for voice use, and dispatch remains human-owned |
 
 `WorkerBackend` is an explicit interface that tests can replace with a fake.

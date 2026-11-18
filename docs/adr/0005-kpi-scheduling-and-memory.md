@@ -19,4 +19,5 @@ recovery and context size depend on that session. Fresh cycles keep the research
 state explicit, separate the KPIs even if they share an agent profile, and use
 the existing backend contract. Automatic cycles require a running Corral server
 and an available Omnigent runner. Each monitor allows one active cycle and picks
-up due work after restart. Operators own the definitions and connector access.
+up due work after restart. Operators own the definitions and connector access. [ADR 0007](0007-kpi-favorite-and-working-directory.md)
+covers how the agent and its working directory are chosen.

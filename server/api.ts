@@ -206,7 +206,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     routes.push({ method, pattern, keys, handler, bodyLimit });
   };
 
-  const kpis = state.kpis ??= new KpiMonitor(state.db, state.backend);
+  const kpis = state.kpis ??= new KpiMonitor(state.db, state.backend, {
+    favorites: () => state.cfg.favorites ?? [],
+    repos: () => state.db.listRepos(),
+  });
   on("GET", "/api/kpis", (_req, res) => json(res, 200, KPI_IDS.map((id) => kpis.view(id))));
   on("PUT", "/api/kpis/:id", (_req, res, { params, body }) => {
     const id = KPI_IDS.find((value) => value === params.id);

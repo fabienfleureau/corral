@@ -207,8 +207,12 @@ Give the metric a name and describe its calculation, what to include and its
 reporting window. Add a display unit and references to expected connectors,
 dashboards or queries when known. Save the definition to name the tab.
 
-Select an Omnigent profile with read-only connector access and a registered
-repository as its workspace. Save the settings and use **Run now**, or set
+Choose the working directory the agent reads from. Any absolute folder works,
+git repository or not; the session runs there directly, without a worktree.
+Registered repositories are suggested and decide which favorites are available
+(an unregistered folder uses professional favorites). Pick a favorite to supply
+the harness, agent, model and reasoning; add one in Settings if needed, with
+read-only connector access. Save the settings and use **Run now**, or set
 **Hourly** or **Daily** for automatic analysis. Scheduling starts off.
 Corral and the Omnigent runner must stay online for unattended cycles. After
 a restart Corral resumes checking the active session or starts a due cycle.

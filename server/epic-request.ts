@@ -3,7 +3,7 @@
 // request and reused by the next one.
 
 import { randomUUID } from "node:crypto";
-import type { Favorite } from "./favorites.ts";
+import { favoriteForPath, type Favorite } from "./favorites.ts";
 import type { Reviewer } from "./reviewers.ts";
 import type { Db } from "./db.ts";
 import { logTaskEvent } from "./task-events.ts";
@@ -40,10 +40,7 @@ export function resolveEpicRequestSettings(
   const repoPath = typeof input.repo_path === "string" ? input.repo_path.trim() : "";
   // Any path is allowed, as on the task form. Registered repos are only used
   // to pick the favorite context; an unregistered path uses professional.
-  const repo = repos.find((r) => r.path === repoPath);
-  const context = repo?.context ?? "professional";
-  const available = context ? favorites.filter((f) => (f.context ?? "professional") === context) : favorites;
-  const favorite = favoriteName ? available.find((f) => f.name === favoriteName) ?? null : null;
+  const favorite = favoriteForPath(favoriteName, repoPath, favorites, repos);
   if (favoriteName && !favorite) throw new EpicRequestError("favorite is not configured for this working directory");
   return { favorite, repoPath };
 }

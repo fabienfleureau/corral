@@ -3,11 +3,10 @@ import type { FormEvent } from "react";
 import { KPI_IDS } from "../../../shared/kpis";
 import type { KpiId, KpiMeasurement, KpiSettings, KpiView } from "../../../shared/kpis";
 import { api } from "../api";
+import { favoritesFor, repoContext } from "../favorite-context";
 import { selectionTaskHash } from "../selection-task";
-import type { Repo } from "../types";
+import type { Favorite, Repo } from "../types";
 import { errText } from "../util";
-
-type AgentChoice = { id: string; name: string; harness: string };
 
 function selectedKpi(): KpiId {
   const selected = new URLSearchParams(window.location.hash.split("?")[1]).get("metric");
@@ -18,10 +17,10 @@ export function KpisPage() {
   const [selected, setSelected] = useState(selectedKpi);
   const [views, setViews] = useState<KpiView[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [agents, setAgents] = useState<AgentChoice[]>([]);
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [loadError, setLoadError] = useState("");
   const [optionsError, setOptionsError] = useState("");
-  const [loadingAgents, setLoadingAgents] = useState(true);
+  const [loadingOptions, setLoadingOptions] = useState(true);
   const requestVersion = useRef(0);
   const hasDefinition = views.some(({ settings }) => settings.name && settings.definition);
 
@@ -49,13 +48,14 @@ export function KpisPage() {
   useEffect(() => {
     if (!hasDefinition) return;
     let active = true;
-    void api.listRepos().then((list) => {
-      if (active) setRepos(list);
-    }).catch((error: unknown) => { if (active) setOptionsError(errText(error)); });
-    void api.listHarnesses().then(({ harnesses }) => {
-      if (active) setAgents(harnesses.flatMap(({ harness, agents }) => agents.map((agent) => ({ ...agent, harness }))));
+    setLoadingOptions(true);
+    void Promise.all([api.listRepos(), api.getConfig()]).then(([list, cfg]) => {
+      if (!active) return;
+      setRepos(list);
+      setFavorites(cfg.favorites ?? []);
+      setOptionsError("");
     }).catch((error: unknown) => { if (active) setOptionsError(errText(error)); }).finally(() => {
-      if (active) setLoadingAgents(false);
+      if (active) setLoadingOptions(false);
     });
     return () => { active = false; };
   }, [hasDefinition]);
@@ -75,7 +75,7 @@ export function KpisPage() {
         </a>)}
       </nav>
       {loadError && <div className="inline-error" role="alert">{loadError}</div>}
-      {view ? <KpiDetail key={view.id} view={view} repos={repos} agents={agents} loadingAgents={loadingAgents} optionsError={optionsError} onUpdate={sync} />
+      {view ? <KpiDetail key={view.id} view={view} repos={repos} favorites={favorites} loadingOptions={loadingOptions} optionsError={optionsError} onUpdate={sync} />
         : !loadError && <p role="status" className="muted">Loading KPI status…</p>}
     </div>
   </div>;
@@ -89,8 +89,8 @@ const runStatus = {
   failed: "Last cycle failed",
 } as const;
 
-function KpiDetail({ view, repos, agents, loadingAgents, optionsError, onUpdate }: {
-  view: KpiView; repos: Repo[]; agents: AgentChoice[]; loadingAgents: boolean; optionsError: string;
+function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpdate }: {
+  view: KpiView; repos: Repo[]; favorites: Favorite[]; loadingOptions: boolean; optionsError: string;
   onUpdate: (view: KpiView) => void;
 }) {
   const [settings, setSettings] = useState(view.settings);
@@ -101,7 +101,8 @@ function KpiDetail({ view, repos, agents, loadingAgents, optionsError, onUpdate 
   const defined = Boolean(view.settings.name && view.settings.definition);
   const running = runState === "starting" || runState === "running" || runState === "blocked";
   const dirty = (Object.keys(settings) as (keyof KpiSettings)[]).some((key) => settings[key] !== view.settings[key]);
-  const agentIndex = agents.findIndex(({ id, harness }) => id === settings.agent && harness === settings.harness);
+  const shownFavorites = favoritesFor(favorites, repoContext(repos, settings.repoPath));
+  const favoriteAvailable = shownFavorites.some(({ name }) => name === settings.favorite);
 
   const change = (patch: Partial<KpiSettings>) => {
     setSettings((previous) => ({ ...previous, ...patch }));
@@ -191,27 +192,33 @@ function KpiDetail({ view, repos, agents, loadingAgents, optionsError, onUpdate 
         {view.sessionUrl && <a href={view.sessionUrl} target="_blank" rel="noreferrer">View session in Omnigent ↗</a>}
         {view.error && <div className="inline-error" role="alert">{view.error}</div>}
         {runState === "blocked" && <p className="muted kpi-copy">Open the Omnigent session to see what needs attention.</p>}
-        <label className="field">
-          Agent profile
-          <select name="agent" value={agentIndex >= 0 ? String(agentIndex) : settings.agent ? "unavailable" : ""} disabled={busy || loadingAgents}
+        <label className="field" htmlFor="kpi-workdir">
+          Working directory
+          <input id="kpi-workdir" name="repoPath" list="kpi-workdirs" value={settings.repoPath} disabled={busy}
+            maxLength={2000} autoComplete="off" spellCheck={false} placeholder="/path/to/folder"
+            aria-describedby="kpi-workdir-help"
             onChange={(event) => {
-              const agent = event.target.value === "" ? undefined : agents[Number(event.target.value)];
-              change({ agent: agent?.id ?? "", harness: agent?.harness ?? "" });
-            }}>
-            <option value="">{loadingAgents ? "Loading agents…" : "Choose an agent"}</option>
-            {agentIndex < 0 && settings.agent && <option value="unavailable">{settings.agent} (saved profile)</option>}
-            {agents.map(({ id, name, harness }, i) => <option key={`${harness}/${id}`} value={i}>{name} ({harness})</option>)}
-          </select>
+              const repoPath = event.target.value;
+              const allowed = favoritesFor(favorites, repoContext(repos, repoPath.trim()));
+              change({ repoPath, favorite: settings.favorite && allowed.some((f) => f.name === settings.favorite) ? settings.favorite : "" });
+            }} />
+          <datalist id="kpi-workdirs">
+            {repos.map(({ id, name, path }) => <option key={id} value={path}>{name}</option>)}
+          </datalist>
+          <small id="kpi-workdir-help" className="muted kpi-meta">Any absolute folder works, git repository or not. The agent reads from it directly, without a worktree.</small>
         </label>
-        {!loadingAgents && !agents.length && !optionsError && <p className="muted kpi-copy">Register an Omnigent agent with read-only data access to begin.</p>}
-        <label className="field">
-          Workspace
-          <select name="repo" value={settings.repo} disabled={busy} onChange={(event) => change({ repo: event.target.value })}>
-            <option value="">Choose a repository</option>
-            {settings.repo && !repos.some(({ path }) => path === settings.repo) && <option value={settings.repo}>{settings.repo}</option>}
-            {repos.map(({ id, name, path }) => <option key={id} value={path}>{name} · {path}</option>)}
+        <label className="field" htmlFor="kpi-favorite">
+          Favorite
+          <select id="kpi-favorite" name="favorite" value={favoriteAvailable ? settings.favorite : settings.favorite ? "unavailable" : ""}
+            disabled={busy || loadingOptions} aria-describedby="kpi-favorite-help"
+            onChange={(event) => change({ favorite: event.target.value })}>
+            <option value="">{loadingOptions ? "Loading favorites…" : "Choose a favorite"}</option>
+            {settings.favorite && !favoriteAvailable && <option value="unavailable">{settings.favorite} (unavailable)</option>}
+            {shownFavorites.map(({ name, harness, agent }) => <option key={name} value={name}>{name} — {harness}{agent ? ` · ${agent}` : ""}</option>)}
           </select>
+          <small id="kpi-favorite-help" className="muted kpi-meta">The favorite sets the harness, agent, model and reasoning. Only favorites matching the folder context are shown.</small>
         </label>
+        {!loadingOptions && !favorites.length && !optionsError && <p className="muted kpi-copy">Add a favorite in <a href="#/settings">Settings</a> with read-only data access to begin.</p>}
         <label className="field">
           Run automatically
           <select name="intervalHours" value={settings.intervalHours} disabled={busy} onChange={(event) => change({ intervalHours: Number(event.target.value) as KpiSettings["intervalHours"] })}>
@@ -232,7 +239,7 @@ function KpiDetail({ view, repos, agents, loadingAgents, optionsError, onUpdate 
       {notice && <p className="muted kpi-meta" role="status">{notice}</p>}
       <div className="form-foot">
         <button type="submit" className="btn btn-primary" disabled={busy}>{defined ? "Save settings" : "Save KPI"}</button>
-        {defined && <button type="button" className="btn" disabled={busy || running || dirty || !settings.agent || !settings.repo} onClick={() => void run()}>Run now</button>}
+        {defined && <button type="button" className="btn" disabled={busy || running || dirty || !settings.repoPath || !favoriteAvailable} onClick={() => void run()}>Run now</button>}
       </div>
     </form>
   </div>;
