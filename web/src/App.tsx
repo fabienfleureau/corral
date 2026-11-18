@@ -31,7 +31,7 @@ import { ImprovePage } from "./pages/Improve";
 type Tab = "progress" | "daily" | "inbox" | "tasks" | "epics" | "pulls" | "sessions" | "usage" | "improve" | "settings" | "errors";
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: "inbox", label: "Inbox" },
+  { key: "inbox", label: "Waiting" },
   { key: "tasks", label: "Tasks" },
   { key: "epics", label: "Epics" },
   { key: "daily", label: "Daily" },
