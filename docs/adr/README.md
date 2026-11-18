@@ -15,6 +15,7 @@ They are required when a change makes or revisits such a decision.
 | [0003](0003-record-consequential-decisions.md) | Accepted | Record consequential decisions in the same PR |
 | [0004](0004-agent-control-mcp.md) | Proposed | Agent control uses three MCP tools on the Corral HTTP server |
 | [0005](0005-kpi-scheduling-and-memory.md) | Proposed | Corral owns KPI schedules and analysis memory |
+| [0006](0006-omnigent-project-cleanup.md) | Proposed | Archive detaches the session and removes its empty omnigent project |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.

@@ -146,7 +146,8 @@ export interface WorkerBackend {
     meta?: Record<string, unknown>,
   ): Promise<void>;
   kill(address: string): Promise<void>;
-  /** Archive a resolved session without deleting its worktree. */
+  /** Archive a resolved session without deleting its worktree. Backends may
+   *  also detach it from any grouping and remove an empty group. */
   archive?(address: string): Promise<void>;
   /** Remove the worktree a finished task created (best effort). */
   cleanup?(address: string): Promise<void>;

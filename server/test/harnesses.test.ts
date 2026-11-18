@@ -207,3 +207,109 @@ test("only identifies a terminal startup error before any agent work", async () 
   data = [prompt, failure, prompt];
   assert.equal(await backend.initialFailurePrompt("s"), null);
 });
+
+type RequestCall = { method: string; path: string; body?: any };
+
+function archiveBackend(reply: (call: RequestCall) => Promise<any> | any) {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  const calls: RequestCall[] = [];
+  (backend as unknown as { request: (m: string, p: string, b?: any) => Promise<any> }).request = async (method, path, body) => {
+    const call = { method, path, body };
+    calls.push(call);
+    return reply(call);
+  };
+  return { backend, calls };
+}
+
+const filedSession = { id: "s1", project_id: "p1", labels: { "corral.task": "t", omni_project: "corral" } };
+const filedProject = { data: [{ id: "p1", name: "corral", config: {} }] };
+const noMembers = { data: [], has_more: false };
+
+test("archiving detaches the session and deletes the emptied repository project", async () => {
+  const { backend, calls } = archiveBackend(({ method, path }) => {
+    if (method === "GET" && path === "/v1/sessions/s1") return filedSession;
+    if (path === "/v1/projects") return filedProject;
+    if (path.startsWith("/v1/sessions?")) return noMembers;
+    return {};
+  });
+  await backend.archive("s1");
+  assert.deepEqual(calls.find((c) => c.method === "PATCH" && c.path === "/v1/sessions/s1")?.body, {
+    archived: true,
+    project_id: "",
+    labels: { omni_project: "" },
+  });
+  assert.equal(calls.filter((c) => c.method === "DELETE").length, 1);
+  assert.ok(calls.some((c) => c.method === "DELETE" && c.path === "/v1/projects/p1"));
+  assert.equal((backend as unknown as { projectIds: Map<string, string> }).projectIds.has("corral"), false);
+});
+
+test("a project with a live session is kept untouched", async () => {
+  const { backend, calls } = archiveBackend(({ method, path }) => {
+    if (method === "GET" && path === "/v1/sessions/s1") return filedSession;
+    if (path === "/v1/projects") return filedProject;
+    if (path.startsWith("/v1/sessions?") && path.includes("include_archived=false")) return { data: [{ id: "s2", archived: false }] };
+    if (path.startsWith("/v1/sessions?")) return noMembers;
+    return {};
+  });
+  await backend.archive("s1");
+  assert.equal(calls.some((c) => c.method === "DELETE"), false);
+  assert.equal(calls.some((c) => c.path === "/v1/sessions/s2"), false);
+});
+
+test("archived leftovers are unfiled before the project is deleted", async () => {
+  let archivedReads = 0;
+  const { backend, calls } = archiveBackend(({ method, path }) => {
+    if (method === "GET" && path === "/v1/sessions/s1") return filedSession;
+    if (path === "/v1/projects") return filedProject;
+    if (path.startsWith("/v1/sessions?") && path.includes("include_archived=true")) {
+      archivedReads += 1;
+      return archivedReads === 1
+        ? { data: [{ id: "old", archived: true, labels: { omni_project: "corral" } }], has_more: false }
+        : noMembers;
+    }
+    if (path.startsWith("/v1/sessions?")) return noMembers;
+    return {};
+  });
+  await backend.archive("s1");
+  assert.deepEqual(calls.find((c) => c.method === "PATCH" && c.path === "/v1/sessions/old")?.body, {
+    project_id: "",
+    labels: { omni_project: "" },
+  });
+  assert.ok(calls.some((c) => c.method === "DELETE" && c.path === "/v1/projects/p1"));
+});
+
+test("a project Corral did not create is never deleted", async () => {
+  for (const project of [
+    { id: "p1", name: "corral", config: { model: "custom" } },
+    { id: "p1", name: "renamed", config: {} },
+  ]) {
+    const { backend, calls } = archiveBackend(({ method, path }) => {
+      if (method === "GET" && path === "/v1/sessions/s1") return filedSession;
+      if (path === "/v1/projects") return { data: [project] };
+      if (path.startsWith("/v1/sessions?")) return noMembers;
+      return {};
+    });
+    await backend.archive("s1");
+    assert.equal(calls.some((c) => c.method === "DELETE"), false, `project ${project.name}`);
+  }
+});
+
+test("an older omnigent still archives when it rejects the unfile fields", async () => {
+  const { backend, calls } = archiveBackend(({ method, path, body }) => {
+    if (method === "GET" && path === "/v1/sessions/s1") return filedSession;
+    if (path === "/v1/projects") throw new Error("404 Not Found");
+    if (method === "PATCH" && path === "/v1/sessions/s1" && body.labels !== undefined) throw new Error("422 unrecognized field");
+    return {};
+  });
+  await backend.archive("s1");
+  assert.deepEqual(calls.filter((c) => c.method === "PATCH").map((c) => c.body), [
+    { archived: true, labels: { omni_project: "" } },
+    { archived: true },
+  ]);
+  assert.equal(calls.some((c) => c.method === "DELETE"), false);
+});
+
+test("a failed archive still fails the caller", async () => {
+  const { backend } = archiveBackend(() => { throw new Error("unavailable"); });
+  await assert.rejects(backend.archive("s1"), /unavailable/);
+});

@@ -76,7 +76,9 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   which tells them to POST a clean question via `$CORRAL_URL/api/reports`. Structured
   question batches and permission requests are answered from the item. Acknowledge,
   snooze (1h, 4h, tomorrow) and archive sit on top. Archiving a task from the
-  inbox also archives its session in Omnigent when it has one. A run that stops
+  inbox also archives its session in Omnigent when it has one; the session leaves
+  its repository project, which Corral deletes once no live session remains in
+  it (a renamed or configured project is kept). A run that stops
   without a report —
   a plain closing message, or a backend error — is surfaced as a question item
   carrying that last message, instead of sitting "in progress" forever.
