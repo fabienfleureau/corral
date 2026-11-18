@@ -59,7 +59,7 @@ const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg
 const skills = new SkillsAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt, SKILLS_ANALYSIS_TIMEOUT_MS), { evidence: skillsEvidenceSource(db), agent: analysisAgent });
 const engineeringSkills = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt), { agent: analysisAgent, mode: "engineering-skills" });
 const sessionFacts = new SessionFacts(backend);
-const kpis = new KpiMonitor(db, backend);
+const kpis = new KpiMonitor(db, backend, { favorites: () => cfg.favorites ?? [], repos: () => db.listRepos() });
 const state: AppState = { kpis, db, cfg, backend, capture, jira, hub, usage, improvement, skills, engineeringSkills, sessionFacts };
 const tickKpis = () => void kpis.tick().catch((err) => console.error("corral: KPI poll failed", err));
 setTimeout(tickKpis, 5_000);

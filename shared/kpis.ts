@@ -6,9 +6,10 @@ export interface KpiSettings {
   definition: string;
   unit: string;
   sources: string;
-  agent: string;
-  harness: string;
-  repo: string;
+  /** Working directory for the read-only cycle; any absolute folder path. */
+  repoPath: string;
+  /** Configured favorite supplying harness, agent, model and reasoning. */
+  favorite: string;
   intervalHours: 0 | 1 | 24;
   context: string;
 }

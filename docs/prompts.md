@@ -10,7 +10,7 @@ Prompt families:
 | **Agent conventions** | `skills/*.md` | the dispatched coding agent (Claude Code, Codex, …) | every dispatch, and every PR-loop respawn |
 | **PR-loop messages** | string builders in `server/pr.ts` | a live agent session, or a fresh respawn | when the PR loop has work for the agent |
 | **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts` | the `assistant` command | when the human clicks Summarize, or a digest runs |
-| **KPI analysis** | `kpiPrompt()` in `server/kpi.ts` | the selected Omnigent agent | every manual or scheduled KPI cycle |
+| **KPI analysis** | `kpiPrompt()` in `server/kpi.ts` | the Omnigent agent from the selected favorite | every manual or scheduled KPI cycle |
 | **Agent control tools** | `server/agent-control.ts` | a voice or chat agent using the MCP endpoint | at MCP `initialize` and `tools/list` |
 
 ### Untrusted text: data, not instructions

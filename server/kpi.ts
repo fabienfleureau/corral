@@ -3,13 +3,21 @@ import { isAbsolute } from "node:path";
 import { KPI_IDS } from "../shared/kpis.ts";
 import type { KpiId, KpiMeasurement, KpiReport, KpiSettings, KpiView } from "../shared/kpis.ts";
 import type { Db } from "./db.ts";
+import { favoriteForPath, type Favorite } from "./favorites.ts";
+import type { Repo } from "./types.ts";
 import type { WorkerBackend } from "./worker.ts";
 
 const HOUR = 3_600_000;
 const START_GRACE = 5 * 60_000;
 const DEFAULT_SETTINGS: KpiSettings = {
-  name: "", definition: "", unit: "", sources: "", agent: "", harness: "", repo: "", intervalHours: 0, context: "",
+  name: "", definition: "", unit: "", sources: "", repoPath: "", favorite: "", intervalHours: 0, context: "",
 };
+
+export interface KpiDeps {
+  /** Read at launch so config changes apply to the next cycle. */
+  favorites: () => Favorite[];
+  repos: () => Repo[];
+}
 
 type Row = {
   settings: string;
@@ -23,6 +31,22 @@ type Row = {
   report_ms: number | null;
   last_measurement: string | null;
 };
+
+/** KPI settings are a JSON blob. Older rows stored agent/harness/repo; the
+ *  folder carries over and the operator picks a favorite again. */
+function storedSettings(json: string): KpiSettings {
+  const raw = JSON.parse(json) as Partial<KpiSettings> & { repo?: string };
+  return {
+    name: raw.name ?? "",
+    definition: raw.definition ?? "",
+    unit: raw.unit ?? "",
+    sources: raw.sources ?? "",
+    repoPath: raw.repoPath ?? raw.repo ?? "",
+    favorite: raw.favorite ?? "",
+    intervalHours: raw.intervalHours ?? 0,
+    context: raw.context ?? "",
+  };
+}
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected an object");
@@ -99,12 +123,14 @@ function kpiPrompt(settings: KpiSettings, previous: KpiReport | null, startedMs:
 export class KpiMonitor {
   private db: Db;
   private worker: Pick<WorkerBackend, "start" | "get" | "list" | "lastRunOutcome" | "inspectUrl">;
+  private deps: KpiDeps;
   private clock: () => number;
   private busy = new Set<KpiId>();
 
-  constructor(db: Db, worker: KpiMonitor["worker"], clock = Date.now) {
+  constructor(db: Db, worker: KpiMonitor["worker"], deps: KpiDeps, clock = Date.now) {
     this.db = db;
     this.worker = worker;
+    this.deps = deps;
     this.clock = clock;
     for (const id of KPI_IDS) {
       db.raw.prepare("INSERT OR IGNORE INTO kpi_monitors (id, settings) VALUES (?, ?)").run(id, JSON.stringify(DEFAULT_SETTINGS));
@@ -113,7 +139,7 @@ export class KpiMonitor {
 
   view(id: KpiId): KpiView {
     const row = this.row(id);
-    const settings: KpiSettings = JSON.parse(row.settings);
+    const settings = storedSettings(row.settings);
     return {
       id, settings, runState: row.run_state, address: row.address,
       sessionUrl: row.address ? this.worker.inspectUrl?.(row.address) ?? null : null,
@@ -133,17 +159,19 @@ export class KpiMonitor {
       definition: text(raw.definition, "KPI definition", 6000, true),
       unit: text(raw.unit, "measurement unit", 40, true),
       sources: text(raw.sources, "data sources", 6000, true),
-      agent: text(raw.agent, "agent", 200, true),
-      harness: text(raw.harness, "harness", 100, true),
-      repo: text(raw.repo, "workspace", 2000, true),
+      repoPath: text(raw.repoPath, "working directory", 2000, true),
+      favorite: text(raw.favorite, "favorite", 200, true),
       context: text(raw.context, "KPI context", 6000, true),
       intervalHours,
     };
     if (!settings.name || !settings.definition) throw new Error("Set a KPI name and definition first");
-    if (settings.repo && !isAbsolute(settings.repo)) throw new Error("Workspace path must be absolute");
+    if (settings.repoPath && !isAbsolute(settings.repoPath)) throw new Error("Working directory must be absolute");
+    if (settings.favorite && !favoriteForPath(settings.favorite, settings.repoPath, this.deps.favorites(), this.deps.repos())) {
+      throw new Error(`Favorite ${settings.favorite} is not configured for this working directory`);
+    }
     if (intervalHours) this.validateRunnable(settings);
     const row = this.row(id);
-    const previous: KpiSettings = JSON.parse(row.settings);
+    const previous = storedSettings(row.settings);
     const redefined = previous.definition !== settings.definition || previous.unit !== settings.unit;
     if (redefined && row.run_name) throw new Error("Wait for the active cycle before changing the definition or unit");
     const update = redefined
@@ -182,12 +210,21 @@ export class KpiMonitor {
     return this.db.raw.prepare("SELECT * FROM kpi_monitors WHERE id = ?").get(id) as unknown as Row;
   }
 
+  private favoriteFor(settings: KpiSettings): Favorite {
+    if (!settings.repoPath || !isAbsolute(settings.repoPath)) throw new Error("Select an absolute working directory first");
+    if (!settings.favorite) throw new Error("Select a favorite first");
+    const favorite = favoriteForPath(settings.favorite, settings.repoPath, this.deps.favorites(), this.deps.repos());
+    if (!favorite) throw new Error(`Favorite ${settings.favorite} is not configured for this working directory`);
+    return favorite;
+  }
+
   private validateRunnable(settings: KpiSettings): void {
     if (!settings.name || !settings.definition) throw new Error("Set a KPI name and definition first");
-    if (!settings.agent || !settings.harness || !settings.repo) throw new Error("Select an agent and workspace first");
+    this.favoriteFor(settings);
   }
 
   private async launch({ id, settings, report }: KpiView): Promise<void> {
+    const favorite = this.favoriteFor(settings);
     const name = `KPI: ${settings.name} · ${randomUUID().slice(0, 8)}`;
     const startedMs = this.clock();
     const claim = this.db.raw.prepare(`
@@ -197,8 +234,9 @@ export class KpiMonitor {
     this.busy.add(id);
     try {
       const session = await this.worker.start({
-        taskId: null, name, repoPath: settings.repo, git: null, agent: settings.agent,
-        harness: settings.harness, model: null, reasoning: null, prompt: kpiPrompt(settings, report, startedMs),
+        taskId: null, name, repoPath: settings.repoPath, git: null, agent: favorite.agent || null,
+        harness: favorite.harness, model: favorite.model || null, reasoning: favorite.reasoning || null,
+        prompt: kpiPrompt(settings, report, startedMs),
       });
       this.db.raw.prepare("UPDATE kpi_monitors SET address = ?, run_state = 'running' WHERE id = ? AND run_name = ?")
         .run(session.address, id, name);

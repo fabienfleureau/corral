@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Db } from "../db.ts";
-import { KpiMonitor, parseKpiReport } from "../kpi.ts";
+import { KpiMonitor, parseKpiReport, type KpiDeps } from "../kpi.ts";
+import type { Favorite } from "../favorites.ts";
+import type { Repo } from "../types.ts";
 import type { WorkerSession, WorkerStart } from "../worker.ts";
 
 const hour = 3_600_000;
 const start = Date.UTC(2026, 10, 18);
 const metric = { name: "Example metric", definition: "Compute the change in the net count over a week.", unit: "events", sources: "Fixture event log" };
+const favorites: Favorite[] = [
+  { name: "Research", harness: "claude", agent: "analyst", model: "opus", reasoning: "high", context: "professional", review: "" },
+  { name: "Home research", harness: "codex", agent: "", model: "", reasoning: "", context: "personal", review: "" },
+];
+const work: Repo = { id: "work", name: "work", path: "/sample/work", jira_prefix: null, context: null, source: "manual", created_ms: 0 };
+const home: Repo = { ...work, id: "home", name: "home", path: "/sample/home", context: "personal" };
+const deps: KpiDeps = { favorites: () => favorites, repos: () => [work, home] };
+const agentSettings = { favorite: "Research", repoPath: work.path };
 const report = {
   summary: "The current value is zero.",
   measurement: { value: 0, from: "2026-10-21", to: "2026-11-18", sources: ["Fixture dashboard, metric panel"] },
@@ -48,7 +58,7 @@ test("schedules opted-in KPIs independently and resumes their reports and memory
       list: async () => session ? [session] : [],
       lastRunOutcome: async () => ({ kind: "message" as const, text: output }),
     };
-    const monitor = () => new KpiMonitor(db, worker, () => now);
+    const monitor = () => new KpiMonitor(db, worker, deps, () => now);
     const service = monitor();
     await service.tick();
     assert.equal(launches.length, 0);
@@ -59,12 +69,18 @@ test("schedules opted-in KPIs independently and resumes their reports and memory
       assert.equal(settings.sources, "");
       assert.equal(report, null);
       assert.throws(() => service.runNow(id), /name and definition/i);
-      assert.throws(() => service.configure(id, { ...settings, agent: "analyst", harness: "codex", repo: "/workspace", intervalHours: 1 }), /name and definition/i);
+      assert.throws(() => service.configure(id, { ...settings, ...agentSettings, intervalHours: 1 }), /name and definition/i);
     }
-    service.configure("kpi-2", { ...metric, agent: "analyst", harness: "codex", repo: "/workspace", intervalHours: 1, context: "Use the event catalogue." });
+    service.configure("kpi-2", { ...metric, ...agentSettings, intervalHours: 1, context: "Use the event catalogue." });
     await Promise.all([service.tick(), service.tick(), monitor().tick()]);
     assert.equal(launches.length, 1);
     assert.equal(launches[0].taskId, null);
+    assert.equal(launches[0].repoPath, work.path);
+    assert.equal(launches[0].harness, "claude");
+    assert.equal(launches[0].agent, "analyst");
+    assert.equal(launches[0].model, "opus");
+    assert.equal(launches[0].reasoning, "high");
+    assert.equal(launches[0].git, null);
     assert.match(launches[0].prompt, /Use the event catalogue/);
     assert.match(launches[0].prompt, /net count over a week/);
     assert.match(launches[0].prompt, /Fixture event log/);
@@ -119,12 +135,69 @@ test("an ambiguous launch is recovered by session name without starting another 
       list: async () => [session],
       lastRunOutcome: async () => null,
     };
-    const service = new KpiMonitor(db, worker, () => start);
-    service.configure("kpi-2", { ...metric, agent: "analyst", harness: "codex", repo: "/workspace", intervalHours: 1, context: "" });
+    const service = new KpiMonitor(db, worker, deps, () => start);
+    service.configure("kpi-2", { ...metric, ...agentSettings, intervalHours: 1, context: "" });
     await service.tick();
-    await new KpiMonitor(db, worker, () => start).tick();
+    await new KpiMonitor(db, worker, deps, () => start).tick();
     assert.equal(launches, 1);
     assert.equal(service.view("kpi-2").runState, "running");
     assert.equal(service.view("kpi-2").address, "recovered");
+  } finally { db.close(); }
+});
+
+test("a definition can be saved before the agent picks a folder and favorite", () => {
+  const db = new Db(":memory:");
+  try {
+    const service = new KpiMonitor(db, {} as KpiMonitor["worker"], deps);
+    const saved = service.configure("kpi-1", { ...metric, favorite: "", repoPath: "", intervalHours: 0, context: "" });
+    assert.equal(saved.settings.favorite, "");
+    assert.throws(() => service.runNow("kpi-1"), /working directory/i);
+    service.configure("kpi-1", { ...saved.settings, repoPath: work.path });
+    assert.throws(() => service.runNow("kpi-1"), /favorite/i);
+    assert.throws(() => service.configure("kpi-1", { ...saved.settings, ...agentSettings, repoPath: "relative/path" }), /absolute/i);
+    assert.throws(() => service.configure("kpi-1", { ...saved.settings, ...agentSettings, repoPath: home.path }), /not configured/i);
+    assert.equal(service.configure("kpi-1", { ...saved.settings, ...agentSettings }).settings.favorite, "Research");
+  } finally { db.close(); }
+});
+
+test("old agent settings keep the folder and ask for a favorite", () => {
+  const db = new Db(":memory:");
+  try {
+    const service = new KpiMonitor(db, {} as KpiMonitor["worker"], deps);
+    db.raw.prepare("UPDATE kpi_monitors SET settings = ? WHERE id = ?")
+      .run(JSON.stringify({ ...metric, agent: "analyst", harness: "codex", repo: "/old/folder", intervalHours: 0, context: "" }), "kpi-1");
+    const { settings } = service.view("kpi-1");
+    assert.equal(settings.repoPath, "/old/folder");
+    assert.equal(settings.favorite, "");
+    assert.throws(() => service.runNow("kpi-1"), /favorite/i);
+  } finally { db.close(); }
+});
+
+test("the favorite is resolved at launch, not copied into the settings", async () => {
+  const db = new Db(":memory:");
+  try {
+    const launches: WorkerStart[] = [];
+    let session: WorkerSession;
+    const worker = {
+      start: async (input: WorkerStart) => {
+        launches.push(input);
+        session = { address: "favorite-session", name: input.name, status: "done", state: "finished" } as WorkerSession;
+        return session;
+      },
+      get: async () => session,
+      list: async () => [session],
+      lastRunOutcome: async () => ({ kind: "message" as const, text: JSON.stringify(report) }),
+    };
+    const editable = favorites.map((favorite) => ({ ...favorite }));
+    const service = new KpiMonitor(db, worker, { favorites: () => editable, repos: () => [work, home] }, () => start);
+    service.configure("kpi-1", { ...metric, ...agentSettings, intervalHours: 0, context: "" });
+    await service.runNow("kpi-1");
+    await service.tick();
+    editable[0] = { ...editable[0], model: "sonnet", reasoning: "low" };
+    await service.runNow("kpi-1");
+    await service.tick();
+    assert.equal(launches.length, 2);
+    assert.equal(launches[1].model, "sonnet");
+    assert.equal(launches[1].reasoning, "low");
   } finally { db.close(); }
 });

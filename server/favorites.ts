@@ -1,3 +1,5 @@
+import type { Repo } from "./types.ts";
+
 export type Context = "professional" | "personal";
 export type Favorite = { name: string; harness: string; agent: string; model: string; reasoning: string; context: Context; review: string };
 
@@ -5,6 +7,20 @@ export const CONTEXTS: readonly Context[] = ["professional", "personal"];
 
 export function isContext(value: unknown): value is Context {
   return CONTEXTS.includes(value as Context);
+}
+
+/** A favorite only applies to folders in the same context, as on the task form.
+ *  Unregistered folders use the professional context. */
+export function favoriteForPath(
+  name: string,
+  repoPath: string,
+  favorites: Favorite[],
+  repos: Pick<Repo, "path" | "context">[],
+): Favorite | null {
+  if (!name) return null;
+  const repo = repos.find((r) => r.path === repoPath);
+  const context = repo?.context ?? "professional";
+  return favorites.find((f) => f.name === name && (f.context ?? "professional") === context) ?? null;
 }
 
 export function parseFavorites(value: unknown): Favorite[] {
