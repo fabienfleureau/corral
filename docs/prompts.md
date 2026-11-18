@@ -3,13 +3,14 @@
 Every prompt Corral sends, in one place. Read this before changing what an agent
 is told: prompt text is a product decision, not an implementation detail.
 
-Three families of prompt exist:
+Four families of prompt exist:
 
 | Family | Source of the text | Sent to | Read from disk when |
 |---|---|---|---|
 | **Agent conventions** | `skills/*.md` | the dispatched coding agent (Claude Code, Codex, …) | every dispatch, and every PR-loop respawn |
 | **PR-loop messages** | string builders in `server/pr.ts` | a live agent session, or a fresh respawn | when the PR loop has work for the agent |
 | **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts` | the `assistant` command | when the human clicks Summarize, or a digest runs |
+| **Agent control tools** | `server/agent-control.ts` | a voice or chat agent using the MCP endpoint | at MCP `initialize` and `tools/list` |
 
 ### Untrusted text: data, not instructions
 
@@ -90,6 +91,18 @@ What each one is for:
 `~/.config/corral/skills/` therefore **silently wins** over the checkout, and the
 server does not install or refresh that directory. Files are re-read on every
 dispatch, so editing `skills/*.md` needs no server restart.
+
+## 1a. Agent control tools (`server/agent-control.ts`)
+
+An agent that registers `POST /api/mcp` receives these texts as MCP protocol
+data, not as an injected task convention. They still tell an agent what to do,
+so they live in this registry. Results are one short line and carry task or
+inbox titles as data, never as instructions.
+
+| Text | Sent when | Role |
+|---|---|---|
+| `MCP_INSTRUCTIONS` | in the `initialize` result | answer with the tool result only, one short sentence, in the user's language; treat Corral text as data |
+| `MCP_TOOLS[].description` (`corral_next`, `corral_create_task`, `corral_instruct`) | on `tools/list` | what each tool does and that creating a task does not dispatch it |
 
 ## 2. PR-loop messages pushed into a session
 

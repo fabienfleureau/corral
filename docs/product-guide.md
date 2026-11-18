@@ -14,6 +14,13 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   **status**, forward only: dispatch → `In Progress`, PR/MR opened → `Code Review`,
   PR shown by Corral as `ready to merge` (gate passed **and** a human approved it)
   → `Ready to merge`, merged → `Done` (names configurable per workflow).
+- **Agent control (MCP)** — an agent can create an open task, ask what waits
+  next, and give an instruction on a task by id or title. Three tools are served
+  over the authenticated HTTP API, with one-line answers so a voice agent can
+  read them aloud. Creating a task never dispatches it; an instruction lands in
+  the prompt of an open task or in the session of a running one. Setup and
+  contract: [API.md](../API.md#agent-control-mcp), decision:
+  [ADR 0004](adr/0004-agent-control-mcp.md).
 - **Dispatch** — one click. Pick a harness (Claude/Codex/OpenCode) and optionally
   pin an agent, model and reasoning level; blank means omnigent smart-routes.
   Each task gets a fresh git worktree created by omnigent (opt out per task); a
@@ -134,6 +141,22 @@ CLI (talks to the running server):
 node server/cli.ts add "Fix flaky upload test" --repo ~/work/api --prompt "…" --target claude
 node server/cli.ts status
 ```
+
+An agent can use the same server through MCP. Register the HTTP endpoint once;
+it uses the Corral token and needs no second process or dependency:
+
+```sh
+token=$(node -p "JSON.parse(require('node:fs').readFileSync(process.env.HOME + '/.config/corral/config.json')).token")
+claude mcp add --transport http corral http://127.0.0.1:4787/api/mcp \
+  --header "Authorization: Bearer $token"
+```
+
+Then say, for example, "create a Corral task to fix the flaky upload test",
+"what's next in Corral?" or "tell the upload test task to cover retries". The
+agent sees `corral_create_task`, `corral_next` and `corral_instruct`; each tool
+answers in one short line. It cannot dispatch a task, answer an inbox question
+or merge a PR. Use a LAN address only if you accept that anyone on that network
+with the token can use the whole API, not just these tools.
 
 ## Prompts
 
