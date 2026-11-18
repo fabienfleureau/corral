@@ -291,16 +291,23 @@ export async function findPr(repoPath: string, branch: string): Promise<PrInfo |
   // local checkout. A bare branch still needs a repo to resolve it against.
   const urlRef = /^https?:\/\//.test(branch);
   if (!branch || (!repoPath && !urlRef)) return null;
-  try {
-    return await findPrGitHub(repoPath, branch);
-  } catch {
-    /* not GitHub or gh missing — try GitLab */
-  }
-  try {
-    return await findPrGitLab(repoPath, branch);
-  } catch {
-    return null;
-  }
+  const lookup = async (cwd: string): Promise<PrInfo | null> => {
+    try {
+      return await findPrGitHub(cwd, branch);
+    } catch {
+      /* not GitHub or gh missing — try GitLab */
+    }
+    try {
+      return await findPrGitLab(cwd, branch);
+    } catch {
+      return null;
+    }
+  };
+  const found = await lookup(repoPath);
+  if (found || !urlRef || !repoPath) return found;
+  // A checkout that was moved or removed makes both CLIs fail before they can
+  // read the URL. A URL needs no local repo, so retry from the process cwd.
+  return lookup("");
 }
 
 // ---- the PR loop: feed comments back to the agent, automatically ----
@@ -811,6 +818,10 @@ export function startSyncAllPrs(
       // leaves an open "ready for review" item nobody checks again.
       const followed = db.listTasks().filter((t) => reportedTasks.has(t.id) && !known.has(t.id));
       const tasks = [...candidates, ...followed].filter((t) => !opts.knownPrsOnly || t.pr_url || reportedTasks.has(t.id));
+      // An open PR item promises a current answer. Check it before the rest of
+      // the queue: a slow sweep over hundreds of PRs must not keep a merged
+      // PR showing as "ready for review" in the inbox.
+      tasks.sort((a, b) => Number(reportedTasks.has(b.id)) - Number(reportedTasks.has(a.id)));
       await mapLimit(tasks, 4, (task) => syncTaskPr(db, hub, task, opts).catch(() => null));
       try { archiveEpicLaunchItems(db, hub); } catch (err) { console.error("corral: epic launch cleanup failed:", String(err)); }
     } finally {

@@ -70,7 +70,7 @@ test("periodic sync checks a reported PR even when the task has no branch", with
   assert.equal(db.getItem("item-1")?.status, "archived");
 }));
 
-test("findPr looks up a reported URL without a local repo", async () => {
+async function withFakeGh(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "corral-pr-url-"));
   const originalPath = process.env.PATH;
   try {
@@ -81,16 +81,41 @@ case "$*" in
 esac
 `, { mode: 0o755 });
     process.env.PATH = `${dir}:${originalPath}`;
-
-    const found = await findPr("", URL);
-
-    assert.equal(found?.state, "MERGED");
-    assert.equal(found?.url, URL);
+    await fn(dir);
   } finally {
     process.env.PATH = originalPath;
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+test("findPr looks up a reported URL without a local repo", async () => {
+  await withFakeGh(async () => {
+    const found = await findPr("", URL);
+    assert.equal(found?.state, "MERGED");
+    assert.equal(found?.url, URL);
+  });
 });
+
+test("findPr follows a reported URL when the task's checkout is gone", async () => {
+  await withFakeGh(async (dir) => {
+    const found = await findPr(join(dir, "deleted-checkout"), URL);
+    assert.equal(found?.state, "MERGED", "a missing local path must not hide a merged PR");
+    assert.equal(found?.url, URL);
+  });
+});
+
+test("periodic sync checks live PR items before other candidates", withDb(async (db) => {
+  const now = Date.now();
+  db.insertTask(task({ id: "task-old", created_ms: now - 60_000, branch: "old-branch", pr_url: URL }));
+  db.insertTask(task({ id: "task-new", created_ms: now, branch: "new-branch", pr_url: "https://example.com/repos/1/pulls/8" }));
+  db.insertItem(prItem({ task_id: "task-old" }));
+  const checked: string[] = [];
+
+  await syncAllPrs(db, hub, { finder: (_repo, ref) => { checked.push(ref); return pr(); } }, 0);
+
+  assert.equal(checked[0], URL, "the task with a live inbox item is refreshed first, whatever its age");
+  assert.deepEqual(new Set(checked), new Set([URL, "https://example.com/repos/1/pulls/8"]));
+}));
 
 test("a task with no live session is never respawned by a PR sync", withDb(async (db) => {
   db.insertTask(task({ status: "archived", terminal_address: null }));
