@@ -46,6 +46,36 @@ export function seedScreenshotData(db: Db): void {
   seedEpic(db, now);
   seedTaskHistory(db, now);
   seedPulls(db, now);
+  seedKpis(db, now);
+}
+
+/** Defined KPIs with a report, so the KPI page shows the two-column layout. */
+export function seedKpis(db: Db, now: number): void {
+  const settings = {
+    name: "Weekly active reporters",
+    definition: "Count distinct accounts that submitted a report during the week, UTC.",
+    unit: "accounts", sources: "warehouse.reports, dashboard/activity",
+    repoPath: "/sample/example-project", favorite: "Careful review",
+    intervalHours: 24, context: "Exclude test accounts.",
+  };
+  const report = {
+    summary: "Reporting is steady week over week. The drop in mobile submissions needs a closer look before it changes the trend.",
+    measurement: { value: 1420, from: "2025-01-06", to: "2025-01-13", sources: ["warehouse.reports", "dashboard/activity"] },
+    dataNeeds: ["Mobile submissions lack a device field in the events table."],
+    productQuestions: ["Should trial accounts count as reporters?"],
+    proposals: [{ title: "Add device field to submission events", rationale: "Would explain the mobile gap and sharpen the weekly count.", evidence: "dashboard/activity, panel 3" }],
+    memory: "Previous cycles confirmed the warehouse job completes by 06:00 UTC.",
+  };
+  db.raw.prepare(`INSERT OR REPLACE INTO kpi_monitors
+    (id, settings, run_state, report, report_ms, last_measurement, finished_ms)
+    VALUES (?, ?, 'complete', ?, ?, ?, ?)`).run(
+    "kpi-1", JSON.stringify(settings), JSON.stringify(report), now, JSON.stringify(report.measurement), now,
+  );
+  db.raw.prepare("INSERT OR REPLACE INTO kpi_monitors (id, settings) VALUES (?, ?)").run("kpi-2", JSON.stringify({
+    name: "Median review time",
+    definition: "Median hours from review request to first substantive review.",
+    unit: "hours", sources: "", repoPath: "", favorite: "", intervalHours: 0, context: "",
+  }));
 }
 
 /** A multi-repo spec with its plan waiting for approval, and a code task a

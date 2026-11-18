@@ -33,6 +33,15 @@ export function parseStoredFlag(raw: string | null): boolean {
   return raw === "1";
 }
 
+/** Arrow keys follow the handle: Right grows a pane on its left, Left grows a
+ * pane on its right. Other keys pass through unchanged. */
+export function keyForSide(key: string, side: "start" | "end"): string {
+  if (side === "start") return key;
+  if (key === "ArrowRight") return "ArrowLeft";
+  if (key === "ArrowLeft") return "ArrowRight";
+  return key;
+}
+
 /**
  * The width a key press asks for, or null when the key does nothing. The
  * handle sits on the pane's end edge, so Right grows it and Left shrinks it.

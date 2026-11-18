@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { KPI_IDS } from "../../../shared/kpis";
 import type { KpiId, KpiMeasurement, KpiSettings, KpiView } from "../../../shared/kpis";
 import { api } from "../api";
 import { favoritesFor, repoContext } from "../favorite-context";
 import { selectionTaskHash } from "../selection-task";
+import { ResizeHandle } from "../ResizeHandle";
+import { usePaneWidth } from "../use-pane-size";
+import type { PaneLimits } from "../pane-size";
 import type { Favorite, Repo } from "../types";
 import { errText } from "../util";
+
+const SETTINGS_LIMITS: PaneLimits = { min: 320, max: 560 };
+const SETTINGS_DEFAULT_WIDTH = 380;
+/** The report keeps this much room while the settings pane grows. */
+const REPORT_MIN_WIDTH = 360;
 
 function selectedKpi(): KpiId {
   const selected = new URLSearchParams(window.location.hash.split("?")[1]).get("metric");
@@ -94,6 +102,7 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
   onUpdate: (view: KpiView) => void;
 }) {
   const [settings, setSettings] = useState(view.settings);
+  const settingsPane = usePaneWidth("corral.kpiSettingsWidth", SETTINGS_DEFAULT_WIDTH, SETTINGS_LIMITS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -126,6 +135,8 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
     catch (error) { setError(errText(error)); }
     finally { setBusy(false); }
   };
+
+  const paneStyle = { "--kpi-settings-width": `${settingsPane.width}px` } as CSSProperties;
 
   return <div className={defined ? "kpi-layout" : "kpi-setup"}>
     {defined && <div className="kpi-main">
@@ -166,75 +177,87 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
       </details>}
     </div>}
 
-    <form className="panel-form kpi-agent" aria-labelledby="kpi-definition" onSubmit={(event) => void save(event)}>
-      <fieldset className="kpi-definition" disabled={busy}>
-        <legend id="kpi-definition" className="panel-title">KPI definition</legend>
-        <label className="field" htmlFor="kpi-name">Name (required)</label>
-        <input id="kpi-name" name="name" required maxLength={120} value={settings.name}
-          onChange={(event) => change({ name: event.target.value })} />
-        <label className="field" htmlFor="kpi-calculation">Definition (required)</label>
-        <textarea id="kpi-calculation" name="definition" required rows={3} maxLength={6000} value={settings.definition}
-          onChange={(event) => change({ definition: event.target.value })} aria-describedby="kpi-definition-help" />
-        <p id="kpi-definition-help" className="muted kpi-meta">Describe how to calculate the KPI, what to include and which period to measure.</p>
-        <label className="field" htmlFor="kpi-unit">Unit (optional)</label>
-        <input id="kpi-unit" name="unit" maxLength={40} value={settings.unit}
-          onChange={(event) => change({ unit: event.target.value })} />
-        <label className="field" htmlFor="kpi-sources">Data sources (optional)</label>
-        <textarea id="kpi-sources" name="sources" rows={3} maxLength={6000} value={settings.sources}
-          onChange={(event) => change({ sources: event.target.value })} aria-describedby="kpi-sources-help" />
-        <p id="kpi-sources-help" className="muted kpi-meta">Add connector names, dashboard links or query references for the agent.</p>
-      </fieldset>
-      {defined && <>
-        <div className="kpi-agent-heading">
-          <h2 className="panel-title">Omnigent agent</h2>
-          <span className="kpi-state" role="status">{runState ? runStatus[runState] : "Awaiting first run"}</span>
-        </div>
-        {view.sessionUrl && <a href={view.sessionUrl} target="_blank" rel="noreferrer">View session in Omnigent ↗</a>}
-        {view.error && <div className="inline-error" role="alert">{view.error}</div>}
-        {runState === "blocked" && <p className="muted kpi-copy">Open the Omnigent session to see what needs attention.</p>}
-        <label className="field" htmlFor="kpi-workdir">
-          Working directory
-          <input id="kpi-workdir" name="repoPath" list="kpi-workdirs" value={settings.repoPath} disabled={busy}
-            maxLength={2000} autoComplete="off" spellCheck={false} placeholder="/path/to/folder"
-            aria-describedby="kpi-workdir-help"
-            onChange={(event) => {
-              const repoPath = event.target.value;
-              const allowed = favoritesFor(favorites, repoContext(repos, repoPath.trim()));
-              change({ repoPath, favorite: settings.favorite && allowed.some((f) => f.name === settings.favorite) ? settings.favorite : "" });
-            }} />
-          <datalist id="kpi-workdirs">
-            {repos.map(({ id, name, path }) => <option key={id} value={path}>{name}</option>)}
-          </datalist>
-          <small id="kpi-workdir-help" className="muted kpi-meta">Any absolute folder works, git repository or not. The agent reads from it directly, without a worktree.</small>
-        </label>
-        <label className="field" htmlFor="kpi-favorite">
-          Favorite
-          <select id="kpi-favorite" name="favorite" value={favoriteAvailable ? settings.favorite : settings.favorite ? "unavailable" : ""}
-            disabled={busy || loadingOptions} aria-describedby="kpi-favorite-help"
-            onChange={(event) => change({ favorite: event.target.value })}>
-            <option value="">{loadingOptions ? "Loading favorites…" : "Choose a favorite"}</option>
-            {settings.favorite && !favoriteAvailable && <option value="unavailable">{settings.favorite} (unavailable)</option>}
-            {shownFavorites.map(({ name, harness, agent }) => <option key={name} value={name}>{name} — {harness}{agent ? ` · ${agent}` : ""}</option>)}
-          </select>
-          <small id="kpi-favorite-help" className="muted kpi-meta">The favorite sets the harness, agent, model and reasoning. Only favorites matching the folder context are shown.</small>
-        </label>
-        {!loadingOptions && !favorites.length && !optionsError && <p className="muted kpi-copy">Add a favorite in <a href="#/settings">Settings</a> with read-only data access to begin.</p>}
-        <label className="field">
-          Run automatically
-          <select name="intervalHours" value={settings.intervalHours} disabled={busy} onChange={(event) => change({ intervalHours: Number(event.target.value) as KpiSettings["intervalHours"] })}>
-            <option value={0}>Off</option><option value={1}>Hourly</option><option value={24}>Daily</option>
-          </select>
-        </label>
-        <p className="muted kpi-meta">Automatic cycles require Corral and the Omnigent runner to stay online.</p>
-        {view.nextRunMs !== null && <p className="muted kpi-meta">Next cycle {view.nextRunMs <= Date.now() ? "due now" : new Date(view.nextRunMs).toLocaleString()}</p>}
-        <label className="field">
-          Product context and answers
-          <textarea name="context" rows={4} maxLength={6000} value={settings.context} disabled={busy}
-            onChange={(event) => change({ context: event.target.value })} aria-describedby="kpi-context-help" />
-        </label>
-        <p id="kpi-context-help" className="muted kpi-meta">Add constraints or answers to product questions for the next cycle.</p>
-        {optionsError && <div className="inline-error" role="alert">{optionsError}</div>}
-      </>}
+    {defined && <ResizeHandle
+      label="Resize KPI settings"
+      side="end"
+      width={settingsPane.width}
+      limits={SETTINGS_LIMITS}
+      reserve={REPORT_MIN_WIDTH}
+      onChange={settingsPane.setWidth}
+      onReset={settingsPane.reset}
+    />}
+
+    <form className="panel-form kpi-agent" style={paneStyle} aria-labelledby="kpi-definition" onSubmit={(event) => void save(event)}>
+      <div className="kpi-agent-body">
+        <fieldset className="kpi-definition" disabled={busy}>
+          <legend id="kpi-definition" className="panel-title">KPI definition</legend>
+          <label className="field" htmlFor="kpi-name">Name (required)</label>
+          <input id="kpi-name" name="name" required maxLength={120} value={settings.name}
+            onChange={(event) => change({ name: event.target.value })} />
+          <label className="field" htmlFor="kpi-calculation">Definition (required)</label>
+          <textarea id="kpi-calculation" name="definition" required rows={3} maxLength={6000} value={settings.definition}
+            onChange={(event) => change({ definition: event.target.value })} aria-describedby="kpi-definition-help" />
+          <p id="kpi-definition-help" className="muted kpi-meta">Describe how to calculate the KPI, what to include and which period to measure.</p>
+          <label className="field" htmlFor="kpi-unit">Unit (optional)</label>
+          <input id="kpi-unit" name="unit" maxLength={40} value={settings.unit}
+            onChange={(event) => change({ unit: event.target.value })} />
+          <label className="field" htmlFor="kpi-sources">Data sources (optional)</label>
+          <textarea id="kpi-sources" name="sources" rows={3} maxLength={6000} value={settings.sources}
+            onChange={(event) => change({ sources: event.target.value })} aria-describedby="kpi-sources-help" />
+          <p id="kpi-sources-help" className="muted kpi-meta">Add connector names, dashboard links or query references for the agent.</p>
+        </fieldset>
+        {defined && <>
+          <div className="kpi-agent-heading">
+            <h2 className="panel-title">Omnigent agent</h2>
+            <span className="kpi-state" role="status">{runState ? runStatus[runState] : "Awaiting first run"}</span>
+          </div>
+          {view.sessionUrl && <a href={view.sessionUrl} target="_blank" rel="noreferrer">View session in Omnigent ↗</a>}
+          {view.error && <div className="inline-error" role="alert">{view.error}</div>}
+          {runState === "blocked" && <p className="muted kpi-copy">Open the Omnigent session to see what needs attention.</p>}
+          <label className="field" htmlFor="kpi-workdir">
+            Working directory
+            <input id="kpi-workdir" name="repoPath" list="kpi-workdirs" value={settings.repoPath} disabled={busy}
+              maxLength={2000} autoComplete="off" spellCheck={false} placeholder="/path/to/folder"
+              aria-describedby="kpi-workdir-help"
+              onChange={(event) => {
+                const repoPath = event.target.value;
+                const allowed = favoritesFor(favorites, repoContext(repos, repoPath.trim()));
+                change({ repoPath, favorite: settings.favorite && allowed.some((f) => f.name === settings.favorite) ? settings.favorite : "" });
+              }} />
+            <datalist id="kpi-workdirs">
+              {repos.map(({ id, name, path }) => <option key={id} value={path}>{name}</option>)}
+            </datalist>
+            <small id="kpi-workdir-help" className="muted kpi-meta">Any absolute folder works, git repository or not. The agent reads from it directly, without a worktree.</small>
+          </label>
+          <label className="field" htmlFor="kpi-favorite">
+            Favorite
+            <select id="kpi-favorite" name="favorite" value={favoriteAvailable ? settings.favorite : settings.favorite ? "unavailable" : ""}
+              disabled={busy || loadingOptions} aria-describedby="kpi-favorite-help"
+              onChange={(event) => change({ favorite: event.target.value })}>
+              <option value="">{loadingOptions ? "Loading favorites…" : "Choose a favorite"}</option>
+              {settings.favorite && !favoriteAvailable && <option value="unavailable">{settings.favorite} (unavailable)</option>}
+              {shownFavorites.map(({ name, harness, agent }) => <option key={name} value={name}>{name} — {harness}{agent ? ` · ${agent}` : ""}</option>)}
+            </select>
+            <small id="kpi-favorite-help" className="muted kpi-meta">The favorite sets the harness, agent, model and reasoning. Only favorites matching the folder context are shown.</small>
+          </label>
+          {!loadingOptions && !favorites.length && !optionsError && <p className="muted kpi-copy">Add a favorite in <a href="#/settings">Settings</a> with read-only data access to begin.</p>}
+          <label className="field">
+            Run automatically
+            <select name="intervalHours" value={settings.intervalHours} disabled={busy} onChange={(event) => change({ intervalHours: Number(event.target.value) as KpiSettings["intervalHours"] })}>
+              <option value={0}>Off</option><option value={1}>Hourly</option><option value={24}>Daily</option>
+            </select>
+          </label>
+          <p className="muted kpi-meta">Automatic cycles require Corral and the Omnigent runner to stay online.</p>
+          {view.nextRunMs !== null && <p className="muted kpi-meta">Next cycle {view.nextRunMs <= Date.now() ? "due now" : new Date(view.nextRunMs).toLocaleString()}</p>}
+          <label className="field">
+            Product context and answers
+            <textarea name="context" rows={4} maxLength={6000} value={settings.context} disabled={busy}
+              onChange={(event) => change({ context: event.target.value })} aria-describedby="kpi-context-help" />
+          </label>
+          <p id="kpi-context-help" className="muted kpi-meta">Add constraints or answers to product questions for the next cycle.</p>
+          {optionsError && <div className="inline-error" role="alert">{optionsError}</div>}
+        </>}
+      </div>
       {error && <div className="inline-error" role="alert">{error}</div>}
       {notice && <p className="muted kpi-meta" role="status">{notice}</p>}
       <div className="form-foot">
