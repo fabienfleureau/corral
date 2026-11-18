@@ -188,8 +188,8 @@ The inbox action asks the active Claude session to create a private artifact exp
 
 ## KPI monitoring
 
-`kpiPrompt()` in `server/kpi.ts` sends the metric definition, operator context
-and previous validated report to a fresh worker session. The prompt asks the
+`kpiPrompt()` in `server/kpi.ts` sends the operator's metric definition, unit,
+source references, context and previous validated report to a fresh worker session. The prompt asks the
 agent to treat collected evidence and prior output as data, use authorised
 read-only connectors, and return a JSON report with a sourced measurement or
 an explicit gap, product questions, evidence-backed proposals and a bounded

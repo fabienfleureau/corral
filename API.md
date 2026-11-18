@@ -65,11 +65,11 @@ type Item = {
 ### KPI monitoring
 
 The contract types live in [`shared/kpis.ts`](shared/kpis.ts). Supported IDs are
-`qovery-side` and `tier1`.
+`kpi-1` and `kpi-2`. Both slots start empty.
 
 - `GET /api/kpis` → `KpiView[]` — settings, cycle state, Omnigent session link, latest validated report and last sourced measurement for both KPIs. This reads SQLite.
-- `PUT /api/kpis/:id` `{agent, harness, repo, intervalHours, context}` → `KpiView` — saves the selected agent, absolute workspace path, cadence (0 off, 1 hourly, 24 daily) and operator context. 400 for invalid settings, 404 for an unknown KPI.
-- `POST /api/kpis/:id/run` → `202 KpiView` — starts one cycle using saved settings. 409 when the agent or workspace is missing or a cycle is active, 404 for an unknown KPI.
+- `PUT /api/kpis/:id` `{name, definition, unit, sources, agent, harness, repo, intervalHours, context}` → `KpiView` — saves the metric definition, its optional display unit and source references, then the agent settings and operator context. A schedule (1 hourly, 24 daily, 0 off) requires a name, definition, agent and absolute workspace path. Changing the definition or unit resets the previous report and is allowed between cycles. 400 for invalid settings, 404 for an unknown slot.
+- `POST /api/kpis/:id/run` → `202 KpiView` — starts one cycle using saved settings. 409 when required settings are missing or a cycle is active, 404 for an unknown KPI.
 
 A report includes the summary, optional numeric measurement with UTC window
 and source references, data needs, product questions, proposals with evidence,

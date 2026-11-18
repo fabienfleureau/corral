@@ -6,28 +6,28 @@ import type { WorkerSession, WorkerStart } from "../worker.ts";
 
 const hour = 3_600_000;
 const start = Date.UTC(2026, 10, 18);
+const metric = { name: "Example metric", definition: "Compute the change in the net count over a week.", unit: "events", sources: "Fixture event log" };
 const report = {
-  summary: "Both Tier 1 organisations are below the threshold.",
-  measurement: { value: 0, from: "2026-10-21", to: "2026-11-18", sources: ["Deployment dashboard, Tier 1 panel"] },
+  summary: "The current value is zero.",
+  measurement: { value: 0, from: "2026-10-21", to: "2026-11-18", sources: ["Fixture dashboard, metric panel"] },
   dataNeeds: [],
-  productQuestions: ["Should retried deployments count once?"],
+  productQuestions: ["How should duplicate events be counted?"],
   proposals: [],
-  memory: "Compare against the Tier 1 cohort from the CRM.",
+  memory: "Cross-check counts against the event log.",
 };
 
-test("validates measured zero, rolling windows and evidence in agent output", () => {
-  assert.deepEqual(parseKpiReport("tier1", JSON.stringify(report), start), report);
-  assert.throws(() => parseKpiReport("tier1", JSON.stringify({
-    ...report, measurement: { ...report.measurement, from: "2026-11-01" },
+test("validates generic measurements, windows and evidence in agent output", () => {
+  assert.deepEqual(parseKpiReport(JSON.stringify(report), start), report);
+  const signed = { ...report, measurement: { ...report.measurement, value: -120.5 } };
+  assert.deepEqual(parseKpiReport(JSON.stringify(signed), start), signed);
+  assert.throws(() => parseKpiReport(JSON.stringify({
+    ...report, measurement: { ...report.measurement, from: "2026-11-31" },
   }), start), /measurement/i);
-  assert.throws(() => parseKpiReport("tier1", JSON.stringify({
-    ...report, measurement: { ...report.measurement, from: "2026-10-20", to: "2026-11-17" },
-  }), start), /measurement/i);
-  assert.throws(() => parseKpiReport("qovery-side", JSON.stringify({
+  assert.throws(() => parseKpiReport(JSON.stringify({
     ...report, measurement: { ...report.measurement, sources: [] },
   }), start), /measurement/i);
-  assert.throws(() => parseKpiReport("tier1", JSON.stringify({
-    ...report, measurement: null, proposals: [{ title: "Fix runner", rationale: "Increase reliability", evidence: "Unverified" }],
+  assert.throws(() => parseKpiReport(JSON.stringify({
+    ...report, measurement: null, proposals: [{ title: "Fix event pipeline", rationale: "Increase coverage", evidence: "Unverified" }],
   }), start), /proposals/i);
 });
 
@@ -52,40 +52,55 @@ test("schedules opted-in KPIs independently and resumes their reports and memory
     const service = monitor();
     await service.tick();
     assert.equal(launches.length, 0);
-    service.configure("tier1", { agent: "reliability", harness: "codex", repo: "/workspace", intervalHours: 1, context: "CRM defines Tier 1." });
+    for (const id of ["kpi-1", "kpi-2"] as const) {
+      const { settings, report } = service.view(id);
+      assert.equal(settings.name, "");
+      assert.equal(settings.definition, "");
+      assert.equal(settings.sources, "");
+      assert.equal(report, null);
+      assert.throws(() => service.runNow(id), /name and definition/i);
+      assert.throws(() => service.configure(id, { ...settings, agent: "analyst", harness: "codex", repo: "/workspace", intervalHours: 1 }), /name and definition/i);
+    }
+    service.configure("kpi-2", { ...metric, agent: "analyst", harness: "codex", repo: "/workspace", intervalHours: 1, context: "Use the event catalogue." });
     await Promise.all([service.tick(), service.tick(), monitor().tick()]);
     assert.equal(launches.length, 1);
     assert.equal(launches[0].taskId, null);
-    assert.match(launches[0].prompt, /CRM defines Tier 1/);
-    assert.equal(service.view("tier1").runState, "running");
-    assert.equal(service.view("qovery-side").report, null);
+    assert.match(launches[0].prompt, /Use the event catalogue/);
+    assert.match(launches[0].prompt, /net count over a week/);
+    assert.match(launches[0].prompt, /Fixture event log/);
+    assert.equal(service.view("kpi-2").runState, "running");
+    assert.equal(service.view("kpi-1").report, null);
 
     session = { ...session!, status: "done" };
     await monitor().tick();
-    assert.equal(service.view("tier1").report?.measurement?.value, 0);
-    assert.equal(service.view("tier1").report?.productQuestions.length, 1);
+    assert.equal(service.view("kpi-2").report?.measurement?.value, 0);
+    assert.equal(service.view("kpi-2").report?.productQuestions.length, 1);
     now += hour - 1;
     await service.tick();
     assert.equal(launches.length, 1);
     now++;
     await service.tick();
     assert.equal(launches.length, 2);
-    assert.match(launches[1].prompt, /Compare against the Tier 1 cohort/);
-    assert.match(launches[1].prompt, /Should retried deployments count once/);
+    assert.match(launches[1].prompt, /Cross-check counts against the event log/);
+    assert.match(launches[1].prompt, /How should duplicate events be counted/);
 
     session = { ...session!, status: "done" };
-    output = JSON.stringify({ ...report, measurement: null, dataNeeds: ["Restore deployment connector"] });
+    output = JSON.stringify({ ...report, measurement: null, dataNeeds: ["Restore the event connector"] });
     await service.tick();
-    assert.equal(service.view("tier1").report?.measurement, null);
-    assert.equal(service.view("tier1").lastMeasurement?.value, 0);
-    assert.deepEqual(service.view("tier1").report?.dataNeeds, ["Restore deployment connector"]);
+    assert.equal(service.view("kpi-2").report?.measurement, null);
+    assert.equal(service.view("kpi-2").lastMeasurement?.value, 0);
+    assert.deepEqual(service.view("kpi-2").report?.dataNeeds, ["Restore the event connector"]);
 
-    await service.runNow("tier1");
+    await service.runNow("kpi-2");
     session = { ...session!, status: "done" };
     output = "invalid output";
     await service.tick();
-    assert.equal(service.view("tier1").runState, "failed");
-    assert.deepEqual(service.view("tier1").report?.dataNeeds, ["Restore deployment connector"]);
+    assert.equal(service.view("kpi-2").runState, "failed");
+    assert.deepEqual(service.view("kpi-2").report?.dataNeeds, ["Restore the event connector"]);
+
+    service.configure("kpi-2", { ...service.view("kpi-2").settings, definition: "Calculate a different metric." });
+    assert.equal(service.view("kpi-2").report, null);
+    assert.equal(service.view("kpi-2").lastMeasurement, null);
   } finally { db.close(); }
 });
 
@@ -105,11 +120,11 @@ test("an ambiguous launch is recovered by session name without starting another 
       lastRunOutcome: async () => null,
     };
     const service = new KpiMonitor(db, worker, () => start);
-    service.configure("tier1", { agent: "reliability", harness: "codex", repo: "/workspace", intervalHours: 1, context: "" });
+    service.configure("kpi-2", { ...metric, agent: "analyst", harness: "codex", repo: "/workspace", intervalHours: 1, context: "" });
     await service.tick();
     await new KpiMonitor(db, worker, () => start).tick();
     assert.equal(launches, 1);
-    assert.equal(service.view("tier1").runState, "running");
-    assert.equal(service.view("tier1").address, "recovered");
+    assert.equal(service.view("kpi-2").runState, "running");
+    assert.equal(service.view("kpi-2").address, "recovered");
   } finally { db.close(); }
 });

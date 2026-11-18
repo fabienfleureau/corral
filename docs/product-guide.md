@@ -200,23 +200,22 @@ Env overrides: `CORRAL_PORT`, `CORRAL_HOST`, `CORRAL_TOKEN`, `CORRAL_DATA_DIR`.
 
 ## KPI monitoring
 
-Open [KPI](#/kpis) and choose **Qovery-side deployment failure rate** or
-**Tier 1 organisations above 2% failed deployments (4 weeks)**. Each tab
-shows the latest report, measurement window and evidence, missing data,
-product questions and proposed improvements. A previous sourced measurement
-stays visible if the latest cycle cannot measure the KPI. **Draft task**
-opens the editable Tasks form.
+Open [KPI](#/kpis) and choose **KPI 1** or **KPI 2**. Both start empty.
+Give the metric a name and describe its calculation, what to include and its
+reporting window. Add a display unit and references to expected connectors,
+dashboards or queries when known. Save the definition to name the tab.
 
-For each KPI, choose an Omnigent agent profile with read-only connector access
-and a registered repository as its workspace. Save the settings and use **Run
-now**, or set **Hourly** or **Daily** for automatic analysis. Scheduling is
-off by default. Keep Corral and the Omnigent runner online for unattended cycles.
-After a restart Corral checks the active session or starts a due cycle.
-A cycle can run until it finishes. If a harness blocks, open the session link
-to review the pending request.
+Select an Omnigent profile with read-only connector access and a registered
+repository as its workspace. Save the settings and use **Run now**, or set
+**Hourly** or **Daily** for automatic analysis. Scheduling starts off.
+Corral and the Omnigent runner must stay online for unattended cycles. After
+a restart Corral resumes checking the active session or starts a due cycle.
 
-Use **KPI context and answers** for authoritative definitions, dashboard or
-query references and answers to product questions. Add connector credentials
-to the Omnigent profile through its normal configuration. Each new cycle reads
-the last validated report and its research memory for this KPI. It can spend
-a cycle investigating and return data needs without proposing any work.
+Each tab shows the last report, measurement window and evidence, missing
+data, product questions and proposals. The last sourced value stays visible
+if a newer cycle lacks a measurement. Use **Product context and answers** to
+reply to questions. The next cycle reads the prior report and research memory.
+**Draft task** opens the editable Tasks form for a proposal.
+
+Changing the calculation or unit starts a fresh report and memory for the slot.
+Edits to the name, sources and product context preserve the current research.

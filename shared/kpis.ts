@@ -1,12 +1,11 @@
-export const KPIS = {
-  "qovery-side": { title: "Qovery-side deployment failure rate", unit: "%" },
-  tier1: { title: "Tier 1 organisations above 2% failed deployments (4 weeks)", unit: "organisations" },
-} as const;
-
-export type KpiId = keyof typeof KPIS;
-export const KPI_IDS = Object.keys(KPIS) as KpiId[];
+export const KPI_IDS = ["kpi-1", "kpi-2"] as const;
+export type KpiId = typeof KPI_IDS[number];
 
 export interface KpiSettings {
+  name: string;
+  definition: string;
+  unit: string;
+  sources: string;
   agent: string;
   harness: string;
   repo: string;

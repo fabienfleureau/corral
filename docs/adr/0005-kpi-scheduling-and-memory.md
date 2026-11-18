@@ -2,9 +2,10 @@
 
 Status: Proposed
 
-Corral tracks two deployment KPIs and displays the evidence, open questions
-and improvement proposals together. Corral stores the schedule, active cycle,
-latest report and last sourced measurement in SQLite. Each cycle starts a
+Corral provides two empty slots for user-defined KPIs and displays the evidence,
+open questions and improvement proposals together. Corral stores each definition,
+source references, schedule, active cycle, latest report and last sourced measurement
+in SQLite. Each cycle starts a
 fresh Omnigent session through `WorkerBackend`, with the operator's KPI context
 and the previous validated report. The latest accepted report carries a bounded
 research memory. Improvements stay proposals until the operator drafts a task.
