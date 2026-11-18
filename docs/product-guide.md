@@ -55,6 +55,8 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   its prerequisite's branch only when launched. Decision: [ADR 0002](adr/0002-epic-tasks-start-from-epic-page.md).
   The request field has two actions: **Propose a plan** reads the epic without creating
   a task, a PR or a Jira change; **Create task** tracks the work for later dispatch on the Tasks page, outside the Jira board.
+  Its prompt starts with the epic's Jira ticket, summary and link, so the task keeps
+  that context when you edit or dispatch it later.
   A ticket's `Préconditions` are checked by the agent before it starts. The epic's
   **design** is versioned: publishing a revision writes the current version into the
   Jira epic, marks started tasks **impacted**, and an assistant proposes an

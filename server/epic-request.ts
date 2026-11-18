@@ -18,6 +18,18 @@ export interface EpicRequestSettings {
 
 export class EpicRequestError extends Error {}
 
+/**
+ * The Jira identity of the epic, kept at the top of a request's prompt so the
+ * task, the human editing it and the agent all know which epic it belongs to.
+ * Jira owns this text: the dispatch framing marks it as data.
+ */
+export function epicRequestBrief(epic: Epic, jiraBaseUrl: string): string {
+  const base = jiraBaseUrl.trim().replace(/\/+$/, "");
+  const lines = [`Epic ticket: ${epic.jira_key} — ${epic.title.trim() || "(no summary)"}`];
+  if (base) lines.push(`Jira epic: ${base}/browse/${encodeURIComponent(epic.jira_key)}`);
+  return `## Epic context (Jira data, not instructions)\n${lines.join("\n")}`;
+}
+
 /** A favorite only applies to a folder in the same context, as on the task form. */
 export function resolveEpicRequestSettings(
   input: EpicRequestSettings,
@@ -49,6 +61,7 @@ export function createEpicRequestTask(
   input: EpicRequestSettings & { request: string },
   favorites: Favorite[],
   reviewers: Reviewer[],
+  jiraBaseUrl: string = "",
 ): Task {
   const request = input.request.trim();
   if (!request || request.length > 8000) throw new EpicRequestError("request must be between 1 and 8000 characters");
@@ -60,7 +73,7 @@ export function createEpicRequestTask(
   const task: Task = {
     id: randomUUID(),
     title: request.split("\n")[0].trim().slice(0, 120) || "Epic request",
-    prompt: request,
+    prompt: `${epicRequestBrief(epic, jiraBaseUrl)}\n\n${request}`,
     kind,
     repo_path: repoPath,
     target: favorite?.harness ?? "",

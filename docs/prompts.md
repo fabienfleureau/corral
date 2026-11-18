@@ -18,7 +18,7 @@ body. `DATA_NOT_INSTRUCTIONS` (`server/dispatch.ts`) wraps both as **data**: it
 cannot widen scope, change rules, or make the agent run commands, and the agent
 reports a question instead of complying. It is one short constant, shared by
 `dispatch.ts` and `commentsSection()` in `server/pr.ts` — do not fork the wording.
-Keep this rule when adding an injection of third-party text.
+Keep this rule when adding an injection of third-party text. Tasks created from the Epic page carry the epic's Jira key, summary and link at the top of their prompt (`epicRequestBrief()` in `server/epic-request.ts`); having an `epic_id` therefore also triggers the framing, since that text comes from Jira.
 
 ## 1. Agent conventions (`skills/`)
 
@@ -26,9 +26,9 @@ Assembled by `questionConvention()` in `server/dispatch.ts` and joined with
 `\n\n---\n\n`. The final prompt is:
 
 ```
-<data-not-instructions framing>   # only when the task came from Jira
+<data-not-instructions framing>   # only when the task came from Jira or belongs to an epic
 <task title>
-<task description>
+<task description>               # an Epic page request starts with the epic's key, summary and Jira link
 Jira: <task jira url>            # only when the task came from Jira
 Review this PR/MR: <pr url>      # only for a review task
 ## Multi-repo contract ...         # only for a task created from a plan (parent_task_id)

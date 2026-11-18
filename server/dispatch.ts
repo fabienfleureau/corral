@@ -254,9 +254,10 @@ export async function dispatchTask(
   const taskContext = [...new Set([task.title.trim(), task.prompt.trim()].filter(Boolean))];
   if (task.jira_url) taskContext.push(`Jira: ${task.jira_url}`);
   if (review) taskContext.push(`Review this PR/MR: ${task.pr_url}`);
-  // A Jira-imported task's title and description are the ticket's own text:
-  // frame the block as data before the conventions, which are Corral's rules.
-  const taskText = [task.jira_url || task.jira_key ? DATA_NOT_INSTRUCTIONS : "", taskContext.join("\n\n"), contractBlock(db, task), epicContext(db, task), epicBlock(cfg, task)]
+  // Ticket text — a Jira task's own ticket, or an epic's key, summary and URL
+  // copied into an Epic page request — is data before Corral's own rules.
+  const fromJira = Boolean(task.jira_url || task.jira_key || task.epic_id);
+  const taskText = [fromJira ? DATA_NOT_INSTRUCTIONS : "", taskContext.join("\n\n"), contractBlock(db, task), epicContext(db, task), epicBlock(cfg, task)]
     .filter(Boolean)
     .join("\n\n");
 
