@@ -928,7 +928,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         favorite_name: input.favorite_name ?? epic.favorite_name ?? "",
         repo_path: input.repo_path ?? epic.repo_path ?? "",
         kind: epicRequestKind(body),
-      }, state.cfg.favorites ?? [], state.cfg.reviewers ?? []);
+      }, state.cfg.favorites ?? [], state.cfg.reviewers ?? [], state.cfg.jira?.baseUrl ?? "");
       state.hub.broadcast("task.updated", task);
       state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));
       json(res, 200, task);
