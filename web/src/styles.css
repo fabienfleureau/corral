@@ -1041,8 +1041,8 @@ select:focus {
   gap: 4px;
 }
 
-/* The body owns the scroll: a long description must not push the reply and
-   action buttons below the fold. */
+/* The body owns the scroll: a long description must not shrink the reply and
+   action buttons. */
 .detail-pane {
   flex: 1;
   min-width: 0;
@@ -1174,11 +1174,7 @@ select:focus {
 }
 
 .detail-actions {
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 60%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  flex: none;
   border-top: 1px solid var(--border);
   background: var(--bg);
   padding: 16px 28px 24px;
