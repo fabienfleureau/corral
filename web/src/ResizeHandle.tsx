@@ -1,10 +1,10 @@
 // Draggable, keyboard-operable divider between a pane and its neighbour.
 // It is a flex sibling of the pane (not a child), so the pane's own overflow
-// never clips the grab area. Pane on the left, neighbour on the right.
+// never clips the grab area.
 
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
-import { clampWidth, effectiveLimits, keyboardWidth } from "./pane-size";
+import { clampWidth, effectiveLimits, keyForSide, keyboardWidth } from "./pane-size";
 import type { PaneLimits } from "./pane-size";
 
 type Props = {
@@ -16,9 +16,11 @@ type Props = {
   reserve: number;
   onChange: (width: number) => void;
   onReset: () => void;
+  /** Side the resized pane sits on. Drag and arrow keys follow that edge. */
+  side?: "start" | "end";
 };
 
-export function ResizeHandle({ label, width, limits, reserve, onChange, onReset }: Props) {
+export function ResizeHandle({ label, width, limits, reserve, onChange, onReset, side = "start" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<{ startX: number; startWidth: number; limits: PaneLimits } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -37,7 +39,7 @@ export function ResizeHandle({ label, width, limits, reserve, onChange, onReset 
   // narrower than the stored value, and the divider must follow the pointer
   // from where it really is.
   const renderedWidth = () => {
-    const pane = ref.current?.previousElementSibling;
+    const pane = side === "end" ? ref.current?.nextElementSibling : ref.current?.previousElementSibling;
     return pane ? Math.round(pane.getBoundingClientRect().width) : width;
   };
 
@@ -52,7 +54,8 @@ export function ResizeHandle({ label, width, limits, reserve, onChange, onReset 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const current = drag.current;
     if (!current) return;
-    onChange(clampWidth(current.startWidth + event.clientX - current.startX, current.limits));
+    const delta = side === "end" ? current.startX - event.clientX : event.clientX - current.startX;
+    onChange(clampWidth(current.startWidth + delta, current.limits));
   };
 
   const endDrag = (event: PointerEvent<HTMLDivElement>) => {
@@ -68,7 +71,7 @@ export function ResizeHandle({ label, width, limits, reserve, onChange, onReset 
       onReset();
       return;
     }
-    const next = keyboardWidth(event.key, renderedWidth(), currentLimits(), event.shiftKey);
+    const next = keyboardWidth(keyForSide(event.key, side), renderedWidth(), currentLimits(), event.shiftKey);
     if (next === null) return;
     event.preventDefault();
     onChange(next);

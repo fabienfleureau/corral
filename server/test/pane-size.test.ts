@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clampWidth, effectiveLimits, keyboardWidth, parseStoredFlag, parseStoredWidth } from "../../web/src/pane-size.ts";
+import { clampWidth, effectiveLimits, keyForSide, keyboardWidth, parseStoredFlag, parseStoredWidth } from "../../web/src/pane-size.ts";
 
 const limits = { min: 160, max: 360 };
 
@@ -46,6 +46,14 @@ test("keyboardWidth: Right grows, Left shrinks, Shift takes the large step", () 
   assert.equal(keyboardWidth("ArrowLeft", 200, limits, false), 184);
   assert.equal(keyboardWidth("ArrowRight", 200, limits, true), 264);
   assert.equal(keyboardWidth("ArrowLeft", 200, limits, true), 160);
+});
+
+test("keyForSide reverses arrows only for a pane on the right", () => {
+  assert.equal(keyForSide("ArrowRight", "start"), "ArrowRight");
+  assert.equal(keyForSide("ArrowLeft", "end"), "ArrowRight");
+  assert.equal(keyForSide("ArrowRight", "end"), "ArrowLeft");
+  assert.equal(keyForSide("Home", "end"), "Home");
+  assert.equal(keyboardWidth(keyForSide("ArrowLeft", "end"), 200, limits, false), 216);
 });
 
 test("keyboardWidth clamps, jumps with Home/End and ignores other keys", () => {

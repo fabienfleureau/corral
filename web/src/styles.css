@@ -2656,10 +2656,35 @@ select:focus {
 }
 .kpi-tabs a:focus-visible { outline-offset: -2px; }
 .kpi-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(270px, 340px);
+  display: flex;
+  align-items: flex-start;
   gap: 16px;
-  align-items: start;
+}
+.kpi-main { flex: 1; min-inline-size: 0; }
+/* The settings pane keeps its own scroll and actions, so editing a long form
+   does not push the report out of view. Width comes from the resize handle. */
+.kpi-layout > .kpi-agent {
+  position: sticky;
+  top: 20px;
+  flex: none;
+  inline-size: var(--kpi-settings-width, 380px);
+  max-inline-size: calc(100% - 360px);
+  max-block-size: calc(100dvh - 140px);
+}
+.kpi-agent-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-block-size: 0;
+}
+.kpi-layout > .kpi-agent > .kpi-agent-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.kpi-layout > .kpi-agent > .form-foot {
+  flex: none;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
 }
 .kpi-inputs {
   display: grid;
@@ -2707,7 +2732,15 @@ select:focus {
 .kpi-main details p { margin-top: 8px; }
 
 @media (max-width: 1000px) {
-  .kpi-layout { grid-template-columns: minmax(0, 1fr); }
+  .kpi-layout { display: block; }
+  .kpi-layout > .resize-handle { display: none; }
+  .kpi-layout > .kpi-agent {
+    position: static;
+    inline-size: 100%;
+    max-inline-size: none;
+    max-block-size: none;
+  }
+  .kpi-layout > .kpi-agent > .kpi-agent-body { overflow: visible; }
 }
 @media (max-width: 600px) {
   .kpi-inputs { grid-template-columns: minmax(0, 1fr); }

@@ -217,7 +217,11 @@ Registered repositories are suggested and decide which favorites are available
 (an unregistered folder uses professional favorites). Pick a favorite to supply
 the harness, agent, model and reasoning; add one in Settings if needed, with
 read-only connector access. Save the settings and use **Run now**, or set
-**Hourly** or **Daily** for automatic analysis. Scheduling starts off.
+**Hourly** or **Daily** for automatic analysis. On a wide screen the settings
+stay beside the report: drag the divider, or focus it and use the arrow keys,
+to change the pane width; **Save settings** and **Run now** stay in view while
+you edit. On a narrow screen the form moves below the report. Scheduling
+starts off.
 Corral and the Omnigent runner must stay online for unattended cycles. After
 a restart Corral resumes checking the active session or starts a due cycle.
 
