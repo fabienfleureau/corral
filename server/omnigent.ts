@@ -26,6 +26,11 @@ import type {
 
 const POLL_MS = 4000;
 
+type OmnigentProject = { id: string; name: string; config: Record<string, unknown> };
+
+/** Project membership Corral filed a session into, read before archiving. */
+type FiledProject = { project: OmnigentProject | null; label: string | null };
+
 /** Where a user install of the OpenCode CLI usually lands. */
 const OPENCODE_DIRS = [
   join(homedir(), ".opencode/bin"),
@@ -450,15 +455,40 @@ export class OmnigentBackend implements WorkerBackend {
 
   /** The caller's first-class projects, or null when the server has no
    *  projects API (older build: the legacy label is the only grouping). */
-  private async listProjects(): Promise<{ id: string; name: string }[] | null> {
+  private async listProjects(): Promise<OmnigentProject[] | null> {
     try {
       const res = await this.request<{ data?: Record<string, unknown>[] }>("GET", "/v1/projects");
       return (res.data ?? [])
-        .map((p) => ({ id: str(p.id) ?? "", name: str(p.name) ?? "" }))
+        .map((p) => ({
+          id: str(p.id) ?? "",
+          name: str(p.name) ?? "",
+          config: p.config && typeof p.config === "object" ? p.config as Record<string, unknown> : {},
+        }))
         .filter((p) => p.id && p.name);
     } catch {
       return null;
     }
+  }
+
+  /** Find the repository project Corral filed this session into. Archived
+   *  sessions stay members until they are unfiled, so read membership before
+   *  archiving. Only Corral's own label/project pair is managed here: a session
+   *  someone moved to another project keeps that membership. */
+  private async filedProject(address: string): Promise<FiledProject | null> {
+    let raw: Record<string, unknown>;
+    try {
+      raw = await this.request<Record<string, unknown>>("GET", `/v1/sessions/${address}`);
+    } catch {
+      return null;
+    }
+    const projectId = str(raw.project_id);
+    const label = str(((raw.labels ?? {}) as Record<string, unknown>)["omni_project"]);
+    if (!projectId && !label) return null;
+    const project = projectId
+      ? (await this.listProjects())?.find((p) => p.id === projectId) ?? null
+      : null;
+    if (project && (!label || project.name !== label)) return null;
+    return { project, label };
   }
 
   /** Find-or-create the omnigent project named `name` (the task repository's
@@ -649,7 +679,71 @@ export class OmnigentBackend implements WorkerBackend {
   }
 
   async archive(address: string): Promise<void> {
-    await this.request("PATCH", `/v1/sessions/${address}`, { archived: true });
+    const filed = await this.filedProject(address);
+    const patch: Record<string, unknown> = { archived: true };
+    if (filed?.project) patch.project_id = "";
+    if (filed?.label) patch.labels = { omni_project: "" };
+    let detached = true;
+    try {
+      await this.request("PATCH", `/v1/sessions/${address}`, patch);
+    } catch (err) {
+      if (!filed) throw err;
+      // An older omnigent rejects the unfile fields: archiving alone still
+      // works, but the session may still be filed, so skip project cleanup.
+      detached = false;
+      await this.request("PATCH", `/v1/sessions/${address}`, { archived: true });
+    }
+    if (!filed || !detached) return;
+    try {
+      await this.pruneProject(address, filed);
+    } catch (err) {
+      console.error("corral: omnigent project cleanup failed:", String(err));
+    }
+  }
+
+  /** Sessions left in a project after Corral archived its own member are all
+   *  archived. Detach them and remove the empty project, as omnigent's own
+   *  "Delete project" flow does. Leave a project with live sessions, custom
+   *  settings, a renamed folder, or too many members to inspect in one read. */
+  private async pruneProject(address: string, filed: FiledProject): Promise<void> {
+    const project = filed.project;
+    if (!project || Object.keys(project.config).length > 0) return;
+    const members = async (includeArchived: boolean): Promise<Record<string, unknown>[] | null> => {
+      const params = new URLSearchParams({
+        project: project.name,
+        include_archived: String(includeArchived),
+        visibility: "all",
+        kind: "any",
+        limit: "1000",
+      });
+      const res = await this.request<{ data?: Record<string, unknown>[]; has_more?: boolean }>(
+        "GET", `/v1/sessions?${params}`,
+      );
+      if (res.has_more) return null;
+      return (res.data ?? []).filter((s) => str(s.id) !== address);
+    };
+    const live = await members(false);
+    if (live === null || live.length > 0) return; // unknown page size or live members
+    const archived = await members(true);
+    if (!archived?.length) {
+      await this.request("DELETE", `/v1/projects/${encodeURIComponent(project.id)}`);
+      this.projectIds.delete(project.name);
+      return;
+    }
+    for (const session of archived) {
+      const id = str(session.id);
+      if (!id) continue;
+      const labels = (session.labels ?? {}) as Record<string, unknown>;
+      await this.request("PATCH", `/v1/sessions/${id}`, {
+        project_id: "",
+        ...(str(labels["omni_project"]) ? { labels: { omni_project: "" } } : {}),
+      });
+    }
+    // A session filed while we detached the others must keep its project.
+    if (!(await members(true))?.length) {
+      await this.request("DELETE", `/v1/projects/${encodeURIComponent(project.id)}`);
+      this.projectIds.delete(project.name);
+    }
   }
 
   async kill(address: string): Promise<void> {
