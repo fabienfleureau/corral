@@ -13,6 +13,7 @@ import { inboxTitle, itemDisplayTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
 import { parseGrillRound, formatGrillAnswers } from "../grill-format";
 import { QuestionReply } from "../QuestionReply";
+import { GrillRoundReply } from "../GrillRoundReply";
 import { TaskHistoryButton } from "../TaskHistory";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePaneWidth } from "../use-pane-size";
@@ -544,7 +545,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               ) : null}
             </div>
 
-            <div className="detail-actions">
+            <div className={`detail-actions${grillRound.length > 0 ? " grill-actions" : ""}`}>
               <div className="action-row">
                 {selected.source_ref ? (
                   <button className="btn btn-primary" onClick={() => void openConversation()} disabled={openBusy}>
@@ -635,7 +636,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
 
               {selected.kind === "launch" || selected.kind === "amendment" ? null : <div className="reply-block">
                 {grillRound.length > 0 ? <>
-                  <QuestionReply key={selected.id + selected.updated_ms} questions={grillRound.map((q) => ({ ...q, prompt: `${q.id} — ${q.prompt.replaceAll("**", "")}${q.recommendation ? `\nRecommendation: ${q.recommendation}` : ""}`, choices: q.recommendation ? ["Yes — accept recommendation", ...q.choices] : q.choices }))} disabled={replyBusy || selected.status !== "open"} onSend={(answers) => sendReply(formatGrillAnswers(grillRound, answers))} />
+                  <GrillRoundReply key={selected.id + selected.updated_ms} questions={grillRound} disabled={replyBusy || selected.status !== "open"} onSend={(answers) => sendReply(formatGrillAnswers(grillRound, answers))} />
                   {replyError ? <span className="inline-error">{replyError}</span> : null}
                 </> : replyQuestions(selected.elicitation).length > 0 ? <>
                   <QuestionReply key={selected.id + selected.elicitation}
