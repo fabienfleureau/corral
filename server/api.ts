@@ -456,7 +456,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/tasks", (req, res, { body }) => {
     const b = body as Partial<Task> & { attachments?: unknown };
     const kind = b?.kind ?? "code";
-    if (kind !== "code" && kind !== "review" && kind !== "spec" && kind !== "ops") return json(res, 400, { error: "kind must be code, review, spec or ops" });
+    if (kind !== "code" && kind !== "review" && kind !== "spec" && kind !== "ops" && kind !== "grill" && kind !== "grill-docs") return json(res, 400, { error: "kind must be code, review, spec, ops, grill or grill-docs" });
     if (kind === "spec" || kind === "ops") {
       if (!b?.prompt?.trim()) return json(res, 400, { error: `${kind} tasks need a prompt` });
       if (!b.repo_path?.trim() || !isDirectory(b.repo_path)) return json(res, 400, { error: `${kind} tasks need an existing folder in repo_path` });
@@ -675,6 +675,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!task) return json(res, 404, { error: "task not found" });
     if (task.kind === "review") return json(res, 400, { error: "review tasks have no PR of their own" });
     if (task.kind === "spec") return json(res, 400, { error: "spec tasks have no PR of their own" });
+    if (task.kind === "grill") return json(res, 400, { error: "interview tasks have no PR of their own" });
     if (task.kind === "ops") return json(res, 400, { error: "ops tasks have no PR of their own" });
     if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
     const force = (body as { force?: unknown } | undefined)?.force === true;

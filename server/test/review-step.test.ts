@@ -164,3 +164,18 @@ test("dispatch: {base_branch} becomes empty when unset and there is no remote", 
   assert.doesNotMatch(started[0].prompt, /\{base_branch\}/);
   assert.match(started[0].prompt, /cubic review --base/);
 }));
+
+test("interview modes dispatch the selected skill and isolate documentation changes", withDb(async (db, dir) => {
+  execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+  execFileSync("git", ["-C", dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "initial"], { stdio: "ignore" });
+  const { backend, started } = fakeBackend();
+  for (const kind of ["grill", "grill-docs"] as const) {
+    const task = makeTask({ id: kind, kind, repo_path: dir });
+    db.insertTask(task);
+    await dispatchTask(db, cfgWith(dir), backend, task, "codex", { useWorktree: false });
+    const prompt = started.at(-1)!.prompt;
+    assert.match(prompt, new RegExp(`Interview mode: \\*\\*${kind === "grill" ? "discussion" : "documentation"}\\*\\*`));
+    assert.match(prompt, /complete round as a single question report/);
+    assert.equal(started.at(-1)!.git === null, kind === "grill");
+  }
+}));

@@ -316,7 +316,7 @@ export class CaptureEngine {
     const taskId = opts.taskId ?? null;
     // A task without a PR of its own reports into the inbox as information.
     const taskKind = taskId ? this.db.getTask(taskId)?.kind : undefined;
-    const noPr = taskKind === "review" || taskKind === "spec" || taskKind === "analysis" || taskKind === "ops";
+    const noPr = taskKind === "review" || taskKind === "spec" || taskKind === "analysis" || taskKind === "ops" || taskKind === "grill" || (taskKind === "grill-docs" && !/\bPR:\s*https?:\/\/[^\s)]+\/(?:pull|merge_requests)\/\d+/i.test(opts.body));
     const itemKind: Item["kind"] = isDone ? (noPr ? "digest" : "pr") : "question";
     const address =
       opts.terminal ??

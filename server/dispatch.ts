@@ -105,7 +105,9 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
   // A review must not commit, push or open a PR: its convention replaces both
   // the finish flow of question-report.md and the PR loop.
   // A spec task never commits or opens a PR: it reports a plan instead.
-  const parts = task.kind === "analysis"
+  const parts = task.kind === "grill" || task.kind === "grill-docs"
+    ? [read("grill.md", "Interview the human in rounds and report each full round to Corral."), task.kind === "grill-docs" ? read("question-report.md", "") : read("ops.md", ""), ...(task.kind === "grill-docs" ? [read("pr-loop.md", "")] : [])]
+    : task.kind === "analysis"
     ? [read("analysis.md", "Analyze the evidence and report a digest. Do not change files.")]
     : task.kind === "ops"
     ? [read("ops.md", "Do the task in this folder. No branch, no commit, no PR. Report what you did to Corral.")]
@@ -123,6 +125,7 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
     parts.push(read("pre-pr-review.md", "").replaceAll("{review_command}", () => reviewCommand));
   }
   return parts.filter(Boolean).join("\n\n---\n\n")
+    .replaceAll("{grill_mode}", task.kind === "grill-docs" ? "documentation" : "discussion")
     .replaceAll("{task_id}", task.id)
     .replaceAll("{corral_url}", `http://${cfg.host}:${cfg.port}`)
     .replaceAll("{corral_token}", cfg.token)
@@ -225,6 +228,7 @@ export async function dispatchTask(
   const spec = task.kind === "spec";
   const analysis = task.kind === "analysis";
   const ops = task.kind === "ops";
+  const grill = task.kind === "grill";
   if (spec || ops) {
     // A spec holds sub-projects; an ops task just needs its context folder.
     // Neither is a repository itself.
@@ -244,8 +248,8 @@ export async function dispatchTask(
   }
   // A review reads the MR head without checking it out: no worktree, no branch.
   // A spec, analysis or ops task uses a folder as context and never creates one.
-  const noBranch = review || spec || analysis || ops;
-  const useWorktree = !noBranch && opts.useWorktree !== false;
+  const noBranch = review || spec || analysis || ops || grill;
+  const useWorktree = !noBranch && (task.kind === "grill-docs" || opts.useWorktree !== false);
   const originalBranch = task.branch ?? branchName(task);
   let branch = originalBranch;
 
@@ -264,7 +268,7 @@ export async function dispatchTask(
   // Resolve the reviewer before building the prompt: {base_branch} needs the
   // task's pinned branch, or the remote default when the task did not pin one.
   let reviewCommand: string | null = null;
-  if (!review && !spec && !ops && opts.review) {
+  if (!review && !spec && !ops && !grill && task.kind !== "grill-docs" && opts.review) {
     const reviewer = (cfg.reviewers ?? []).find((r) => r.name === opts.review);
     if (!reviewer) throw new Error(`unknown reviewer: ${opts.review}`);
     const baseBranch = task.base_branch?.trim() || await defaultBranchName(task.repo_path);
@@ -348,7 +352,7 @@ export async function dispatchTask(
   logTaskEvent(db, task.id, "prompt", `Initial prompt sent to ${target}`, promptData(fullPrompt, {
     source: "dispatch",
     harness: target,
-    kind: review ? "review" : spec ? "spec" : analysis ? "analysis" : ops ? "ops" : "code",
+    kind: grill ? "grill" : task.kind === "grill-docs" ? "grill-docs" : review ? "review" : spec ? "spec" : analysis ? "analysis" : ops ? "ops" : "code",
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
     agent: opts.agent ?? null,

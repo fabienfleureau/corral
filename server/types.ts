@@ -14,7 +14,7 @@ export type TargetState = "suggested" | "confirmed";
  *  sub-project; no branch, no PR. ops: the agent carries out a request with a
  *  folder as context (the folder need not be a git repo) and reports back; no
  *  branch, no PR. */
-export type TaskKind = "code" | "review" | "spec" | "analysis" | "ops";
+export type TaskKind = "code" | "review" | "spec" | "analysis" | "ops" | "grill" | "grill-docs";
 
 /** One sub-task a spec proposes. `repo` is a directory relative to the spec task's folder. */
 export interface PlanSubtask {
