@@ -48,6 +48,7 @@ through the API. The diagram groups responsibilities, not separate services.
 | Jira and epics | [`server/jira.ts`](../server/jira.ts) handles Jira HTTP; [`server/jira-status.ts`](../server/jira-status.ts) advances lifecycle stages; [`server/epic-orchestration.ts`](../server/epic-orchestration.ts) coordinates epic launch |
 | Persistence | [`server/db.ts`](../server/db.ts) owns schema, migrations and queries; [`server/task-events.ts`](../server/task-events.ts) records task history |
 | Agent instructions | [`skills/`](../skills) holds injected conventions; [`docs/prompts.md`](prompts.md) registers file-based and inline prompts |
+| Agent control | [`server/agent-control.ts`](../server/agent-control.ts) exposes three MCP tools (`corral_next`, `corral_create_task`, `corral_instruct`) through `POST /api/mcp`; results are one short line for voice use, and dispatch remains human-owned |
 
 `WorkerBackend` is an explicit interface that tests can replace with a fake.
 Platform modules are integration boundaries, but they are not all interchangeable
@@ -107,6 +108,10 @@ query token or browser cookie, except for the health endpoint. The initial
 access URL sets an `HttpOnly`, `SameSite=Strict` cookie and redirects to remove
 the token. This is local access control, not user identity, roles or tenant
 isolation; the server provides HTTP rather than a public HTTPS deployment.
+
+The MCP route uses that same token: it narrows what a voice agent sees, not
+the credential's reach. Per [ADR 0004](adr/0004-agent-control-mcp.md), its tools
+never dispatch a task or answer an inbox item.
 
 Agents, platform CLIs, and Jira use the privileges of configured accounts.
 Ticket and review text is untrusted input, including when passed to an agent;

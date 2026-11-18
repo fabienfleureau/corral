@@ -43,6 +43,7 @@ import { withDeadline } from "./deadline.ts";
 import { cacheControlFor, etagFor, isFresh } from "./static-cache.ts";
 import { SessionFacts } from "./session-facts.ts";
 import type { SessionFact } from "./session-facts.ts";
+import { handleMcp, instructTask, InstructError } from "./agent-control.ts";
 
 /** The skills prompt carries more evidence than a summary: allow a longer assistant call. */
 export const SKILLS_ANALYSIS_TIMEOUT_MS = 300_000;
@@ -263,6 +264,17 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   // ---- health (unauthenticated) ----
   on("GET", "/api/health", (_req, res) => json(res, 200, { ok: true, name: "corral" }));
+
+  // ---- MCP (stateless Streamable HTTP, same token as the rest of the API) ----
+  on("GET", "/api/mcp", (_req, res) => {
+    res.writeHead(405, { Allow: "POST", "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "MCP messages go to POST /api/mcp" }));
+  });
+  on("POST", "/api/mcp", async (req, res, { body }) => {
+    const reply = await handleMcp(state, body);
+    if (reply.status === 202) { res.writeHead(202); res.end(); return; }
+    json(res, reply.status ?? 200, reply.body);
+  });
 
   // ---- items (inbox) ----
   on("GET", "/api/items", (_req, res, { url }) => {
@@ -492,6 +504,18 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     state.db.updateTask(task.id, patch);
     state.hub.broadcast("task.updated", state.db.getTask(task.id));
     json(res, 200, state.db.getTask(task.id));
+  });
+
+  // An instruction is recorded in task history whether it lands in the prompt
+  // of an open task or in the session of a running one.
+  on("POST", "/api/tasks/:id/instruct", async (req, res, { body, params }) => {
+    try {
+      const mode = await instructTask(state, params.id, (body as { text?: unknown } | null)?.text);
+      json(res, 200, { ok: true, mode, task: state.db.getTask(params.id) });
+    } catch (err) {
+      if (err instanceof InstructError) return json(res, err.status, { error: err.message });
+      json(res, 500, { error: String(err) });
+    }
   });
 
   // Local Markdown paths in task text are opened on demand, never fetched
