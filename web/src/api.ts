@@ -179,7 +179,7 @@ export type NewTaskInput = {
   prompt?: string;
   /** Files sent to the agent with the prompt (see web/src/attachments.ts). */
   attachments?: AttachmentInput[];
-  kind?: "code" | "review" | "spec" | "ops";
+  kind?: "code" | "review" | "spec" | "ops" | "grill" | "grill-docs";
   /** Required for kind "review": the PR/MR to review. */
   pr_url?: string;
   repo_path?: string;

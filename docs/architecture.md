@@ -64,7 +64,7 @@ when a concrete change needs a narrower responsibility.
    convention files, optional reviewer command, settings, and attachments.
 2. `dispatchTask` asks `WorkerBackend.start` for a session. For a code task,
    omnigent prepares the requested worktree and runs the harness. Review, spec,
-   and ops tasks have different completion contracts; they do not all open PRs.
+   ops, and interview tasks have different completion contracts; they do not all open PRs. Interview rounds are reported as questions and answered together; documentation interviews use a worktree and may produce a PR.
 3. Backend events enter `CaptureEngine`. Agents can also submit structured
    reports to `/api/reports`. Questions and permission requests become inbox
    items; a run ending without a report produces a fallback item.

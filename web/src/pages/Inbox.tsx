@@ -11,6 +11,7 @@ import { inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxIt
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle, itemDisplayTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
+import { parseGrillRound, formatGrillAnswers } from "../grill-format";
 import { QuestionReply } from "../QuestionReply";
 import { TaskHistoryButton } from "../TaskHistory";
 import { ResizeHandle } from "../ResizeHandle";
@@ -311,6 +312,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
 
   const linkedTask = selected?.task_id ? tasksById[selected.task_id] ?? null : null;
   const selectedTask = selectedTaskId ? inProgressTasks.find((task) => task.id === selectedTaskId) ?? null : null;
+  const grillRound = selected && linkedTask && (linkedTask.kind === "grill" || linkedTask.kind === "grill-docs") && !selected.elicitation ? parseGrillRound(selected.summary || selected.body) : [];
   const prUrl = selected ? itemPrUrl(selected.body, linkedTask?.pr_url) : null;
   /** An item the agent is handling reads as "in progress", not "open". */
   const selectedInProgress = selected !== null && isHandlingItem(selected) && selected.status === "open";
@@ -632,7 +634,10 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               ) : null}
 
               {selected.kind === "launch" || selected.kind === "amendment" ? null : <div className="reply-block">
-                {replyQuestions(selected.elicitation).length > 0 ? <>
+                {grillRound.length > 0 ? <>
+                  <QuestionReply key={selected.id + selected.updated_ms} questions={grillRound.map((q) => ({ ...q, prompt: `${q.id} — ${q.prompt.replaceAll("**", "")}${q.recommendation ? `\nRecommendation: ${q.recommendation}` : ""}`, choices: q.recommendation ? ["Yes — accept recommendation", ...q.choices] : q.choices }))} disabled={replyBusy || selected.status !== "open"} onSend={(answers) => sendReply(formatGrillAnswers(grillRound, answers))} />
+                  {replyError ? <span className="inline-error">{replyError}</span> : null}
+                </> : replyQuestions(selected.elicitation).length > 0 ? <>
                   <QuestionReply key={selected.id + selected.elicitation}
                     questions={replyQuestions(selected.elicitation)} disabled={replyBusy || selected.status !== "open"}
                     onSend={(answers) => sendReply("", undefined, answers)} />

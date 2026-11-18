@@ -1005,3 +1005,24 @@ test("archive and clean session preserves the task when session archiving fails"
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("interview completion reports become a digest unless documentation produced a PR", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-grill-finish-"));
+  const db = new Db(join(dir, "test.db"));
+  try {
+    const { backend } = fakeBackend();
+    const capture = new CaptureEngine(db, backend, { broadcast: () => undefined });
+    for (const [id, kind, body, expected] of [
+      ["discussion", "grill", "Interview complete", "digest"],
+      ["docs-empty", "grill-docs", "No documentation changes", "digest"],
+      ["docs-pr", "grill-docs", "PR: https://github.com/example/repo/pull/42", "pr"],
+    ] as const) {
+      db.insertTask(makeTask({ id, kind }));
+      const item = await capture.createStructuredQuestion({ kind: "done", taskId: id, title: "Finished", body });
+      assert.equal(item.kind, expected);
+    }
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

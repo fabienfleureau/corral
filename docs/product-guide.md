@@ -192,6 +192,10 @@ the common keys; the file wins on restart.
 
 Env overrides: `CORRAL_PORT`, `CORRAL_HOST`, `CORRAL_TOKEN`, `CORRAL_DATA_DIR`.
 
+## Interview tasks
+
+Choose **Grill me** to interview about an idea without changing files, or **Grill with docs** to record domain decisions in a repository worktree and prepare a PR. The inbox shows each reported round with choices, a recommendation and a custom answer for every question. Submit the answers together; the agent continues with the next round.
+
 ## Roadmap
 
 - **next** — routing suggestions (quota headroom + editable rules)

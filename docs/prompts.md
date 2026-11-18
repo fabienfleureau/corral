@@ -45,6 +45,7 @@ Review this PR/MR: <pr url>      # only for a review task
 |---|---|---|---|
 | `skills/question-report.md` | every `code` task (neither `review` nor `spec`) | `{corral_url}`, `{corral_token}`, `{task_id}` | one-line fallback: *"When you need the human, ask clearly and wait. Do not guess."* |
 | `skills/analysis.md` | analysis tasks, replacing the PR convention | `{corral_url}`, `{corral_token}`, `{task_id}` | read-only analysis and digest report |
+| `skills/grill.md` | grill and grill-docs tasks | `{grill_mode}` | invoke the interview skill and report complete rounds to the inbox |
 | `skills/ops.md` | ops tasks (an Epic page request without a PR), replacing the PR convention | `{corral_url}`, `{corral_token}`, `{task_id}` | do the work in the folder, no branch or PR, report what was done |
 | `skills/spec.md` | **replaces** `question-report.md` and `pr-loop.md` when `task.kind === "spec"` (multi-repo step one) — a spec reads the sub-projects, reports a `plan` and never commits | `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Write the contract between the sub-projects and report it as a plan. Do not change code."* |
 | `skills/epic-task.md` | a `code` task of an epic (`epic_id`), in the task text before the conventions: check the ticket's Preconditions, report a question and stop if one is unmet | — | one-line fallback: *"Before changing anything, check the ticket's Preconditions section. If one is not met, report a question and stop."* |
