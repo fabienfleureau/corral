@@ -209,4 +209,7 @@ Without one it asks for both to be null. Every cycle also asks for ideas
 forward and confirmed or rejected), impact and effort on proposals, and stable
 ids on data needs and product questions. The prompt carries the operator's
 inbox answers and dismissed ideas as `feedback` and forbids re-asking an
-answered id or reviving a dismissed idea.
+answered id or reviving a dismissed idea. It also lists the shipped changes
+still followed (`shippedChanges`: tasks drafted from earlier proposals, their
+shipping date and previous verdicts) and asks for one `impact` verdict per
+change (visible, none or too early).

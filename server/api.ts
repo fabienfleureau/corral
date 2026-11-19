@@ -488,6 +488,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     // Checked before anything is stored: a bad file must not leave a task behind.
     const attached = checkAttachments(b?.attachments);
     if (!attached.ok) return json(res, attached.status, { error: attached.error });
+    const kpiLink = (body as { kpi?: unknown } | null)?.kpi;
+    if (kpiLink !== undefined && kpiLink !== null) {
+      try { KpiMonitor.checkLink(kpiLink); }
+      catch (error) { return json(res, 400, { error: `Invalid KPI link: ${error instanceof Error ? error.message : String(error)}` }); }
+    }
     const now = Date.now();
     const task: Task = {
       id: randomUUID(),
@@ -516,6 +521,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       updated_ms: now,
     };
     state.db.insertTaskWithAttachments(task, attached.files);
+    if (kpiLink !== undefined && kpiLink !== null) kpis.linkTask(task.id, kpiLink);
     state.db.reward("task", task.id);
     state.db.recordMetric("task.created", task.id, { source: b.jira_key ? "jira" : "manual" });
     logTaskEvent(state.db, task.id, "created", kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : kind === "ops" ? "Action task created" : "Task created", {

@@ -244,7 +244,12 @@ impact and smallest effort first; **Dismiss idea** rules one out for good.
 Confirmed, rejected and dismissed ideas stay folded below, and **Answers and
 decisions** lists what the agent receives. Proposals are sorted the same way.
 **Product context and answers** remains for anything else. The next cycle reads the prior report and research memory. The durable memory is a file in the working directory: `.corral/kpi-1-memory.md` or `.corral/kpi-2-memory.md`. Corral creates it, the agent updates it during a cycle, and the page shows a bounded copy. Once the file has notes it is the source for the next cycle.
-**Draft task** opens the editable Tasks form for a proposal.
+**Draft task** opens the editable Tasks form for a proposal, linked to it
+(**Unlink** drops the link). Once that task is done (its PR merged, or the task
+completed), each cycle compares the KPI before and after and records a verdict:
+impact visible, no impact or too early. **Shipped changes** on the KPI page
+lists these tasks and their latest verdict. Corral stops asking after three
+verdicts other than too early, or 60 days after the change shipped.
 
 Set an optional **Goal**: a target value in the KPI unit, whether the KPI
 must end at least or at most there, a deadline, and why it matters. The last
