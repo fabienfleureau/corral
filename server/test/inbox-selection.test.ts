@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { selectedInboxItem } from "../../web/src/inbox-selection.ts";
-import type { Item } from "../../web/src/types.ts";
+import { agentRunStatus, selectedInboxItem } from "../../web/src/inbox-selection.ts";
+import type { Item, SessionInfo, Task, TrackedTerminal } from "../../web/src/types.ts";
 
 test("an archived selected item leaves the open inbox detail", () => {
   const open = { id: "one", status: "open" } as Item;
@@ -62,4 +62,41 @@ test("an archived item leaves in progress even while it is handled", async () =>
   const { inProgressInboxItems } = await import("../../web/src/inbox-selection.ts");
   const archived = { id: "archived", kind: "pr", status: "archived", handling: 1, ready: 0, task_id: null } as Item;
   assert.deepEqual(inProgressInboxItems([archived], []), []);
+});
+
+const task = (id: string, terminal_address: string | null = `session-${id}`) => ({ id, terminal_address }) as Task;
+const session = (address: string, status: string | null, state = "live") =>
+  ({ address, status, state }) as SessionInfo;
+const terminal = (address: string, last_status: string | null) =>
+  ({ address, last_status }) as TrackedTerminal;
+
+test("a live Omnigent session reads as running, including a blocked one", () => {
+  assert.equal(agentRunStatus(task("one"), [session("session-one", "working")], []), "running");
+  assert.equal(agentRunStatus(task("one"), [session("session-one", "blocked")], []), "running");
+});
+
+test("a stopped or finished Omnigent session reads as stopped", () => {
+  for (const status of ["idle", "done", "error"]) {
+    assert.equal(agentRunStatus(task("one"), [session("session-one", status)], []), "stopped", status);
+  }
+  assert.equal(agentRunStatus(task("one"), [session("session-one", "working", "finished")], []), "stopped");
+});
+
+test("tracked terminals give the last status when the worker has no session listed", () => {
+  assert.equal(agentRunStatus(task("one"), [], [terminal("session-one", "working")]), "running");
+  assert.equal(agentRunStatus(task("one"), [], [terminal("session-one", "error")]), "stopped");
+  // A live answer wins over an older status recorded in the terminal.
+  assert.equal(agentRunStatus(task("one"), [session("session-one", "working")], [terminal("session-one", "idle")]), "running");
+});
+
+test("a task without a session or a known status reads as unknown", () => {
+  assert.equal(agentRunStatus(task("one"), [], []), "unknown");
+  assert.equal(agentRunStatus({ id: "one", terminal_address: null } as Task, [], []), "unknown");
+  assert.equal(agentRunStatus(task("one"), [session("session-one", null, "unknown")], [terminal("session-one", null)]), "unknown");
+});
+
+test("a session with no terminal address is matched by task id", () => {
+  const noAddress = task("one", null);
+  assert.equal(agentRunStatus(noAddress, [{ ...session("other", "working"), task_id: "one" }], []), "running");
+  assert.equal(agentRunStatus(noAddress, [], [{ ...terminal("other", "idle"), task_id: "one" }]), "stopped");
 });

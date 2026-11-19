@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { api } from "../api";
-import type { Item, SessionInfo, Task } from "../types";
+import type { Item, SessionInfo, Task, TrackedTerminal } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
 import { ExternalLinkIcon, JiraPill, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
-import { inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxItems, selectedInboxItem } from "../inbox-selection";
+import { agentRunStatus, inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxItems, selectedInboxItem, type AgentRunStatus } from "../inbox-selection";
 import { INBOX_ACTION_COOLDOWN_MS, inboxActionsLocked } from "../inbox-action-lock";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle, itemDisplayTitle } from "../inbox-title";
@@ -32,6 +32,16 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "snoozed", label: "Snoozed" },
   { key: "in-progress", label: "In progress" },
 ];
+
+function AgentRunBadge({ status }: { status: AgentRunStatus }) {
+  const label = status === "running" ? "agent running" : status === "stopped" ? "agent stopped" : "agent status unknown";
+  const title = status === "running"
+    ? "Omnigent session is working or waiting on you."
+    : status === "stopped"
+      ? "Omnigent session stopped while this task is still dispatched."
+      : "No Omnigent session status is available for this task.";
+  return <span className={`badge badge-agent-${status}`} title={title}>{label}</span>;
+}
 
 /** Force refresh: re-check the task's PR/MR now and hand any unaddressed
  *  review comments or merge conflicts to the agent — the manual escape hatch
@@ -112,6 +122,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [allItems, setAllItems] = useState<Item[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [terminals, setTerminals] = useState<TrackedTerminal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncRequest, setSyncRequest] = useState<"idle" | "requesting" | "requested" | "error">("idle");
@@ -150,12 +161,18 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
     if (!active) return;
     let cancelled = false;
     setLoading(true);
-    Promise.all([api.listItems(), api.listTasks(), api.listSessions().catch(() => [] as SessionInfo[])])
-      .then(([itemList, taskList, sessionList]) => {
+    Promise.all([
+      api.listItems(),
+      api.listTasks(),
+      api.listSessions().catch(() => [] as SessionInfo[]),
+      api.listTerminals().catch(() => [] as TrackedTerminal[]),
+    ])
+      .then(([itemList, taskList, sessionList, terminalList]) => {
         if (cancelled) return;
         setAllItems(itemList);
         setTasks(taskList);
         setSessions(sessionList);
+        setTerminals(terminalList);
         setError(null);
         setSelected((prev) => selectedInboxItem(prev, itemList, statusFilter));
       })
@@ -375,7 +392,10 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(null); setSelectedTaskId(task.id); } }}>
               <span className="item-row-main">
                 <span className="item-row-title">{task.title || task.prompt.trim().split("\n")[0] || "Untitled task"}</span>
-                <span className="item-row-sub">Task · in progress</span>
+                <span className="item-row-sub">
+                  <span>Task · in progress</span>
+                  <AgentRunBadge status={agentRunStatus(task, sessions, terminals)} />
+                </span>
               </span>
               <span className="item-row-side">
                 <JiraPill jiraKey={task.jira_key} jiraUrl={task.jira_url} />
@@ -473,6 +493,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               <h2 className="detail-title">{selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"}</h2>
               <div className="detail-meta">
                 <span className="chip chip-static status-dispatched">in progress</span>
+                <AgentRunBadge status={agentRunStatus(selectedTask, sessions, terminals)} />
                 <JiraPill jiraKey={selectedTask.jira_key} jiraUrl={selectedTask.jira_url} />
               </div>
             </div>

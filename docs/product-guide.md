@@ -82,6 +82,10 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   without a report —
   a plain closing message, or a backend error — is surfaced as a question item
   carrying that last message, instead of sitting "in progress" forever.
+  The **In progress** tab marks each task with its Omnigent run state:
+  **agent running** (working or waiting on you), **agent stopped** (the session
+  went idle, finished or failed), or **agent status unknown** when no session
+  state is available.
 - **PR loop** — Corral watches each task's PR/MR. Review comments and merge
   conflicts are pushed back to the agent (`skills/pr-loop.md`). The item turns
   **green** only when threads are answered or resolved, checks pass and the PR
