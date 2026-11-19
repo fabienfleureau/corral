@@ -59,12 +59,12 @@ export function seedKpis(db: Db, now: number): void {
     intervalHours: 24, context: "Exclude test accounts.",
   };
   const report = {
-    summary: "Reporting is steady week over week. The drop in mobile submissions needs a closer look before it changes the trend.",
-    measurement: { value: 1420, from: "2025-01-06", to: "2025-01-13", sources: ["warehouse.reports", "dashboard/activity"] },
-    dataNeeds: ["Mobile submissions lack a device field in the events table."],
-    productQuestions: ["Should trial accounts count as reporters?"],
-    proposals: [{ title: "Add device field to submission events", rationale: "Would explain the mobile gap and sharpen the weekly count.", evidence: "dashboard/activity, panel 3" }],
-    memory: "Previous cycles confirmed the warehouse job completes by 06:00 UTC.",
+    summary: "Reporting is steady week over week, but **mobile submissions dropped** in the latest window.\n\n- The events table has no device field\n- Weekend coverage is incomplete\n\nSee the [activity dashboard](https://example.com/activity) for the daily breakdown.",
+    measurement: { value: 1420, from: "2025-01-06", to: "2025-01-13", sources: ["warehouse.reports", "[dashboard/activity](https://example.com/activity)"] },
+    dataNeeds: ["Add a `device` field to mobile submission events; see the [event schema](https://example.com/schema)."],
+    productQuestions: ["Should **trial accounts** count as reporters?"],
+    proposals: [{ title: "Add device field to submission events", rationale: "Would explain the **mobile gap** and sharpen the weekly count:\n\n- Split mobile and desktop trends\n- Confirm the drop is real", evidence: "`dashboard/activity`, panel 3" }],
+    memory: "Previous cycles confirmed the warehouse job completes by 06:00 UTC.\n\n- Keep that cut-off in mind for the next window",
   };
   db.raw.prepare(`INSERT OR REPLACE INTO kpi_monitors
     (id, settings, run_state, report, report_ms, last_measurement, finished_ms)

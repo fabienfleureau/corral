@@ -226,8 +226,9 @@ Corral and the Omnigent runner must stay online for unattended cycles. After
 a restart Corral resumes checking the active session or starts a due cycle.
 
 Each tab shows the last report, measurement window and evidence, missing
-data, product questions and proposals. The last sourced value stays visible
-if a newer cycle lacks a measurement. Use **Product context and answers** to
+data, product questions and proposals. Report text uses Markdown, so agent
+findings keep their headings, lists, emphasis, code and links. The last
+sourced value stays visible if a newer cycle lacks a measurement. Use **Product context and answers** to
 reply to questions. The next cycle reads the prior report and research memory. The durable memory is a file in the working directory: `.corral/kpi-1-memory.md` or `.corral/kpi-2-memory.md`. Corral creates it, the agent updates it during a cycle, and the page shows a bounded copy. Once the file has notes it is the source for the next cycle.
 **Draft task** opens the editable Tasks form for a proposal.
 

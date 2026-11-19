@@ -2890,9 +2890,15 @@ select:focus {
 .kpi-value { font-size: 38px; font-variant-numeric: tabular-nums; }
 .kpi-value small { font-size: 14px; font-weight: 500; letter-spacing: normal; }
 .kpi-copy { margin: 0; white-space: pre-wrap; }
+.kpi-copy.md > :last-child,
+.kpi-list .md > :last-child { margin-bottom: 0; }
+.kpi-copy.md p,
+.kpi-list .md p { text-wrap: pretty; }
 .kpi-meta { margin: 0; font-size: 12px; }
 .kpi-list { margin: 0; padding-inline-start: 18px; }
 .kpi-list li + li { margin-top: 5px; }
+.kpi-list .md p { margin: 0; }
+.kpi-list .md p + p { margin-top: 6px; }
 .kpi-previous { border-top: 1px solid var(--border); padding-top: 10px; }
 .kpi-previous .kpi-value { font-size: 22px; margin: 3px 0; }
 .kpi-setup { max-width: 620px; }
@@ -2914,10 +2920,11 @@ select:focus {
 .kpi-proposals li { padding-top: 10px; }
 .kpi-proposals li + li { margin-top: 10px; border-top: 1px solid var(--border); }
 .kpi-proposals h3 { margin: 0 0 4px; font-size: 13px; }
-.kpi-proposals p + p, .kpi-proposals a { margin-top: 4px; }
+.kpi-proposals .kpi-copy + .kpi-copy,
+.kpi-proposals a { margin-top: 4px; }
 .kpi-proposals a { display: inline-block; }
 .kpi-main summary { cursor: pointer; }
-.kpi-main details p { margin-top: 8px; }
+.kpi-main details > .kpi-copy { margin-top: 8px; }
 
 @media (max-width: 1000px) {
   .kpi-layout { display: block; }
