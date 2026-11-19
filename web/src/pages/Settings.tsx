@@ -5,6 +5,8 @@ import { api } from "../api";
 import type { Config, Context, EffortFacts, Favorite, ModelFacts, ModelCatalog, Repo, Retention, Reviewer } from "../types";
 import { RETENTIONS, retentionLabel } from "../model-indicators";
 import { CONTEXTS } from "../favorite-context";
+import { EMPTY_REVIEWER_DRAFT, REVIEWER_KINDS, draftToReviewer, isDelegate, reviewerBlocked, reviewerOptionLabel, reviewerSummary, reviewerToDraft } from "../reviewers";
+import type { ReviewerDraft } from "../reviewers";
 import { errText } from "../util";
 import { Spinner } from "../ui";
 import { ModelSettings } from "./Tasks";
@@ -475,7 +477,7 @@ function FavoritesSection() {
     {!loaded ? <p className="muted"><Spinner /> Loading favorites…</p> : favorites.length === 0 ? <p className="muted">{error ? "Could not load favorites." : "No favorites yet — add one below."}</p> : <ul className="repo-list">{favorites.map((f, i) => <li className="repo-row" key={i}><div className="repo-info"><strong>{f.name}</strong><span className="muted">{[f.context, f.harness, agents.find((a) => a.id === f.agent)?.name || f.agent || "bare harness", f.model || "default model", f.reasoning || "default reasoning", f.review ? `review: ${f.review}` : "no review"].join(" · ")}</span></div><div className="repo-actions"><button className="btn" disabled={busy} onClick={() => { setDraft(f); setEditing(i); }}>Edit</button><button className="btn" disabled={busy} onClick={() => void save(favorites.filter((_, n) => n !== i))}>Remove</button></div></li>)}</ul>}
     <div className="field-row"><label className="field"><span>Name</span><input value={draft.name} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. Code review" /></label>
     <label className="field"><span>Context</span><ContextSelect value={draft.context} onChange={(context) => update({ context })} /></label></div>
-    <div className="field-row"><label className="field"><span>Reviewer</span><select value={draft.review} onChange={(e) => update({ review: e.target.value })}><option value="">— none —</option>{draft.review && !reviewers.some((r) => r.name === draft.review) ? <option value={draft.review}>{draft.review} (unavailable)</option> : null}{reviewers.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}</select></label>
+    <div className="field-row"><label className="field"><span>Reviewer</span><select value={draft.review} onChange={(e) => update({ review: e.target.value })}><option value="">— none —</option>{draft.review && !reviewers.some((r) => r.name === draft.review) ? <option value={draft.review}>{draft.review} (unavailable)</option> : null}{reviewers.map((r) => <option key={r.name} value={r.name} disabled={reviewerBlocked(r, harness, draft.agent)}>{reviewerOptionLabel(r, harness, draft.agent)}</option>)}</select></label>
     <label className="field"><span>Harness</span><select value={harness} onChange={(e) => update({ harness: e.target.value, agent: "", model: "", reasoning: "" })}>{catalog.length === 0 ? <option value="">No configured harnesses</option> : null}{draft.harness && !catalog.some((h) => h.harness === draft.harness) ? <option value={draft.harness}>{draft.harness} (unavailable)</option> : null}{catalog.map((h) => <option key={h.harness} value={h.harness}>{h.harness}</option>)}</select></label>
     <label className="field"><span>Agent</span><select value={draft.agent} onChange={(e) => update({ agent: e.target.value })}><option value="">— none (bare harness) —</option>{draft.agent && !matchingAgents.some((a) => a.id === draft.agent) ? <option value={draft.agent}>{draft.agent} (unavailable)</option> : null}{matchingAgents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label></div>
     <div className="field-row"><ModelSettings models={catalog.find((h) => h.harness === harness)?.models ?? []} model={draft.model} reasoning={draft.reasoning} setModel={(model) => update({ model })} setReasoning={(reasoning) => update({ reasoning })} fieldClass="field" /></div>
@@ -487,7 +489,7 @@ function FavoritesSection() {
 function ReviewersSection() {
   const [reviewers, setReviewers] = useState<Reviewer[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [draft, setDraft] = useState<Reviewer>({ name: "", command: "" });
+  const [draft, setDraft] = useState<ReviewerDraft>(EMPTY_REVIEWER_DRAFT);
   const [editing, setEditing] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -504,26 +506,29 @@ function ReviewersSection() {
     return () => { cancelled = true; };
   }, [load]);
 
-  const update = (patch: Partial<Reviewer>) => setDraft((d) => ({ ...d, ...patch }));
+  const update = (patch: Partial<ReviewerDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const reviewer = draftToReviewer(draft);
   const save = async (next: Reviewer[]) => {
     setBusy(true); setError("");
     try {
       await api.putConfig({ reviewers: next });
-      setReviewers(next); setEditing(null); setDraft({ name: "", command: "" });
+      setReviewers(next); setEditing(null); setDraft(EMPTY_REVIEWER_DRAFT);
       await load().catch(() => undefined);
     } catch (e) { setError(errText(e)); } finally { setBusy(false); }
   };
 
   return <section className="panel-form">
     <h2 className="panel-title">Reviewers</h2>
-    <p className="muted">Named commands a code task runs on its diff before opening the PR. <span className="mono">{"{base_branch}"}</span> is replaced with the task's base branch at dispatch; the resolved command is frozen on the task.</p>
-    {!loaded ? <p className="muted"><Spinner /> Loading reviewers…</p> : reviewers.length === 0 ? <p className="muted">{error ? "Could not load reviewers." : "No reviewers yet — add one below."}</p> : <ul className="repo-list">{reviewers.map((r, i) => <li className="repo-row" key={i}><div className="repo-info"><strong>{r.name}</strong><span className="mono muted">{r.command}</span></div><div className="repo-actions"><button className="btn" disabled={busy} onClick={() => { setDraft(r); setEditing(i); }}>Edit</button><button className="btn" disabled={busy} onClick={() => void save(reviewers.filter((_, n) => n !== i))}>Remove</button></div></li>)}</ul>}
+    <p className="muted">Named reviews a code task runs on its diff before opening the PR. A command runs in the agent's shell: <span className="mono">{"{base_branch}"}</span> is replaced with the task's base branch at dispatch, and the resolved command is frozen on the task. A sub-agent review hands the diff to an <span className="mono">ocr delegate</span> sub-agent on the Claude or Codex harness, paid from that harness's quota.</p>
+    {!loaded ? <p className="muted"><Spinner /> Loading reviewers…</p> : reviewers.length === 0 ? <p className="muted">{error ? "Could not load reviewers." : "No reviewers yet — add one below."}</p> : <ul className="repo-list">{reviewers.map((r, i) => <li className="repo-row" key={i}><div className="repo-info"><strong>{r.name}</strong><span className={isDelegate(r) ? "muted" : "mono muted"}>{reviewerSummary(r)}</span></div><div className="repo-actions"><button className="btn" disabled={busy} onClick={() => { setDraft(reviewerToDraft(r)); setEditing(i); }}>Edit</button><button className="btn" disabled={busy} onClick={() => void save(reviewers.filter((_, n) => n !== i))}>Remove</button></div></li>)}</ul>}
     <div className="field-row">
       <label className="field"><span>Name</span><input value={draft.name} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. cubic" /></label>
-      <label className="field"><span>Command</span><input value={draft.command} onChange={(e) => update({ command: e.target.value })} placeholder="cubic review --base {base_branch} --json" /></label>
+      <label className="field"><span>Runs</span><select value={draft.kind} onChange={(e) => update({ kind: e.target.value as ReviewerDraft["kind"] })}>{REVIEWER_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}</select></label>
+      {draft.kind === "command" ? <label className="field"><span>Command</span><input value={draft.command} onChange={(e) => update({ command: e.target.value })} placeholder="cubic review --base {base_branch} --json" /></label> : null}
     </div>
+    {draft.kind === "command" ? null : <p className="muted form-hint">The task agent sends the review to a {draft.kind === "claude" ? "Claude" : "Codex"} sub-agent in the same worktree. It needs the Claude harness and no explicit agent.</p>}
     {error ? <div className="inline-error">{error}</div> : null}
-    <div className="form-foot"><button className="btn btn-primary" disabled={busy || !draft.name.trim() || !draft.command.trim()} onClick={() => { const next = [...reviewers]; const reviewer = { name: draft.name.trim(), command: draft.command.trim() }; if (editing === null) next.push(reviewer); else next[editing] = reviewer; void save(next); }}>{editing === null ? "Add reviewer" : "Save reviewer"}</button>{editing !== null ? <button className="btn" onClick={() => { setEditing(null); setDraft({ name: "", command: "" }); }}>Cancel</button> : null}</div>
+    <div className="form-foot"><button className="btn btn-primary" disabled={busy || !reviewer} onClick={() => { if (!reviewer) return; const next = [...reviewers]; if (editing === null) next.push(reviewer); else next[editing] = reviewer; void save(next); }}>{editing === null ? "Add reviewer" : "Save reviewer"}</button>{editing !== null ? <button className="btn" onClick={() => { setEditing(null); setDraft(EMPTY_REVIEWER_DRAFT); }}>Cancel</button> : null}</div>
   </section>;
 }
 

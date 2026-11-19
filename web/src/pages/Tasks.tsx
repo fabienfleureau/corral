@@ -13,6 +13,7 @@ import { modelFactsReport, retentionLabel } from "../model-indicators";
 import { usePeakNow } from "../use-peak-now";
 import type { HarnessModels, ModelFactsReport, ModelSelection } from "../model-indicators";
 import { favoritesFor, repoContext } from "../favorite-context";
+import { reviewerBlocked, reviewerOptionLabel } from "../reviewers";
 import { errText, formatTs, isPrUrl, prLabel, REVIEW_HARNESS, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 import { batchImportItems } from "../jira-import";
@@ -522,7 +523,7 @@ function TaskRow({
               <select value={reviewName} onChange={(e) => setReviewName(e.target.value)}>
                 <option value="">— none —</option>
                 {reviewName && !reviewers.some((r) => r.name === reviewName) ? <option value={reviewName}>{reviewName} (unavailable)</option> : null}
-                {reviewers.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+                {reviewers.map((r) => <option key={r.name} value={r.name} disabled={reviewerBlocked(r, selectedTarget, agent)}>{reviewerOptionLabel(r, selectedTarget, agent)}</option>)}
               </select>
             </label>}
             <ModelSettings models={catalog[selectedTarget] ?? []} model={model} reasoning={reasoning} setModel={setModel} setReasoning={setReasoning} fieldClass="field-inline" />
@@ -929,7 +930,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
         <label className="field"><span>Reviewer</span><select value={reviewName} onChange={(e) => setReviewName(e.target.value)}>
           <option value="">— none —</option>
           {reviewName && !reviewers.some((r) => r.name === reviewName) ? <option value={reviewName}>{reviewName} (unavailable)</option> : null}
-          {reviewers.map((r) => <option key={r.name} value={r.name}>{r.name}</option>)}
+          {reviewers.map((r) => <option key={r.name} value={r.name} disabled={reviewerBlocked(r, selectedTarget, agent)}>{reviewerOptionLabel(r, selectedTarget, agent)}</option>)}
         </select></label>
       </div>}
       <div className="field-row">

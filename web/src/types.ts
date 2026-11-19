@@ -168,7 +168,9 @@ export type Repo = {
 
 export type Context = "professional" | "personal";
 export type Favorite = { name: string; harness: string; agent: string; model: string; reasoning: string; context: Context; review: string };
-export type Reviewer = { name: string; command: string };
+export type DelegateHarness = "claude" | "codex";
+/** A command the agent runs, or a sub-agent on another harness it hands the review to. */
+export type Reviewer = { name: string; command: string } | { name: string; delegate: DelegateHarness };
 
 export type Config = {
   favorites: Favorite[];
