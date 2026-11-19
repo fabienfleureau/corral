@@ -204,4 +204,9 @@ The file is the source for the next cycle. KPI sessions use their own report con
 It always carries the last 20 sourced measurements. With a goal, the prompt
 adds the target, deadline and Corral's computed gap and progress, and asks for a `trajectory` verdict
 (on track or not, with confidence) and a `goalReview` of the goal itself.
-Without one it asks for both to be null.
+Without one it asks for both to be null. Every cycle also asks for ideas
+(unproven hypotheses with impact, effort and how to verify them, carried
+forward and confirmed or rejected), impact and effort on proposals, and stable
+ids on data needs and product questions. The prompt carries the operator's
+inbox answers and dismissed ideas as `feedback` and forbids re-asking an
+answered id or reviving a dismissed idea.

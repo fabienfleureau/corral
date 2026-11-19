@@ -61,12 +61,58 @@ export interface KpiMeasurement {
   sources: string[];
 }
 
+export type KpiImpact = "high" | "medium" | "low";
+export type KpiEffort = "S" | "M" | "L";
+
+/** A data need or product question. The id stays stable across cycles so the
+ *  inbox asks once. Reports saved before ids carry plain strings. */
+export interface KpiAsk {
+  id: string;
+  text: string;
+}
+
+/** An unproven hypothesis that could move the KPI towards its goal. */
+export interface KpiIdea {
+  id: string;
+  hypothesis: string;
+  expectedImpact: string;
+  /** How a later cycle can confirm or reject it. */
+  verification: string;
+  impact: KpiImpact;
+  effort: KpiEffort;
+  status: "open" | "confirmed" | "rejected";
+  /** Why it was confirmed or rejected. */
+  reason: string;
+}
+
+export interface KpiProposal {
+  title: string;
+  rationale: string;
+  evidence: string;
+  /** Missing on reports saved before prioritisation. */
+  impact?: KpiImpact;
+  effort?: KpiEffort;
+}
+
+/** An inbox answer or a dismissed idea, sent to the next cycles. */
+export interface KpiFeedback {
+  kind: "answer" | "dismissed-idea";
+  /** Question or idea id. */
+  ref: string;
+  /** The question or idea as the operator saw it. */
+  subject: string;
+  answer: string;
+  at: string;
+}
+
 export interface KpiReport {
   summary: string;
   measurement: KpiMeasurement | null;
-  dataNeeds: string[];
-  productQuestions: string[];
-  proposals: { title: string; rationale: string; evidence: string }[];
+  dataNeeds: (KpiAsk | string)[];
+  productQuestions: (KpiAsk | string)[];
+  /** Missing on reports saved before ideas. */
+  ideas?: KpiIdea[];
+  proposals: KpiProposal[];
   memory: string;
   /** Present when the KPI has a goal. Reports saved before goals lack them. */
   trajectory?: KpiTrajectory | null;
@@ -89,4 +135,6 @@ export interface KpiView {
   goalProgress: KpiGoalProgress | null;
   /** Sourced measurements, oldest first, latest window per period. */
   history: KpiMeasurement[];
+  /** Inbox answers and dismissed ideas, oldest first. */
+  feedback: KpiFeedback[];
 }

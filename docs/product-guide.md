@@ -232,10 +232,18 @@ Corral and the Omnigent runner must stay online for unattended cycles. After
 a restart Corral resumes checking the active session or starts a due cycle.
 
 Each tab shows the last report, measurement window and evidence, missing
-data, product questions and proposals. Report text uses Markdown, so agent
-findings keep their headings, lists, emphasis, code and links. The last
-sourced value stays visible if a newer cycle lacks a measurement. Use **Product context and answers** to
-reply to questions. The next cycle reads the prior report and research memory. The durable memory is a file in the working directory: `.corral/kpi-1-memory.md` or `.corral/kpi-2-memory.md`. Corral creates it, the agent updates it during a cycle, and the page shows a bounded copy. Once the file has notes it is the source for the next cycle.
+data, product questions, ideas and proposals. Report text uses Markdown, so agent
+findings keep their headings, lists, emphasis, code and links. The last sourced
+value stays visible if a newer cycle lacks a measurement. Each new data need or product question
+also opens a question in the [Inbox](#/inbox): answer it there, or pick
+**Not available** or **Out of scope**. The answer is kept with the KPI and sent
+to every later cycle, which does not ask the same question again; **Open KPI**
+goes back to the KPI to **Run now**. A question the agent stops asking is
+archived. **Ideas to explore** lists the agent's unproven hypotheses, highest
+impact and smallest effort first; **Dismiss idea** rules one out for good.
+Confirmed, rejected and dismissed ideas stay folded below, and **Answers and
+decisions** lists what the agent receives. Proposals are sorted the same way.
+**Product context and answers** remains for anything else. The next cycle reads the prior report and research memory. The durable memory is a file in the working directory: `.corral/kpi-1-memory.md` or `.corral/kpi-2-memory.md`. Corral creates it, the agent updates it during a cycle, and the page shows a bounded copy. Once the file has notes it is the source for the next cycle.
 **Draft task** opens the editable Tasks form for a proposal.
 
 Set an optional **Goal**: a target value in the KPI unit, whether the KPI
@@ -247,5 +255,5 @@ Each cycle the agent says whether the KPI is on track for the deadline and
 reviews the goal itself (realistic, ambitious, unrealistic or not measurable).
 Clearing the target removes the goal and its baseline.
 
-Changing the calculation or unit starts a fresh report, memory file, last measurement and measurement history for the slot.
+Changing the calculation or unit starts a fresh report, memory file, last measurement, measurement history and answers for the slot, and archives its open inbox questions.
 Edits to the name, sources, product context and goal preserve the current research.

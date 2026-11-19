@@ -77,9 +77,14 @@ export function seedKpis(db: Db, now: number): void {
   const report = {
     summary: "Reporting is steady week over week, but **mobile submissions dropped** in the latest window.\n\n- The events table has no device field\n- Weekend coverage is incomplete\n\nSee the [activity dashboard](https://example.com/activity) for the daily breakdown.",
     measurement: { value: 1420, from: "2025-01-06", to: "2025-01-13", sources: ["warehouse.reports", "[dashboard/activity](https://example.com/activity)"] },
-    dataNeeds: ["Add a `device` field to mobile submission events; see the [event schema](https://example.com/schema)."],
-    productQuestions: ["Should **trial accounts** count as reporters?"],
-    proposals: [{ title: "Add device field to submission events", rationale: "Would explain the **mobile gap** and sharpen the weekly count:\n\n- Split mobile and desktop trends\n- Confirm the drop is real", evidence: "`dashboard/activity`, panel 3" }],
+    dataNeeds: [{ id: "mobile-device-field", text: "Add a `device` field to mobile submission events; see the [event schema](https://example.com/schema)." }],
+    productQuestions: [{ id: "trial-accounts", text: "Should **trial accounts** count as reporters?" }],
+    ideas: [
+      { id: "weekly-reminder", hypothesis: "A Monday reminder brings back accounts that skipped a week.", expectedImpact: "+60 to +90 accounts a week if a third of skippers return.", verification: "Compare return rates of reminded and not reminded accounts over two weeks.", impact: "high", effort: "S", status: "open", reason: "" },
+      { id: "draft-autosave", hypothesis: "Mobile drafts are lost when the app is backgrounded.", expectedImpact: "Recovers part of the mobile drop.", verification: "Count abandoned drafts by platform once the device field exists.", impact: "medium", effort: "M", status: "open", reason: "" },
+      { id: "timezone-cutoff", hypothesis: "Reports near midnight UTC land in the next week.", expectedImpact: "Shifts counts, does not grow them.", verification: "Done: late reports are under 0.5%.", impact: "low", effort: "S", status: "rejected", reason: "Late reports are under 0.5% of the weekly total." },
+    ],
+    proposals: [{ title: "Add device field to submission events", rationale: "Would explain the **mobile gap** and sharpen the weekly count:\n\n- Split mobile and desktop trends\n- Confirm the drop is real", evidence: "`dashboard/activity`, panel 3", impact: "medium", effort: "S" }],
     memory: "Previous cycles confirmed the warehouse job completes by 06:00 UTC.\n\n- Keep that cut-off in mind for the next window",
     trajectory: { onTrack: "no", confidence: "medium", rationale: "Growth of about 20 accounts a week reaches roughly 1,900 only if the mobile gap closes; at the current pace the target lands in August." },
     goalReview: { verdict: "ambitious", rationale: "Needs +27% in six months; reachable only if mobile submissions recover." },
@@ -89,7 +94,16 @@ export function seedKpis(db: Db, now: number): void {
     VALUES (?, ?, 'complete', ?, ?, ?, ?)`).run(
     "kpi-1", JSON.stringify(settings), JSON.stringify(report), now, JSON.stringify(report.measurement), now,
   );
-  db.raw.prepare("UPDATE kpi_monitors SET goal_baseline = ? WHERE id = 'kpi-1'").run(JSON.stringify({ value: 1300, to: "2024-11-11" }));
+  db.raw.prepare("UPDATE kpi_monitors SET goal_baseline = ?, feedback = ? WHERE id = 'kpi-1'").run(
+    JSON.stringify({ value: 1300, to: "2024-11-11" }),
+    JSON.stringify([{ kind: "answer", ref: "test-accounts", subject: "Which accounts are test accounts?", answer: "Accounts whose email ends in @example.test.", at: "2025-01-10" }]),
+  );
+  db.insertItem({
+    id: "sample-kpi-question", kind: "question", status: "open", title: "Weekly active reporters: Should trial accounts count as reporters?", summary: "",
+    body: "**Product question** from the KPI Weekly active reporters.\n\nShould trial accounts count as reporters?\n\nYour answer goes to the next cycle. Open the KPI and use **Run now** to start one sooner.",
+    context: "", options: JSON.stringify(["Not available", "Out of scope"]), ready: 1, handling: 0, source_ref: "kpi:kpi-1:trial-accounts", task_id: null,
+    structured: 1, created_ms: now - 30 * 60_000, updated_ms: now - 30 * 60_000, resolved_ms: null, snooze_until_ms: null,
+  });
   const weekly = [1300, 1315, 1340, 1332, 1360, 1371, 1388, 1395, 1410, 1420];
   weekly.forEach((value, index) => {
     const from = new Date(Date.UTC(2024, 10, 4) + index * 7 * 86_400_000).toISOString().slice(0, 10);
