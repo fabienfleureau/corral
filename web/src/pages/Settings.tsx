@@ -524,8 +524,8 @@ function ReviewersSection() {
     <div className="field-row">
       <label className="field"><span>Name</span><input value={draft.name} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. cubic" /></label>
       <label className="field"><span>Runs</span><select value={draft.kind} onChange={(e) => update({ kind: e.target.value as ReviewerDraft["kind"] })}>{REVIEWER_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}</select></label>
-      {draft.kind === "command" ? <label className="field"><span>Command</span><input value={draft.command} onChange={(e) => update({ command: e.target.value })} placeholder="cubic review --base {base_branch} --json" /></label> : null}
     </div>
+    {draft.kind === "command" ? <div className="field-row"><label className="field"><span>Command</span><input value={draft.command} onChange={(e) => update({ command: e.target.value })} placeholder="cubic review --base {base_branch} --json" /></label></div> : null}
     {draft.kind === "command" ? null : <p className="muted form-hint">The task agent sends the review to a {draft.kind === "claude" ? "Claude" : "Codex"} sub-agent in the same worktree. It needs the Claude harness and no explicit agent.</p>}
     {error ? <div className="inline-error">{error}</div> : null}
     <div className="form-foot"><button className="btn btn-primary" disabled={busy || !reviewer} onClick={() => { if (!reviewer) return; const next = [...reviewers]; if (editing === null) next.push(reviewer); else next[editing] = reviewer; void save(next); }}>{editing === null ? "Add reviewer" : "Save reviewer"}</button>{editing !== null ? <button className="btn" onClick={() => { setEditing(null); setDraft(EMPTY_REVIEWER_DRAFT); }}>Cancel</button> : null}</div>
