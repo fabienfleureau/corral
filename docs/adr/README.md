@@ -14,9 +14,10 @@ They are required when a change makes or revisits such a decision.
 | [0002](0002-epic-tasks-start-from-epic-page.md) | Accepted | Epic tasks wait for explicit launch from the Epic page |
 | [0003](0003-record-consequential-decisions.md) | Accepted | Record consequential decisions in the same PR |
 | [0004](0004-agent-control-mcp.md) | Proposed | Agent control uses three MCP tools on the Corral HTTP server |
-| [0005](0005-kpi-scheduling-and-memory.md) | Proposed | Corral owns KPI schedules and analysis memory |
+| [0005](0005-kpi-scheduling-and-memory.md) | Proposed | Corral owns KPI schedules and analysis memory (memory refined by 0008) |
 | [0006](0006-omnigent-project-cleanup.md) | Proposed | Archive detaches the session and removes its empty omnigent project |
 | [0007](0007-kpi-favorite-and-working-directory.md) | Proposed | KPI cycles use a favorite and a working directory |
+| [0008](0008-kpi-memory-file.md) | Proposed | KPI research memory lives in the working directory |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.

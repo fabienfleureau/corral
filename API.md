@@ -73,8 +73,11 @@ The contract types live in [`shared/kpis.ts`](shared/kpis.ts). Supported IDs are
 
 A report includes the summary, optional numeric measurement with UTC window
 and source references, data needs, product questions, proposals with evidence,
-and a research memory. A missing measurement is `null`. A failed cycle leaves
-the previous report available.
+and a research memory. The memory shown is a bounded copy of
+`.corral/kpi-<slot>-memory.md` in the KPI's working directory. Corral creates the
+file from the stored memory on first use; the agent updates it during a cycle
+and it becomes the source for the next cycle. A missing measurement is `null`.
+A failed cycle leaves the previous report available.
 
 ### Daily activity
 - `GET /api/daily?start=<ms>&end=<ms>` → task history events in the half-open timestamp interval, joined to registered professional repositories (including legacy null contexts). Each event carries the task title, prompt, repo name/path, Jira and PR links, terminal address and `session_url` (omnigent's session inspect URL when available). The interval must be positive and at most 25 hours. Tasks with an unknown repository are excluded.

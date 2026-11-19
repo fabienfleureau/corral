@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, test } from "node:test";
 import { Db } from "../db.ts";
 import { KpiMonitor, parseKpiReport, type KpiDeps } from "../kpi.ts";
 import type { Favorite } from "../favorites.ts";
@@ -13,8 +16,10 @@ const favorites: Favorite[] = [
   { name: "Research", harness: "claude", agent: "analyst", model: "opus", reasoning: "high", context: "professional", review: "" },
   { name: "Home research", harness: "codex", agent: "", model: "", reasoning: "", context: "personal", review: "" },
 ];
-const work: Repo = { id: "work", name: "work", path: "/sample/work", jira_prefix: null, context: null, source: "manual", created_ms: 0 };
+const workspace = mkdtempSync(join(tmpdir(), "corral-kpi-"));
+const work: Repo = { id: "work", name: "work", path: workspace, jira_prefix: null, context: null, source: "manual", created_ms: 0 };
 const home: Repo = { ...work, id: "home", name: "home", path: "/sample/home", context: "personal" };
+after(() => rmSync(workspace, { recursive: true, force: true }));
 const deps: KpiDeps = { favorites: () => favorites, repos: () => [work, home] };
 const agentSettings = { favorite: "Research", repoPath: work.path };
 const report = {

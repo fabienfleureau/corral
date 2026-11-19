@@ -16,5 +16,6 @@ or reasoning, and refused folders Corral had not registered as git repos — a
 real limit for dashboards, logs and read-only data exports. The trade-off is
 that a renamed or removed favorite stops the next cycle until the operator
 picks another one; Corral reports the error instead of silently choosing a
-different agent. Scheduling and report memory from [ADR 0005](0005-kpi-scheduling-and-memory.md)
-are unchanged.
+different agent. Scheduling from [ADR 0005](0005-kpi-scheduling-and-memory.md)
+and the workspace memory file from [ADR 0008](0008-kpi-memory-file.md) are
+unchanged.
