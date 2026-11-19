@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import { KPI_IDS } from "../../../shared/kpis";
-import type { KpiId, KpiMeasurement, KpiSettings, KpiView } from "../../../shared/kpis";
+import type { KpiGoal, KpiId, KpiMeasurement, KpiReport, KpiSettings, KpiView } from "../../../shared/kpis";
 import { api } from "../api";
 import { favoritesFor, repoContext } from "../favorite-context";
 import { Markdown } from "../markdown";
@@ -90,6 +90,27 @@ export function KpisPage() {
   </div>;
 }
 
+/** Goal fields as typed; a blank target means no goal. */
+type GoalDraft = { target: string; direction: KpiGoal["direction"]; deadline: string; why: string };
+
+function goalDraft(goal: KpiGoal | null): GoalDraft {
+  return goal ? { ...goal, target: String(goal.target) } : { target: "", direction: "increase", deadline: "", why: "" };
+}
+
+function draftGoal(draft: GoalDraft): KpiGoal | null {
+  if (!draft.target.trim()) return null;
+  return { target: Number(draft.target), direction: draft.direction, deadline: draft.deadline, why: draft.why };
+}
+
+/** Views from a server without goals lack the key; treat it as no goal. */
+function sameGoal(left: KpiGoal | null | undefined, right: KpiGoal | null | undefined): boolean {
+  const a = left ?? null, b = right ?? null;
+  return a === b || Boolean(a && b && a.target === b.target && a.direction === b.direction && a.deadline === b.deadline && a.why === b.why);
+}
+
+const number = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 12 });
+const withUnit = (value: number, unit: string) => `${number.format(value)}${unit ? (unit === "%" ? "%" : ` ${unit}`) : ""}`;
+
 const runStatus = {
   starting: "Starting",
   running: "Analysing",
@@ -103,6 +124,7 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
   onUpdate: (view: KpiView) => void;
 }) {
   const [settings, setSettings] = useState(view.settings);
+  const [goal, setGoal] = useState(() => goalDraft(view.settings.goal));
   const settingsPane = usePaneWidth("corral.kpiSettingsWidth", SETTINGS_DEFAULT_WIDTH, SETTINGS_LIMITS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -110,7 +132,9 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
   const { id, report, lastMeasurement, runState } = view;
   const defined = Boolean(view.settings.name && view.settings.definition);
   const running = runState === "starting" || runState === "running" || runState === "blocked";
-  const dirty = (Object.keys(settings) as (keyof KpiSettings)[]).some((key) => settings[key] !== view.settings[key]);
+  const payload: KpiSettings = { ...settings, goal: draftGoal(goal) };
+  const dirty = (Object.keys(settings) as (keyof KpiSettings)[]).some((key) => key !== "goal" && settings[key] !== view.settings[key])
+    || !sameGoal(payload.goal, view.settings.goal);
   const shownFavorites = favoritesFor(favorites, repoContext(repos, settings.repoPath));
   const favoriteAvailable = shownFavorites.some(({ name }) => name === settings.favorite);
 
@@ -119,13 +143,19 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
     setNotice("");
     setError("");
   };
+  const changeGoal = (patch: Partial<GoalDraft>) => {
+    setGoal((previous) => ({ ...previous, ...patch }));
+    setNotice("");
+    setError("");
+  };
   const save = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true); setError(""); setNotice("");
     try {
-      const updated = await api.configureKpi(id, settings);
+      const updated = await api.configureKpi(id, payload);
       onUpdate(updated);
       setSettings(updated.settings);
+      setGoal(goalDraft(updated.settings.goal));
       setNotice("Settings saved.");
     } catch (error) { setError(errText(error)); }
     finally { setBusy(false); }
@@ -153,6 +183,8 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
         </div>}
         {view.reportMs !== null && <p className="muted kpi-meta">Report updated <time dateTime={new Date(view.reportMs).toISOString()}>{new Date(view.reportMs).toLocaleString()}</time></p>}
       </section>
+
+      {view.settings.goal && <GoalPanel goal={view.settings.goal} unit={view.settings.unit} view={view} report={report} />}
 
       <div className="kpi-inputs">
         <Findings title="Data and connectors" entries={report?.dataNeeds} empty="No data gaps reported." />
@@ -207,6 +239,27 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
             onChange={(event) => change({ sources: event.target.value })} aria-describedby="kpi-sources-help" />
           <p id="kpi-sources-help" className="muted kpi-meta">Add connector names, dashboard links or query references for the agent.</p>
         </fieldset>
+        {defined && <div className="kpi-goal"><fieldset className="kpi-definition" disabled={busy}>
+          <legend className="panel-title">Goal (optional)</legend>
+          <label className="field" htmlFor="kpi-goal-target">Target value{settings.unit ? ` (${settings.unit})` : ""}</label>
+          <input id="kpi-goal-target" name="goalTarget" type="number" step="any" value={goal.target}
+            onChange={(event) => changeGoal({ target: event.target.value })} aria-describedby="kpi-goal-help" />
+          <p id="kpi-goal-help" className="muted kpi-meta">Leave empty for no goal. The agent then only monitors the KPI.</p>
+          <fieldset className="kpi-goal-direction">
+            <legend className="field">Direction</legend>
+            {(["increase", "decrease"] as const).map((direction) => <label key={direction}>
+              <input type="radio" name="goalDirection" value={direction} checked={goal.direction === direction}
+                onChange={() => changeGoal({ direction })} />
+              {direction === "increase" ? " At least the target" : " At most the target"}
+            </label>)}
+          </fieldset>
+          <label className="field" htmlFor="kpi-goal-deadline">Deadline{goal.target.trim() ? " (required)" : ""}</label>
+          <input id="kpi-goal-deadline" name="goalDeadline" type="date" value={goal.deadline} required={Boolean(goal.target.trim())}
+            onChange={(event) => changeGoal({ deadline: event.target.value })} />
+          <label className="field" htmlFor="kpi-goal-why">Why and constraints</label>
+          <textarea id="kpi-goal-why" name="goalWhy" rows={2} maxLength={2000} value={goal.why}
+            onChange={(event) => changeGoal({ why: event.target.value })} />
+        </fieldset></div>}
         {defined && <>
           <div className="kpi-agent-heading">
             <h2 className="panel-title">Omnigent agent</h2>
@@ -287,4 +340,53 @@ function Findings({ title, entries, empty }: { title: string; entries?: string[]
       {entries.map((entry, i) => <li key={i}><Markdown text={entry} /></li>)}
     </ul> : <p className="muted kpi-copy">{entries ? empty : "Awaiting the first analysis."}</p>}
   </section>;
+}
+
+const onTrackText = { yes: "On track", no: "Off track", unknown: "Trajectory unknown" } as const;
+const reviewText = { realistic: "Realistic", ambitious: "Ambitious", unrealistic: "Unrealistic", unmeasurable: "Not measurable" } as const;
+
+function GoalPanel({ goal, unit, view, report }: { goal: KpiGoal; unit: string; view: KpiView; report: KpiReport | null }) {
+  const progress = view.goalProgress;
+  const share = progress?.progress ?? null;
+  return <section className="panel-form kpi-goal-panel" aria-labelledby="kpi-goal-heading">
+    <h2 id="kpi-goal-heading" className="panel-title">Goal</h2>
+    <p className="kpi-goal-target">
+      {goal.direction === "increase" ? "≥" : "≤"} {withUnit(goal.target, unit)} by <time dateTime={goal.deadline}>{goal.deadline}</time>
+    </p>
+    {goal.why && <p className="kpi-copy muted">{goal.why}</p>}
+    {progress?.reached ? <p className="kpi-copy">Target reached.</p>
+      : progress?.gap != null && <p className="kpi-copy">{withUnit(Math.abs(progress.gap), unit)} to go</p>}
+    {share !== null && <div className="kpi-goal-progress">
+      <progress max={1} value={Math.min(Math.max(share, 0), 1)} aria-labelledby="kpi-goal-share" />
+      <span id="kpi-goal-share" className="muted kpi-meta">
+        {Math.round(share * 100)}% of the way{progress?.baseline ? ` from ${withUnit(progress.baseline.value, unit)} (${progress.baseline.to})` : ""}
+      </span>
+    </div>}
+    {!progress?.baseline && <p className="muted kpi-meta">The next sourced measurement becomes the baseline.</p>}
+    <GoalChart history={view.history} goal={goal} unit={unit} />
+    {report?.trajectory && <div className="kpi-goal-verdict">
+      <h3>{onTrackText[report.trajectory.onTrack]} <small className="muted">· {report.trajectory.confidence} confidence</small></h3>
+      <Markdown text={report.trajectory.rationale} className="kpi-copy" />
+    </div>}
+    {report?.goalReview && <div className="kpi-goal-verdict">
+      <h3>Goal review: {reviewText[report.goalReview.verdict]}</h3>
+      <Markdown text={report.goalReview.rationale} className="kpi-copy" />
+    </div>}
+  </section>;
+}
+
+/** Measurement history with the target as a dashed line. */
+function GoalChart({ history, goal, unit }: { history: KpiMeasurement[]; goal: KpiGoal; unit: string }) {
+  if (history.length < 2) return null;
+  const width = 300, height = 80, pad = 4;
+  const values = [...history.map(({ value }) => value), goal.target];
+  const min = Math.min(...values), max = Math.max(...values);
+  const y = (value: number) => max === min ? height / 2 : pad + (height - 2 * pad) * (max - value) / (max - min);
+  const x = (index: number) => pad + (width - 2 * pad) * index / (history.length - 1);
+  const first = history[0], last = history[history.length - 1];
+  const label = `${history.length} measurements from ${first.from} to ${last.to}, from ${withUnit(first.value, unit)} to ${withUnit(last.value, unit)}. Target ${withUnit(goal.target, unit)}.`;
+  return <svg className="kpi-goal-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label}>
+    <line className="kpi-goal-chart-target" x1={0} x2={width} y1={y(goal.target)} y2={y(goal.target)} />
+    <polyline className="kpi-goal-chart-line" points={history.map(({ value }, i) => `${x(i)},${y(value)}`).join(" ")} />
+  </svg>;
 }

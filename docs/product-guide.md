@@ -238,5 +238,14 @@ sourced value stays visible if a newer cycle lacks a measurement. Use **Product 
 reply to questions. The next cycle reads the prior report and research memory. The durable memory is a file in the working directory: `.corral/kpi-1-memory.md` or `.corral/kpi-2-memory.md`. Corral creates it, the agent updates it during a cycle, and the page shows a bounded copy. Once the file has notes it is the source for the next cycle.
 **Draft task** opens the editable Tasks form for a proposal.
 
-Changing the calculation or unit starts a fresh report, memory file and last measurement for the slot.
-Edits to the name, sources and product context preserve the current research.
+Set an optional **Goal**: a target value in the KPI unit, whether the KPI
+must end at least or at most there, a deadline, and why it matters. The last
+measured value becomes the baseline; without one, the next sourced measurement
+does. The Goal panel shows how far the KPI is from the target, the share of the
+way done since the baseline and the measurement history against the target.
+Each cycle the agent says whether the KPI is on track for the deadline and
+reviews the goal itself (realistic, ambitious, unrealistic or not measurable).
+Clearing the target removes the goal and its baseline.
+
+Changing the calculation or unit starts a fresh report, memory file, last measurement and measurement history for the slot.
+Edits to the name, sources, product context and goal preserve the current research.

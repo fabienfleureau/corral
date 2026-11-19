@@ -2943,6 +2943,21 @@ select:focus {
 .kpi-proposals a { margin-top: 4px; }
 .kpi-proposals a { display: inline-block; }
 .kpi-main summary { cursor: pointer; }
+.kpi-goal { border-top: 1px solid var(--border); padding-top: 12px; }
+.kpi-goal + .kpi-agent-heading { border-top: 1px solid var(--border); padding-top: 12px; }
+.kpi-goal-direction { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 5px 0 0; padding: 0; border: 0; }
+.kpi-goal-direction legend { padding: 0; margin-bottom: 4px; }
+.kpi-definition .kpi-goal-direction label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.kpi-definition .kpi-goal-direction input { inline-size: auto; margin: 0; }
+.kpi-goal-panel { display: grid; gap: 8px; }
+.kpi-goal-target { margin: 0; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kpi-goal-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.kpi-goal-progress progress { inline-size: min(240px, 100%); accent-color: var(--accent); }
+.kpi-goal-chart { inline-size: 100%; block-size: 80px; overflow: visible; }
+.kpi-goal-chart-line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.kpi-goal-chart-target { stroke: var(--ok-ink); stroke-width: 1.5; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.kpi-goal-verdict { border-top: 1px solid var(--border); padding-top: 8px; }
+.kpi-goal-verdict h3 { margin: 0 0 4px; font-size: 13px; }
 .kpi-main details > .kpi-copy { margin-top: 8px; }
 
 @media (max-width: 1000px) {
