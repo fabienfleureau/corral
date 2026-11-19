@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -176,6 +176,26 @@ test("interview modes dispatch the selected skill and isolate documentation chan
     const prompt = started.at(-1)!.prompt;
     assert.match(prompt, new RegExp(`Interview mode: \\*\\*${kind === "grill" ? "discussion" : "documentation"}\\*\\*`));
     assert.match(prompt, /complete round as a single question report/);
+    assert.match(prompt, new RegExp(`Documentation output: \\*\\*${kind === "grill" ? "the working folder" : "a git worktree"}`));
     assert.equal(started.at(-1)!.git === null, kind === "grill");
   }
+}));
+
+test("interview tasks accept a folder; docs run in place without a PR loop", withDb(async (db, dir) => {
+  const folder = join(dir, "notes");
+  mkdirSync(folder);
+  const { backend, started } = fakeBackend();
+  for (const kind of ["grill", "grill-docs"] as const) {
+    const task = makeTask({ id: `folder-${kind}`, kind, repo_path: folder });
+    db.insertTask(task);
+    await dispatchTask(db, cfgWith(dir), backend, task, "codex", { useWorktree: true });
+    const session = started.at(-1)!;
+    assert.equal(session.git, null);
+    assert.match(session.prompt, /# Corral action task/);
+    assert.doesNotMatch(session.prompt, /# The PR loop/);
+    assert.equal(db.getTask(task.id)?.branch, null);
+  }
+  const docsPrompt = started.at(-1)!.prompt;
+  assert.match(docsPrompt, /Interview mode: \*\*documentation\*\*/);
+  assert.match(docsPrompt, /Documentation output: \*\*the working folder/);
 }));

@@ -13,7 +13,9 @@ export type TargetState = "suggested" | "confirmed";
  *  a git repo), writes the contract between them and proposes one code task per
  *  sub-project; no branch, no PR. ops: the agent carries out a request with a
  *  folder as context (the folder need not be a git repo) and reports back; no
- *  branch, no PR. */
+ *  branch, no PR. grill: discussion interview in place. grill-docs: interview
+ *  that writes docs, in a worktree with a PR when the folder is a git repo,
+ *  in place with a digest otherwise. Both accept any folder. */
 export type TaskKind = "code" | "review" | "spec" | "analysis" | "ops" | "grill" | "grill-docs";
 
 /** One sub-task a spec proposes. `repo` is a directory relative to the spec task's folder. */
