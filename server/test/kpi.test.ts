@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -165,6 +165,34 @@ test("schedules opted-in KPIs independently and resumes their reports and memory
     service.configure("kpi-2", { ...service.view("kpi-2").settings, definition: "Calculate a different metric." });
     assert.equal(service.view("kpi-2").report, null);
     assert.equal(service.view("kpi-2").lastMeasurement, null);
+  } finally { db.close(); }
+});
+
+test("KPI cycles join the omnigent project of their working directory", async () => {
+  const db = new Db(":memory:");
+  const unregistered = join(workspace, "unregistered");
+  mkdirSync(unregistered, { recursive: true });
+  try {
+    const launches: WorkerStart[] = [];
+    const worker = {
+      start: async (input: WorkerStart) => {
+        launches.push(input);
+        return { address: `session-${launches.length}`, name: input.name, status: "working", state: "live" } as WorkerSession;
+      },
+      get: async () => null,
+      list: async () => [],
+    };
+    const service = new KpiMonitor(db, worker, deps, () => start);
+    service.configure("kpi-1", { ...metric, ...agentSettings, intervalHours: 0, context: "" });
+    service.configure("kpi-2", { ...metric, favorite: "Research", repoPath: unregistered, intervalHours: 0, context: "" });
+    await service.runNow("kpi-1");
+    await service.runNow("kpi-2");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(launches.length, 2);
+    assert.equal(launches[0].project, work.name);
+    assert.equal(launches[0].repoPath, work.path);
+    assert.equal(launches[1].project, unregistered);
+    assert.equal(launches[1].repoPath, unregistered);
   } finally { db.close(); }
 });
 
