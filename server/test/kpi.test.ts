@@ -132,6 +132,8 @@ test("schedules opted-in KPIs independently and resumes their reports and memory
     assert.match(launches[0].prompt, /Use the event catalogue/);
     assert.match(launches[0].prompt, /net count over a week/);
     assert.match(launches[0].prompt, /Fixture event log/);
+    assert.match(launches[0].prompt, /line breaks.*blank lines/);
+    assert.match(launches[0].prompt, /\\n/);
     assert.equal(service.view("kpi-2").runState, "running");
     assert.equal(service.view("kpi-1").report, null);
 

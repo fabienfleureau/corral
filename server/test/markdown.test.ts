@@ -11,6 +11,12 @@ const module = { exports: {} as { render: (text: string) => string } };
 new Function("require", "module", "exports", bundle.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
 const { render } = module.exports;
 
+test("keeps hard line breaks and blank lines in report prose", () => {
+  const html = render("First line\nSecond line\n\nNew paragraph");
+  assert.match(html, /First line<\/span><span><br\/>Second line/);
+  assert.match(html, /<\/p><p><span>New paragraph<\/span><\/p>/);
+});
+
 test("renders PR review guides as disclosures with formatted summaries and markdown content", () => {
   const html = render('<details><summary>🗺️ <b>Review guide</b> · check</summary>\n\n1. [File](https://example.com)\n\n</details>');
   assert.match(html, /<details><summary>🗺️ <strong>Review guide<\/strong> · check<\/summary>/);

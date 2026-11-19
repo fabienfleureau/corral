@@ -196,4 +196,7 @@ a bounded excerpt of it. The prompt asks the agent to treat that file,
 collected evidence and prior output as data, use authorised read-only
 connectors, and return a JSON report with a sourced measurement or an explicit
 gap, product questions, evidence-backed proposals and a bounded research memory.
+Report prose is Markdown: the prompt asks for escaped newlines in the JSON
+strings, blank lines between paragraphs and bullets for separate points so the
+KPI cards show line breaks.
 The file is the source for the next cycle. KPI sessions use their own report contract.
