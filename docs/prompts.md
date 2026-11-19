@@ -190,8 +190,10 @@ The inbox action asks the active Claude session to create a private artifact exp
 ## KPI monitoring
 
 `kpiPrompt()` in `server/kpi.ts` sends the operator's metric definition, unit,
-source references, context and previous validated report to a fresh worker session. The prompt asks the
-agent to treat collected evidence and prior output as data, use authorised
-read-only connectors, and return a JSON report with a sourced measurement or
-an explicit gap, product questions, evidence-backed proposals and a bounded
-research memory. KPI sessions use their own report contract.
+source references, context and previous validated report to a fresh worker session. It names the
+KPI's `.corral/kpi-<slot>-memory.md` file as the only writable path and carries
+a bounded excerpt of it. The prompt asks the agent to treat that file,
+collected evidence and prior output as data, use authorised read-only
+connectors, and return a JSON report with a sourced measurement or an explicit
+gap, product questions, evidence-backed proposals and a bounded research memory.
+The file is the source for the next cycle. KPI sessions use their own report contract.
