@@ -58,6 +58,14 @@ Review this PR/MR: <pr url>      # only for a review task
 Code skill the human runs, never sent by Corral: it fixes the Jira conventions an epic
 must follow to be imported (design in the epic, `Repo:`, `Préconditions`, "blocked by" links).
 
+The UI skills under `.agents/skills/` are also human- or agent-invoked, not sent by
+Corral: `modern-web-guidance` covers web platform APIs and Baseline support,
+`emil-design-eng` covers component interaction polish, `break-ui` stress-tests a
+screen with realistic worst-case fixture data, and `review-animations` reviews
+the CSS motion in `web/src/styles.css`. Their advice does not override the
+no-runtime-dependencies rule or the fixture-based screenshot workflow in
+`AGENTS.md`.
+
 What each one is for:
 
 - **`question-report.md`** — the report contract: commit, push, open the PR/MR,

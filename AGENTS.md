@@ -135,7 +135,13 @@ import). On failure the last frame is saved next to the output as
 - Web UI work (`web/`) uses the `modern-web-guidance` skill, installed in
   `.agents/skills/` (Codex, OpenCode) and linked from `.claude/skills/` for
   Claude Code. Baseline target: Baseline Widely available. Refresh with
-  `npx skills update`.
+  `npx skills update`. The `emil-design-eng`, `break-ui` and `review-animations`
+  skills come from `emilkowalski/skills` and are installed the same way: use
+  `emil-design-eng` for interaction polish, `break-ui` with the fixture below
+  for realistic worst-case data, and `review-animations` when reviewing the CSS
+  motion in `web/src/styles.css`. They are invoked by the human or their agent,
+  never injected by Corral. Repo rules win: no new runtime dependencies, and
+  screenshots still come from the fixture in this file.
 
 ## Decision records and documentation
 
