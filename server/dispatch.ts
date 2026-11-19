@@ -16,7 +16,7 @@ import { syncJiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 import { gitToplevel } from "./repos.ts";
 import { contractBlock, isDirectory } from "./multi-repo.ts";
 import { epicContext } from "./epic-design.ts";
-import { delegateAgentName, delegateConflict, isDelegateReviewer } from "./reviewers.ts";
+import { delegateAgentName, delegateConflict, isDelegateReviewer, reviewSummary } from "./reviewers.ts";
 import { logTaskEvent, promptData } from "./task-events.ts";
 import type { WorkerBackend, WorkerDelegate, WorkerSession } from "./worker.ts";
 import { taskLabel, type Task } from "./types.ts";
@@ -323,7 +323,7 @@ export async function dispatchTask(
         const name = delegateAgentName(reviewer);
         reviewAgent = { name, baseBranch: baseBranch ?? "" };
         delegates = [{ name, harness: reviewer.delegate, prompt: readSkill(cfg, "ocr-delegate.md", OCR_DELEGATE_FALLBACK) }];
-        frozenReview = `sub-agent ${name}`;
+        frozenReview = reviewSummary(reviewer);
       }
     } else {
       reviewCommand = reviewer.command.replaceAll("{base_branch}", () => baseBranch ?? "");

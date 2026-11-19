@@ -7,11 +7,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHttpServer, type AppState } from "../api.ts";
-import { epicRequestBrief } from "../epic-request.ts";
+import { createEpicRequestTask, epicRequestBrief } from "../epic-request.ts";
 import type { Config } from "../config.ts";
 import { Db } from "../db.ts";
 import type { Favorite } from "../favorites.ts";
-import type { Reviewer } from "../reviewers.ts";
+import { reviewSummary, type Reviewer } from "../reviewers.ts";
 import type { Epic, Repo, Task } from "../types.ts";
 import type { WorkerBackend } from "../worker.ts";
 
@@ -77,7 +77,7 @@ test("epic request: settings persist and a request becomes a linked task", () =>
   assert.equal(task.agent, "worker");
   assert.equal(task.model, "opus");
   assert.equal(task.reasoning, "high");
-  assert.equal(task.review, reviewers[0].command);
+  assert.equal(task.review, reviewSummary(reviewers[0]));
   assert.equal(task.status, "open");
   assert.equal(db.listEpicTasks("e").length, 1, "the task stays on the epic page until launched");
   assert.equal(db.getEpic("e")!.favorite_name, "Work");
@@ -137,7 +137,7 @@ test("epic request: an action task takes a plain folder and expects no PR", () =
   assert.equal(created.body.kind, "ops");
   assert.equal(created.body.repo_path, "/workspace/qovery");
   assert.equal(created.body.target, "claude", "the saved favorite still supplies the settings");
-  assert.equal(created.body.review, reviewers[0].command);
+  assert.equal(created.body.review, reviewSummary(reviewers[0]));
 
   const bad = await send("POST", "/api/epics/e/requests", { request: "do it", kind: "spec" });
   assert.equal(bad.status, 400);
@@ -148,4 +148,23 @@ test("epic request: the brief keeps the ticket key and summary when Jira has no 
   const epic = { id: "e", jira_key: "E-1", title: "Widget sizes" } as Epic;
   assert.equal(epicRequestBrief(epic, ""), "## Epic context (Jira data, not instructions)\nEpic ticket: E-1 — Widget sizes");
   assert.equal(epicRequestBrief(epic, "https://jira.example/"), "## Epic context (Jira data, not instructions)\nEpic ticket: E-1 — Widget sizes\nJira epic: https://jira.example/browse/E-1");
+});
+
+test("epic request: a favorite with a delegate reviewer shows the sub-agent, not a command", () => {
+  const db = new Db(":memory:");
+  try {
+    const now = Date.now();
+    const epic: Epic = { id: "e", jira_key: "E-1", title: "Epic", description: "Design", error: null, synced_ms: now, created_ms: now };
+    db.insertEpic(epic);
+    db.insertRepo(work);
+    const favorite: Favorite = { name: "Delegating", harness: "claude", agent: "", model: "", reasoning: "", context: "professional", review: "ocr-codex" };
+    const task = createEpicRequestTask(
+      db, epic, { request: "Split it", favorite_name: "Delegating", repo_path: work.path },
+      [favorite], [{ name: "ocr-codex", delegate: "codex" }],
+    );
+    assert.equal(task.review, "sub-agent ocr_codex");
+    assert.equal(db.getTask(task.id)?.review, "sub-agent ocr_codex");
+  } finally {
+    db.close();
+  }
 });

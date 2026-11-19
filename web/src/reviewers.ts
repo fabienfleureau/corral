@@ -2,7 +2,7 @@
 // rule about where a delegate can run mirrors `delegateConflict` in
 // server/reviewers.ts; the server enforces it, this only keeps the pickers honest.
 
-import type { DelegateHarness, Reviewer } from "./types";
+import type { DelegateHarness, Reviewer } from "./types.ts";
 
 export type ReviewerKind = "command" | DelegateHarness;
 export type ReviewerDraft = { name: string; kind: ReviewerKind; command: string };

@@ -19,6 +19,12 @@ export function delegateAgentName(r: DelegateReviewer): string {
   return `ocr_${r.delegate}`;
 }
 
+/** What a task shows as its review: the command (as written, before `{base_branch}`
+ *  is resolved), or the sub-agent the review is handed to. */
+export function reviewSummary(r: Reviewer): string {
+  return isDelegateReviewer(r) ? `sub-agent ${delegateAgentName(r)}` : r.command;
+}
+
 /**
  * Why `reviewer` cannot run with this dispatch, or null when it can. A delegate
  * needs an agent that can call sub-agents: Corral picks one, which only works
