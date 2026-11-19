@@ -12,6 +12,17 @@ export interface WorkerAttachment {
   data: Uint8Array;
 }
 
+/** A sub-agent a session may hand work to: it runs on `harness`, follows `prompt`,
+ *  and works in the session's own directory. */
+export interface WorkerDelegate {
+  /** The name the session calls it by (letters, digits, underscore). */
+  name: string;
+  /** Short harness id: "claude" | "codex" | … */
+  harness: string;
+  /** The sub-agent's standing instructions. */
+  prompt: string;
+}
+
 export interface WorkerStart {
   taskId: string | null;
   /** Display name of the task group, when available. */
@@ -32,6 +43,9 @@ export interface WorkerStart {
   harness: string;
   /** Explicit agent choice (omnigent registry name/id) — null = bare harness. */
   agent?: string | null;
+  /** Sub-agents the session may delegate to (a delegate reviewer). The backend
+   *  picks an agent that can call them, so this excludes an explicit `agent`. */
+  delegates?: WorkerDelegate[];
   /** Model pin — null = "let the backend route it" (omnigent smart routing). */
   model: string | null;
   /** Raw per-harness reasoning value — null = backend decides. */

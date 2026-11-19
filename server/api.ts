@@ -1,5 +1,5 @@
 import { isContext, parseFavorites } from "./favorites.ts";
-import { parseReviewers, type Reviewer } from "./reviewers.ts";
+import { delegateConflict, parseReviewers, type Reviewer } from "./reviewers.ts";
 import { errors } from "./errors.ts";
 // HTTP API + static hosting. Token auth middleware (token-ready for LAN/team),
 // SSE hub for live inbox updates.
@@ -620,12 +620,20 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!target) return json(res, 400, { error: "target required (claude|codex|opencode)" });
     if (task.kind === "review" && target !== "claude") return json(res, 400, { error: "review tasks run on the claude harness only" });
     if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — assign one before dispatching" });
+    const agent = b.agent === undefined ? task.agent ?? null : b.agent;
+    // A delegate reviewer needs the claude harness and no explicit agent: say so
+    // as a bad request, not as a failed dispatch.
+    if (b.review && task.kind !== "review" && task.kind !== "spec") {
+      const reviewer = (state.cfg.reviewers ?? []).find((r) => r.name === b.review);
+      const conflict = reviewer ? delegateConflict(reviewer, target, agent) : null;
+      if (conflict) return json(res, 400, { error: conflict });
+    }
     try {
       const result = await dispatchTask(state.db, state.cfg, state.backend, task, target, {
         useWorktree: b.use_worktree,
         model: b.model === undefined ? task.model : b.model,
         reasoning: b.reasoning === undefined ? task.reasoning : b.reasoning,
-        agent: b.agent === undefined ? task.agent ?? null : b.agent,
+        agent,
         review: b.review ?? null,
         jira: state.jira ?? null,
       });

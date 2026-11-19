@@ -32,7 +32,11 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   model shows a pale red **2× peak** tag during its doubled-rate peak hours
   (01:00–04:00 and 06:00–10:00 UTC, Mon–Fri); the favorite stays gray.
   An optional **pre-PR review step** runs
-  a named reviewer command (`reviewers` in the config) before the PR opens.
+  a named reviewer (`reviewers` in the config) before the PR opens: a command, or
+  a **delegate** — `ocr-claude` / `ocr-codex` hand the review to an
+  [`ocr delegate`](https://github.com/alibaba/open-code-review) sub-agent on
+  that harness, so a Claude task can be reviewed on the Codex quota and the other
+  way round. Delegates need the Claude harness and no explicit agent.
 - **Prompt attachments** — drop files on the New task prompt, paste a screenshot
   or pick them: PNG, JPEG, GIF and WebP images, PDFs, and text or code files (up
   to 10 files, 25 MB). They are stored with the task and sent to the agent with
@@ -190,7 +194,7 @@ the common keys; the file wins on restart.
 | `assistant` | `["claude","-p","{prompt}"]` | Corral's own LLM calls (summaries, improvement analysis) |
 | `jira` | `{baseUrl, email, token, jql, statuses?}` | email + API token (Basic); `statuses` maps stage → Jira status name (`to_do`, `in_progress`, `code_review`, `ready_to_merge`, `done`), blank disables a stage |
 | `favorites` | `[]` | saved harness/agent/model/reasoning combos, with a context and an optional reviewer |
-| `reviewers` | `cubic`, `ocr` | named pre-PR review commands; `{base_branch}` is substituted |
+| `reviewers` | `cubic`, `ocr`, `ocr-claude`, `ocr-codex` | named pre-PR reviews: `{name, command}` (`{base_branch}` is substituted) or `{name, delegate: "claude" \| "codex"}`. The defaults only apply while `reviewers` is absent from your file: once saved from Settings the list is yours, so add `{"name": "ocr-codex", "delegate": "codex"}` by hand. Needs the `ocr` CLI (open-code-review ≥ 1.9, for `--format json`) on the host |
 | `models` | `{}` | overrides merged over the shipped model facts catalog |
 | `usage.prices` | `{}` | price overrides (USD/MTok) by model id or `prefix*` |
 | `workspaceRoots` | `~/workspace` | directories scanned for git repos |

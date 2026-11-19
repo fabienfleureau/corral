@@ -4,7 +4,7 @@
 
 import { randomUUID } from "node:crypto";
 import { favoriteForPath, type Favorite } from "./favorites.ts";
-import type { Reviewer } from "./reviewers.ts";
+import { reviewSummary, type Reviewer } from "./reviewers.ts";
 import type { Db } from "./db.ts";
 import { logTaskEvent } from "./task-events.ts";
 import type { Epic, Repo, Task } from "./types.ts";
@@ -65,7 +65,8 @@ export function createEpicRequestTask(
   const kind = input.kind ?? "code";
   if (kind !== "code" && kind !== "ops") throw new EpicRequestError("kind must be code or ops");
   const { favorite, repoPath } = resolveEpicRequestSettings(input, favorites, db.listRepos());
-  const review = favorite?.review ? reviewers.find((r) => r.name === favorite.review)?.command ?? null : null;
+  const reviewer = favorite?.review ? reviewers.find((r) => r.name === favorite.review) : undefined;
+  const review = reviewer ? reviewSummary(reviewer) : null;
   const now = Date.now();
   const task: Task = {
     id: randomUUID(),

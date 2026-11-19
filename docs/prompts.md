@@ -51,6 +51,8 @@ Review this PR/MR: <pr url>      # only for a review task
 | `skills/epic-task.md` | a `code` task of an epic (`epic_id`), in the task text before the conventions: check the ticket's Preconditions, report a question and stop if one is unmet | — | one-line fallback: *"Before changing anything, check the ticket's Preconditions section. If one is not met, report a question and stop."* |
 | `skills/pr-loop.md` | same tasks, right after `question-report.md` | — | dropped (empty string is filtered out) |
 | `skills/pre-pr-review.md` | non-review task dispatched **with a reviewer** (`review` in the dispatch options) | `{review_command}` | dropped |
+| `skills/pre-pr-delegate-review.md` | **replaces** `pre-pr-review.md` when the reviewer is a delegate (`delegate` instead of `command`) | `{review_agent}`, `{base_branch}` | one-line fallback: send the changes to the `{review_agent}` sub-agent with `sys_session_send`, fix or decline each finding |
+| `skills/ocr-delegate.md` | **not part of the task prompt**: the standing instructions of the review sub-agent, written into the omnigent bundle the delegate reviewer's agent is registered from (`delegateBundle()` in `server/omnigent.ts`) | — | three-line fallback in `server/dispatch.ts` (`OCR_DELEGATE_FALLBACK`) |
 | `skills/review.md` | **replaces** the two files above when `task.kind === "review"` — a review must not commit, push or open a PR | `{pr_url}`, `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Review the PR/MR. Do not change code. Ask before posting any comment."* |
 | `skills/clarify.md` | **never injected** — a companion skill the human runs by hand to turn a Jira ticket into subtasks | — | — |
 
@@ -81,6 +83,17 @@ What each one is for:
   (`rebase`, `--force-with-lease`), and the rule to never merge.
 - **`pre-pr-review.md`** — runs the task's configured reviewer command on the
   diff before the PR opens; two rounds max, and the outcome goes in the PR body.
+- **`pre-pr-delegate-review.md`** — the same step for a delegate reviewer: the
+  task agent calls the omnigent tool `sys_session_send` to hand the review to a
+  sub-agent (`ocr_claude` or `ocr_codex`) in the same working directory, ends its
+  turn, and is woken when the sub-agent answers. Two rounds max (a new title per
+  round), the outcome goes in the PR body, and it must never run `ocr` itself.
+- **`ocr-delegate.md`** — what the review sub-agent does: `ocr delegate preview`
+  twice (a range for committed changes, none for uncommitted ones), `ocr delegate
+  rule`, read each diff, then answer with one JSON object `{findings, coverage}`.
+  Read-only: it never edits, commits or pushes. The text is hashed into the name
+  of the registered omnigent agent, so editing it registers a new agent at the next
+  dispatch instead of running the old one; the old agent stays in the registry.
 - **`review.md`** — reviewing someone else's PR/MR: read-only, post **drafts**
   only (`glab .../draft_notes`, one pending GitHub review), ask the human which
   comments to publish, then publish or delete the rest.
@@ -161,6 +174,7 @@ substituted — see `llmComplete()` in `server/llm.ts`).
 |---|---|---|---|
 | `assistant` | argv for Corral's own LLM calls | `{prompt}` | default `["claude", "-p", "{prompt}"]` |
 | `reviewers[].command` | a named reviewer command; the dispatch option `review` picks one by name | `{base_branch}` → the task's base branch, or the repo's remote default | its output feeds `skills/pre-pr-review.md`; the resolved command is frozen on the task |
+| `reviewers[].delegate` | a named reviewer that hands the review to a sub-agent on that harness (`claude` or `codex`) instead of running a command; the dispatch option `review` picks one by name | — | feeds `skills/pre-pr-delegate-review.md` and registers `skills/ocr-delegate.md` as the sub-agent's instructions; the task shows `sub-agent ocr_<harness>` as its frozen review |
 | `agents` | harness list offered in the UI | — | only the **keys** are used: a session is started through omnigent's registry harness, so the argv template is no longer substituted at dispatch |
 
 ## 5. Placeholders
@@ -172,7 +186,8 @@ substituted — see `llmComplete()` in `server/llm.ts`).
 | `{task_id}` | the task's id, for `POST /api/reports` | every convention |
 | `{pr_url}` | the task's PR/MR URL (empty for a code task without one) | every convention |
 | `{review_command}` | the reviewer command, `{base_branch}` already resolved | `skills/pre-pr-review.md` |
-| `{base_branch}` | the task's base branch, else the remote default branch name | `reviewers[].command` |
+| `{review_agent}` | the delegate reviewer's sub-agent name (`ocr_claude` or `ocr_codex`) | `skills/pre-pr-delegate-review.md` |
+| `{base_branch}` | the task's base branch, else the remote default branch name (empty when there is no remote) | `reviewers[].command`, `skills/pre-pr-delegate-review.md` |
 | `{prompt}` | the prompt text | `assistant` argv |
 
 A convention left with an unsubstituted `{placeholder}` is a bug: the agent will

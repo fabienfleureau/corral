@@ -16,8 +16,9 @@ import { syncJiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 import { gitToplevel } from "./repos.ts";
 import { contractBlock, isDirectory } from "./multi-repo.ts";
 import { epicContext } from "./epic-design.ts";
+import { delegateAgentName, delegateConflict, isDelegateReviewer, reviewSummary } from "./reviewers.ts";
 import { logTaskEvent, promptData } from "./task-events.ts";
-import type { WorkerBackend, WorkerSession } from "./worker.ts";
+import type { WorkerBackend, WorkerDelegate, WorkerSession } from "./worker.ts";
 import { taskLabel, type Task } from "./types.ts";
 
 export function slugify(s: string, max = 40): string {
@@ -92,16 +93,32 @@ export function epicBlock(cfg: Config, task: Task): string {
   return fallback;
 }
 
-export function questionConvention(cfg: Config, task: Task, reviewCommand: string | null = null, grillDocsInRepo = true): string {
-  const read = (name: string, fallback: string): string => {
-    const path = join(cfg.configDir, "skills", name);
-    const local = join(process.cwd(), "skills", name);
-    try {
-      return readFileSync(existsSync(path) ? path : local, "utf8");
-    } catch {
-      return fallback;
-    }
-  };
+/** A skill file: the user's copy in the config dir wins over the one shipped in the repo. */
+function readSkill(cfg: Config, name: string, fallback: string): string {
+  const path = join(cfg.configDir, "skills", name);
+  const local = join(process.cwd(), "skills", name);
+  try {
+    return readFileSync(existsSync(path) ? path : local, "utf8");
+  } catch {
+    return fallback;
+  }
+}
+
+const OCR_DELEGATE_FALLBACK = [
+  "You are a read-only reviewer: never edit a file, commit or push.",
+  "Run `ocr delegate preview` and `ocr delegate rule`, read the diffs, then reply with one JSON object",
+  '`{"findings": [{"path", "start_line", "end_line", "severity", "category", "content"}], "coverage": {"total_files", "reviewed_files", "skipped_files"}}`.',
+].join("\n");
+
+export function questionConvention(
+  cfg: Config,
+  task: Task,
+  reviewCommand: string | null = null,
+  grillDocsInRepo = true,
+  /** A delegate reviewer: the sub-agent to call and the base ref it reviews against. */
+  reviewAgent: { name: string; baseBranch: string } | null = null,
+): string {
+  const read = (name: string, fallback: string): string => readSkill(cfg, name, fallback);
   // A review must not commit, push or open a PR: its convention replaces both
   // the finish flow of question-report.md and the PR loop.
   // A spec task never commits or opens a PR: it reports a plan instead.
@@ -127,6 +144,13 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
     // A callback replacement, not a string: review commands legitimately contain
     // `$` sequences ($$, $&, $') that replaceAll would otherwise expand.
     parts.push(read("pre-pr-review.md", "").replaceAll("{review_command}", () => reviewCommand));
+  } else if (task.kind !== "review" && task.kind !== "spec" && task.kind !== "analysis" && reviewAgent) {
+    const fallback = "Before opening the PR/MR, send your changes to the `{review_agent}` sub-agent for review with `sys_session_send`. Fix each finding or say why you decline it.";
+    parts.push(
+      read("pre-pr-delegate-review.md", fallback)
+        .replaceAll("{review_agent}", () => reviewAgent.name)
+        .replaceAll("{base_branch}", () => reviewAgent.baseBranch),
+    );
   }
   return parts.filter(Boolean).join("\n\n---\n\n")
     .replaceAll("{grill_mode}", grillDocs ? "documentation" : "discussion")
@@ -282,14 +306,32 @@ export async function dispatchTask(
   // Resolve the reviewer before building the prompt: {base_branch} needs the
   // task's pinned branch, or the remote default when the task did not pin one.
   let reviewCommand: string | null = null;
+  let reviewAgent: { name: string; baseBranch: string } | null = null;
+  let delegates: WorkerDelegate[] | undefined;
+  /** What the task shows as its review: the command, or the sub-agent it delegates to. */
+  let frozenReview: string | null = null;
   if (!review && !spec && !ops && !grill && !grillDocs && opts.review) {
     const reviewer = (cfg.reviewers ?? []).find((r) => r.name === opts.review);
     if (!reviewer) throw new Error(`unknown reviewer: ${opts.review}`);
+    const conflict = delegateConflict(reviewer, target, opts.agent);
+    if (conflict) throw new Error(conflict);
     const baseBranch = task.base_branch?.trim() || await defaultBranchName(task.repo_path);
-    reviewCommand = reviewer.command.replaceAll("{base_branch}", () => baseBranch ?? "");
+    if (isDelegateReviewer(reviewer)) {
+      // An analysis task never gets a review step (see questionConvention), so it
+      // must not get an agent chosen for one either.
+      if (!analysis) {
+        const name = delegateAgentName(reviewer);
+        reviewAgent = { name, baseBranch: baseBranch ?? "" };
+        delegates = [{ name, harness: reviewer.delegate, prompt: readSkill(cfg, "ocr-delegate.md", OCR_DELEGATE_FALLBACK) }];
+        frozenReview = reviewSummary(reviewer);
+      }
+    } else {
+      reviewCommand = reviewer.command.replaceAll("{base_branch}", () => baseBranch ?? "");
+      frozenReview = reviewCommand;
+    }
   }
 
-  const fullPrompt = `${taskText}\n\n---\n${questionConvention(cfg, task, reviewCommand, docsInRepo)}`;
+  const fullPrompt = `${taskText}\n\n---\n${questionConvention(cfg, task, reviewCommand, docsInRepo, reviewAgent)}`;
   // Files dropped on the prompt travel with it: they are not part of its text.
   const attachments = db.taskAttachmentFiles(task.id);
 
@@ -313,6 +355,7 @@ export async function dispatchTask(
           ...(attachments.length ? { attachments } : {}),
           harness: target,
           agent: opts.agent ?? null,
+          ...(delegates ? { delegates } : {}),
           model: opts.model === undefined ? task.model ?? null : opts.model,
           reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
           env: {
@@ -342,7 +385,7 @@ export async function dispatchTask(
     branch: noBranch ? null : branch,
     worktree_path: useWorktree && session.cwd ? session.cwd : null,
     terminal_address: session.address,
-    review: reviewCommand,
+    review: frozenReview,
     ...(task.epic_id ? { design_version: db.latestDesign(task.epic_id)?.version ?? 1 } : {}),
   });
   db.upsertTerminal({
