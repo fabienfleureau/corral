@@ -87,3 +87,10 @@ test('only a tasks deep link prefills anything, and only a URL prefills a review
   assert.equal(reviewFromHash(''), null);
   assert.equal(taskPrefillFromHash('#/tasks'), null);
 });
+
+test('a KPI proposal link carries the prompt, the KPI and the proposal', async () => {
+  const { kpiTaskHash, taskPrefillFromHash } = await import('../../web/src/selection-task.ts');
+  const hash = kpiTaskHash('Investigate this proposal', { id: 'kpi-1', proposal: 'Add device field' });
+  assert.deepEqual(taskPrefillFromHash(hash), { text: 'Investigate this proposal', kpi: { id: 'kpi-1', proposal: 'Add device field' } });
+  assert.deepEqual(taskPrefillFromHash('#/tasks?prompt=Plain&kpi=kpi-1'), { text: 'Plain' });
+});

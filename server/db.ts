@@ -226,6 +226,11 @@ export class Db {
     const kpiCols = new Set((this.raw.prepare("PRAGMA table_info(kpi_monitors)").all() as { name: string }[]).map((c) => c.name));
     if (!kpiCols.has("goal_baseline")) this.raw.exec("ALTER TABLE kpi_monitors ADD COLUMN goal_baseline TEXT");
     if (!kpiCols.has("feedback")) this.raw.exec("ALTER TABLE kpi_monitors ADD COLUMN feedback TEXT");
+    // Tasks drafted from a KPI proposal, and the impact verdicts after they ship.
+    this.raw.exec(`CREATE TABLE IF NOT EXISTS kpi_changes (
+      task_id TEXT PRIMARY KEY, kpi_id TEXT NOT NULL, proposal TEXT NOT NULL,
+      created_ms INTEGER NOT NULL, verdicts TEXT NOT NULL DEFAULT '[]'
+    )`);
     const cols = this.raw.prepare("PRAGMA table_info(items)").all() as { name: string }[];
     const names = new Set(cols.map((c) => c.name));
     if (!names.has("context")) this.raw.exec(`ALTER TABLE items ADD COLUMN context TEXT NOT NULL DEFAULT ''`);

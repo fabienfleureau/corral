@@ -105,6 +105,20 @@ export interface KpiFeedback {
   at: string;
 }
 
+export type KpiImpactVerdict = "visible" | "none" | "too-early";
+
+/** A task drafted from a proposal, followed after it ships. */
+export interface KpiChange {
+  taskId: string;
+  title: string;
+  proposal: string;
+  /** YYYY-MM-DD the task first became done (PR merged or completed); null until then. */
+  shippedOn: string | null;
+  verdicts: { at: string; verdict: KpiImpactVerdict; rationale: string }[];
+  /** waiting: not shipped; active: sent to cycles; finished: 3 definitive verdicts or 60 days. */
+  tracking: "waiting" | "active" | "finished";
+}
+
 export interface KpiReport {
   summary: string;
   measurement: KpiMeasurement | null;
@@ -117,6 +131,8 @@ export interface KpiReport {
   /** Present when the KPI has a goal. Reports saved before goals lack them. */
   trajectory?: KpiTrajectory | null;
   goalReview?: KpiGoalReview | null;
+  /** One verdict per shipped change the prompt listed. */
+  impact?: { taskId: string; verdict: KpiImpactVerdict; rationale: string }[];
 }
 
 export interface KpiView {
@@ -137,4 +153,6 @@ export interface KpiView {
   history: KpiMeasurement[];
   /** Inbox answers and dismissed ideas, oldest first. */
   feedback: KpiFeedback[];
+  /** Tasks drafted from this KPI's proposals, newest first. */
+  changes: KpiChange[];
 }

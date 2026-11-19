@@ -721,6 +721,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** What the deep link that filled the form was: a selection or a PR to review. */
+  const [kpiLink, setKpiLink] = useState(prefill?.kpi ?? null);
   const [prefilled, setPrefilled] = useState<"selection" | "review" | null>(() => (prefill ? (prefill.prUrl ? "review" : "selection") : null));
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const prUrlRef = useRef<HTMLInputElement | null>(null);
@@ -741,6 +742,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
     }
     setKind("code");
     setPrompt(prefill.text ?? "");
+    setKpiLink(prefill.kpi ?? null);
     setPrefilled("selection");
     const frame = requestAnimationFrame(() => {
       promptRef.current?.scrollIntoView({ block: "center" });
@@ -758,6 +760,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
     setBaseBranch("");
     setError(null);
     setPrefilled(null);
+    setKpiLink(null);
   };
 
   const selectedRepo = repoTouched ? repoChoice : (repos[0]?.path ?? "");
@@ -792,6 +795,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
         reasoning: selectedSettings.reasoning.trim() || null,
         repo_path: spec ? folderPath.trim() : workingPath.trim(),
         base_branch: review || spec || grill ? null : baseBranch.trim() || null,
+        ...(kpiLink && !review ? { kpi: kpiLink } : {}),
       };
       const task = await api.createTask(input);
       clear();
@@ -819,6 +823,12 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           {prefilled === "review"
             ? "PR/MR prefilled from the Pull Requests page — check the harness, then create or dispatch."
             : "Prompt prefilled from your selection — edit it, then create or dispatch."}
+        </p>
+      ) : null}
+      {kpiLink && !review ? (
+        <p className="kpi-task-link" role="status">
+          <span>Linked to the KPI proposal “{kpiLink.proposal}”. The KPI follows its impact once the task is done.</span>
+          <button type="button" className="btn" onClick={() => setKpiLink(null)}>Unlink</button>
         </p>
       ) : null}
       <div className="seg" role="radiogroup" aria-label="Task type">

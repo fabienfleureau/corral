@@ -98,6 +98,20 @@ export function seedKpis(db: Db, now: number): void {
     JSON.stringify({ value: 1300, to: "2024-11-11" }),
     JSON.stringify([{ kind: "answer", ref: "test-accounts", subject: "Which accounts are test accounts?", answer: "Accounts whose email ends in @example.test.", at: "2025-01-10" }]),
   );
+  // A task drafted from a proposal, shipped five weeks ago, with two impact verdicts.
+  const shipped = Date.UTC(2024, 11, 9, 15);
+  db.raw.prepare(`INSERT OR REPLACE INTO tasks (id, title, prompt, kind, repo_path, status, created_ms, updated_ms)
+    VALUES ('sample-kpi-task', 'Show a draft reminder on the report form', 'Investigate this proposed improvement…', 'code', '/sample/example-project', 'done', ?, ?)`)
+    .run(shipped - 3 * 86_400_000, shipped);
+  db.raw.prepare("INSERT INTO task_events (task_id, ts, kind, message, data) VALUES ('sample-kpi-task', ?, 'status', 'Status: dispatched → done', ?)")
+    .run(shipped, JSON.stringify({ from: "dispatched", to: "done" }));
+  db.raw.prepare("INSERT OR REPLACE INTO kpi_changes (task_id, kpi_id, proposal, created_ms, verdicts) VALUES ('sample-kpi-task', 'kpi-1', ?, ?, ?)").run(
+    "Remind reporters of unsent drafts", shipped - 3 * 86_400_000,
+    JSON.stringify([
+      { at: "2024-12-16", verdict: "too-early", rationale: "One week of data after the change." },
+      { at: "2025-01-13", verdict: "visible", rationale: "Weekly reporters grew 2.1% a week in the four weeks after, against 1.0% in the four before; drafts sent rose from 61% to 70%." },
+    ]),
+  );
   db.insertItem({
     id: "sample-kpi-question", kind: "question", status: "open", title: "Weekly active reporters: Should trial accounts count as reporters?", summary: "",
     body: "**Product question** from the KPI Weekly active reporters.\n\nShould trial accounts count as reporters?\n\nYour answer goes to the next cycle. Open the KPI and use **Run now** to start one sooner.",

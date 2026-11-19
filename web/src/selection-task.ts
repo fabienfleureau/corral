@@ -28,6 +28,17 @@ export function selectionTaskHash(prompt: string): string {
   return `#/tasks?${new URLSearchParams({ prompt: promptFromSelection(prompt) }).toString()}`;
 }
 
+/** Proposal a task was drafted from; the KPI follows its impact once it ships. */
+export interface KpiTaskLink {
+  id: string;
+  proposal: string;
+}
+
+/** Tasks-page route for a KPI proposal: the prompt plus the KPI link. */
+export function kpiTaskHash(prompt: string, link: KpiTaskLink): string {
+  return `#/tasks?${new URLSearchParams({ prompt: promptFromSelection(prompt), kpi: link.id, proposal: link.proposal.slice(0, 160) }).toString()}`;
+}
+
 /** Tasks-page route that opens the form on a review of one PR/MR. */
 export function reviewTaskHash(prUrl: string): string {
   return `#/tasks?${new URLSearchParams({ review: prUrl.trim() }).toString()}`;
@@ -37,6 +48,7 @@ export function reviewTaskHash(prUrl: string): string {
 export interface TaskPrefill {
   text?: string;
   prUrl?: string;
+  kpi?: KpiTaskLink;
 }
 
 /** The query of a `#/tasks?…` route, or null for any other route. */
@@ -75,7 +87,9 @@ export function taskFocusFromHash(hash: string): string | null {
 /** Everything a Tasks deep link can prefill, or null when there is nothing. */
 export function taskPrefillFromHash(hash: string): TaskPrefill | null {
   const text = promptFromHash(hash);
-  if (text) return { text };
+  const query = tasksQuery(hash);
+  const kpi = query?.get("kpi"), proposal = query?.get("proposal")?.trim();
+  if (text) return kpi && proposal ? { text, kpi: { id: kpi, proposal } } : { text };
   const prUrl = reviewFromHash(hash);
   return prUrl ? { prUrl } : null;
 }

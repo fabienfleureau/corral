@@ -191,6 +191,8 @@ export type NewTaskInput = {
   jira_key?: string | null;
   jira_url?: string | null;
   jira_parent_key?: string | null;
+  /** The KPI proposal this task was drafted from. */
+  kpi?: { id: string; proposal: string } | null;
 };
 
 export type JiraConfigInput = {
