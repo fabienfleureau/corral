@@ -318,6 +318,7 @@ export const api = {
   listKpis: (): Promise<KpiView[]> => get("/api/kpis"),
   configureKpi: (id: KpiId, settings: KpiSettings): Promise<KpiView> => put(`/api/kpis/${id}`, settings),
   runKpi: (id: KpiId): Promise<KpiView> => post(`/api/kpis/${id}/run`),
+  dismissKpiIdea: (id: KpiId, idea: string, reason = ""): Promise<KpiView> => post(`/api/kpis/${id}/ideas/${encodeURIComponent(idea)}/dismiss`, { reason }),
 
   analysisRepo: (): Promise<{ repo: string }> => get<{ repo: string }>("/api/analysis-repo"),
   setAnalysisRepo: (repo: string): Promise<{ repo: string }> => put<{ repo: string }>("/api/analysis-repo", { repo }),

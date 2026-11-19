@@ -209,6 +209,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   const kpis = state.kpis ??= new KpiMonitor(state.db, state.backend, {
     favorites: () => state.cfg.favorites ?? [],
     repos: () => state.db.listRepos(),
+    onItem: (event, item) => state.hub.broadcast(event, item),
   });
   on("GET", "/api/kpis", (_req, res) => json(res, 200, KPI_IDS.map((id) => kpis.view(id))));
   on("PUT", "/api/kpis/:id", (_req, res, { params, body }) => {
@@ -216,6 +217,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!id) return json(res, 404, { error: "Unknown KPI" });
     try { json(res, 200, kpis.configure(id, body)); }
     catch (err) { json(res, 400, { error: (err as Error).message }); }
+  });
+  on("POST", "/api/kpis/:id/ideas/:idea/dismiss", (_req, res, { params, body }) => {
+    const id = KPI_IDS.find((value) => value === params.id);
+    if (!id) return json(res, 404, { error: "Unknown KPI" });
+    const reason = (body as { reason?: unknown } | null)?.reason ?? "";
+    try { json(res, 200, kpis.dismissIdea(id, decodeURIComponent(params.idea), typeof reason === "string" ? reason : "")); }
+    catch (error) { json(res, 400, { error: error instanceof Error ? error.message : String(error) }); }
   });
   on("POST", "/api/kpis/:id/run", (_req, res, { params }) => {
     const id = KPI_IDS.find((value) => value === params.id);
@@ -310,6 +318,17 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const { text = "", permission, content } = (body ?? {}) as { text?: string; permission?: string; content?: unknown };
     if (typeof text !== "string" || (!text.trim() && !permission && content === undefined)) return json(res, 400, { error: "text or answers required" });
     if ((permission || content !== undefined || item.elicitation) && item.status !== "open") return json(res, 409, { error: "item is not open" });
+    // KPI asks have no live session: the answer is kept for the KPI's next cycle.
+    if (item.source_ref?.startsWith("kpi:")) {
+      if (item.status !== "open" || permission || content !== undefined) return json(res, 409, { error: "answer an open KPI question with text" });
+      try { kpis.answer(item.source_ref, text); }
+      catch (error) { return json(res, 400, { error: error instanceof Error ? error.message : String(error) }); }
+      state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now(), body: `${item.body}\n\n**Reply:** ${text.trim()}` });
+      state.db.reward("inbox", item.id);
+      state.db.recordMetric("item.replied", item.id, { kpi: item.source_ref });
+      state.hub.broadcast("item.updated", state.db.getItem(item.id));
+      return json(res, 200, { ok: true, sent_to: "kpi" });
+    }
     const address = item.source_ref ?? (item.task_id ? state.db.getTask(item.task_id)?.terminal_address : null);
     if (!address) return json(res, 409, { error: "no terminal linked to this item" });
     const elicitation = parseElicitation(item.elicitation);

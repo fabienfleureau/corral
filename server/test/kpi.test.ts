@@ -26,7 +26,7 @@ const report = {
   summary: "The current value is zero.",
   measurement: { value: 0, from: "2026-10-21", to: "2026-11-18", sources: ["Fixture dashboard, metric panel"] },
   dataNeeds: [],
-  productQuestions: ["How should duplicate events be counted?"],
+  productQuestions: [{ id: "duplicate-events", text: "How should duplicate events be counted?" }],
   proposals: [],
   memory: "Cross-check counts against the event log.",
 };
@@ -151,18 +151,18 @@ test("schedules opted-in KPIs independently and resumes their reports and memory
     assert.match(launches[1].prompt, /How should duplicate events be counted/);
 
     session = { ...session!, status: "done" };
-    output = JSON.stringify({ ...report, measurement: null, dataNeeds: ["Restore the event connector"] });
+    output = JSON.stringify({ ...report, measurement: null, dataNeeds: [{ id: "event-connector", text: "Restore the event connector" }] });
     await service.tick();
     assert.equal(service.view("kpi-2").report?.measurement, null);
     assert.equal(service.view("kpi-2").lastMeasurement?.value, 0);
-    assert.deepEqual(service.view("kpi-2").report?.dataNeeds, ["Restore the event connector"]);
+    assert.deepEqual(service.view("kpi-2").report?.dataNeeds, [{ id: "event-connector", text: "Restore the event connector" }]);
 
     await service.runNow("kpi-2");
     session = { ...session!, status: "done" };
     output = "invalid output";
     await service.tick();
     assert.equal(service.view("kpi-2").runState, "failed");
-    assert.deepEqual(service.view("kpi-2").report?.dataNeeds, ["Restore the event connector"]);
+    assert.deepEqual(service.view("kpi-2").report?.dataNeeds, [{ id: "event-connector", text: "Restore the event connector" }]);
 
     service.configure("kpi-2", { ...service.view("kpi-2").settings, definition: "Calculate a different metric." });
     assert.equal(service.view("kpi-2").report, null);

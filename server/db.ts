@@ -225,6 +225,7 @@ export class Db {
       FROM kpi_monitors WHERE last_measurement IS NOT NULL`);
     const kpiCols = new Set((this.raw.prepare("PRAGMA table_info(kpi_monitors)").all() as { name: string }[]).map((c) => c.name));
     if (!kpiCols.has("goal_baseline")) this.raw.exec("ALTER TABLE kpi_monitors ADD COLUMN goal_baseline TEXT");
+    if (!kpiCols.has("feedback")) this.raw.exec("ALTER TABLE kpi_monitors ADD COLUMN feedback TEXT");
     const cols = this.raw.prepare("PRAGMA table_info(items)").all() as { name: string }[];
     const names = new Set(cols.map((c) => c.name));
     if (!names.has("context")) this.raw.exec(`ALTER TABLE items ADD COLUMN context TEXT NOT NULL DEFAULT ''`);

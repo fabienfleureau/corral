@@ -593,7 +593,9 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
 
             <div className={`detail-actions${grillRound.length > 0 ? " grill-actions" : ""}`}>
               <div className="action-row">
-                {selected.source_ref ? (
+                {selected.source_ref?.startsWith("kpi:") ? (
+                  <a className="btn btn-primary" href={`#/kpis?metric=${selected.source_ref.split(":")[1]}`}>Open KPI</a>
+                ) : selected.source_ref ? (
                   <button className="btn btn-primary" onClick={() => void openConversation()} disabled={openBusy}>
                     {openBusy ? <Spinner /> : null}
                     {openBusy ? "Opening…" : "Open conversation"}
@@ -746,7 +748,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 <textarea
                   ref={replyRef}
                   className="reply-input"
-                  placeholder="Reply to the agent's terminal…  (Cmd/Ctrl+Enter to send)"
+                  placeholder={selected.source_ref?.startsWith("kpi:") ? "Answer for the KPI's next cycle…  (Cmd/Ctrl+Enter to send)" : "Reply to the agent's terminal…  (Cmd/Ctrl+Enter to send)"}
                   value={replyText}
                   rows={3}
                   onChange={(e) => setReplyText(e.target.value)}
