@@ -127,3 +127,17 @@ test("a goal saved over a definition change waits for a new measurement", async 
     assert.equal(service.view("kpi-1").goalProgress?.baseline, null);
   } finally { db.close(); }
 });
+
+test("the history starts from a measurement kept before it existed", () => {
+  const path = join(workspace, "upgrade.db");
+  const first = new Db(path);
+  first.raw.exec("DELETE FROM kpi_measurements");
+  first.raw.prepare("INSERT OR REPLACE INTO kpi_monitors (id, settings, last_measurement, report_ms) VALUES ('kpi-1', ?, ?, 5)")
+    .run(JSON.stringify(settings), JSON.stringify({ value: 7, from: "2026-11-01", to: "2026-11-08", sources: ["Fixture"] }));
+  first.close();
+  const db = new Db(path);
+  try {
+    const service = new KpiMonitor(db, {} as KpiMonitor["worker"], deps);
+    assert.deepEqual(service.view("kpi-1").history, [{ value: 7, from: "2026-11-01", to: "2026-11-08", sources: ["Fixture"] }]);
+  } finally { db.close(); }
+});

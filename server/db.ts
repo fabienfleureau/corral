@@ -218,6 +218,11 @@ export class Db {
       value REAL NOT NULL, sources TEXT NOT NULL, recorded_ms INTEGER NOT NULL,
       PRIMARY KEY (kpi_id, from_day, to_day)
     )`);
+    // Start the history from the last measurement kept before it existed.
+    this.raw.exec(`INSERT OR IGNORE INTO kpi_measurements (kpi_id, from_day, to_day, value, sources, recorded_ms)
+      SELECT id, json_extract(last_measurement, '$.from'), json_extract(last_measurement, '$.to'), json_extract(last_measurement, '$.value'),
+        json_extract(last_measurement, '$.sources'), COALESCE(report_ms, 0)
+      FROM kpi_monitors WHERE last_measurement IS NOT NULL`);
     const kpiCols = new Set((this.raw.prepare("PRAGMA table_info(kpi_monitors)").all() as { name: string }[]).map((c) => c.name));
     if (!kpiCols.has("goal_baseline")) this.raw.exec("ALTER TABLE kpi_monitors ADD COLUMN goal_baseline TEXT");
     const cols = this.raw.prepare("PRAGMA table_info(items)").all() as { name: string }[];

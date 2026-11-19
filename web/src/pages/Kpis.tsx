@@ -102,7 +102,9 @@ function draftGoal(draft: GoalDraft): KpiGoal | null {
   return { target: Number(draft.target), direction: draft.direction, deadline: draft.deadline, why: draft.why };
 }
 
-function sameGoal(a: KpiGoal | null, b: KpiGoal | null): boolean {
+/** Views from a server without goals lack the key; treat it as no goal. */
+function sameGoal(left: KpiGoal | null | undefined, right: KpiGoal | null | undefined): boolean {
+  const a = left ?? null, b = right ?? null;
   return a === b || Boolean(a && b && a.target === b.target && a.direction === b.direction && a.deadline === b.deadline && a.why === b.why);
 }
 
