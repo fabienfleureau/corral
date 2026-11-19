@@ -78,6 +78,17 @@ export type SessionInfo = {
   exit_code: number | null;
 };
 
+/** Last agent status Corral saw for an Omnigent session (GET /api/terminals). */
+export type TrackedTerminal = {
+  address: string;
+  task_id: string | null;
+  name: string | null;
+  agent: string | null;
+  last_status: string | null;
+  last_turn: number;
+  updated_ms: number;
+};
+
 /** One entry of a task's history (see server/task-events.ts). */
 export type TaskEventKind =
   | "created"

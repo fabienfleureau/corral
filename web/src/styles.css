@@ -1746,6 +1746,25 @@ select:focus {
   color: var(--sig-blue);
 }
 
+.badge-agent-running {
+  background: var(--ok-soft);
+  color: var(--ok-ink);
+}
+
+.badge-agent-stopped {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+
+.badge-agent-unknown {
+  background: var(--chip-bg);
+  color: var(--muted);
+}
+
+.item-row-sub .badge {
+  flex: none;
+}
+
 /* pull requests page */
 .pull-list {
   display: flex;

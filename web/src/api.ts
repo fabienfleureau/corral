@@ -3,7 +3,7 @@ import type { KpiId, KpiSettings, KpiView } from "../../shared/kpis";
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
 import type { AttachmentInput } from "./attachments";
-import type { Config, DailyActivity, Epic, EpicDetail, EpicSummary, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, UsageRange, UsageReport } from "./types";
+import type { Config, DailyActivity, Epic, EpicDetail, EpicSummary, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, TrackedTerminal, UsageRange, UsageReport } from "./types";
 
 /** Schedule and run state of a server-side analysis (improvement, skills). */
 export type AnalysisStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
@@ -292,6 +292,7 @@ export const api = {
 
   // ---- sessions ----
   listSessions: (): Promise<SessionInfo[]> => get<SessionInfo[]>("/api/sessions"),
+  listTerminals: (): Promise<TrackedTerminal[]> => get<TrackedTerminal[]>("/api/terminals"),
   openSession: (address: string): Promise<{ ok: boolean; opened: boolean; url?: string }> =>
     post<{ ok: boolean; opened: boolean; url?: string }>(`/api/terminals/${encodeURIComponent(address)}/open`),
 

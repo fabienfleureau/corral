@@ -1,4 +1,4 @@
-import type { Item, Task } from "./types.js";
+import type { Item, SessionInfo, Task, TrackedTerminal } from "./types.js";
 
 /** The agent has the item: no human action needed while its run is in flight. */
 export function isHandlingItem(item: Item): boolean {
@@ -37,4 +37,24 @@ export function inProgressInboxItems(items: Item[], tasks: Task[]): Item[] {
 
 export function inProgressInboxTasks(tasks: Task[]): Task[] {
   return tasks.filter((task) => task.status === "dispatched");
+}
+
+export type AgentRunStatus = "running" | "stopped" | "unknown";
+
+const STOPPED_STATUSES = new Set(["idle", "done", "error"]);
+
+/** State of the Omnigent session behind a task, independent of Corral's task status.
+ *  A live session answers first; tracked terminals keep the last status when the
+ *  worker is unreachable or the session is no longer listed. */
+export function agentRunStatus(task: Task, sessions: SessionInfo[], terminals: TrackedTerminal[]): AgentRunStatus {
+  const address = task.terminal_address;
+  const session = sessions.find((s) => address ? s.address === address : s.task_id === task.id);
+  if (session) {
+    if (session.state === "finished") return "stopped";
+    if (!session.status) return session.state === "live" ? "running" : "unknown";
+    return STOPPED_STATUSES.has(session.status) ? "stopped" : "running";
+  }
+  const terminal = terminals.find((t) => address ? t.address === address : t.task_id === task.id);
+  if (!terminal?.last_status) return "unknown";
+  return STOPPED_STATUSES.has(terminal.last_status) ? "stopped" : "running";
 }

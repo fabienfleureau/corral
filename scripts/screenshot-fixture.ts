@@ -47,6 +47,21 @@ export function seedScreenshotData(db: Db): void {
   seedTaskHistory(db, now);
   seedPulls(db, now);
   seedKpis(db, now);
+  seedAgentRuns(db, now);
+}
+
+/** The fixture has no worker, so seed the tracked terminals Corral would have
+ *  recorded from session events: the in-progress badge reads their last status. */
+function seedAgentRuns(db: Db, now: number): void {
+  const runs = [
+    { task_id: "sample-running", address: "fixture-session-running", agent: "claude", last_status: "working" },
+    { task_id: "sample-spec", address: "fixture-session-stopped", agent: "claude", last_status: "idle" },
+    { task_id: "sample-epic-EX-102", address: "fixture-session-blocked", agent: "codex", last_status: "blocked" },
+  ];
+  for (const run of runs) {
+    db.updateTask(run.task_id, { terminal_address: run.address }, false);
+    db.upsertTerminal({ ...run, name: null, last_turn: 3, updated_ms: now });
+  }
 }
 
 /** Defined KPIs with a report, so the KPI page shows the two-column layout. */
