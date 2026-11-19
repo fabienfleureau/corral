@@ -8,6 +8,7 @@ import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../
 import { ExternalLinkIcon, JiraPill, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
 import { inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxItems, selectedInboxItem } from "../inbox-selection";
+import { INBOX_ACTION_COOLDOWN_MS, inboxActionsLocked } from "../inbox-action-lock";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle, itemDisplayTitle } from "../inbox-title";
 import { replyQuestions } from "../question-reply";
@@ -124,6 +125,9 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [replyOk, setReplyOk] = useState<string | null>(null);
   const [summarizeBusy, setSummarizeBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [actionUnlockAt, setActionUnlockAt] = useState(0);
+  const [actionClock, setActionClock] = useState(0);
+  const actionsLocked = inboxActionsLocked(actionBusy, actionUnlockAt, actionClock);
   const [actionError, setActionError] = useState<string | null>(null);
   const [openBusy, setOpenBusy] = useState(false);
   const [attachCmd, setAttachCmd] = useState<string | null>(null);
@@ -133,6 +137,14 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
 
   // A different item must not inherit an open interview round.
   useEffect(() => { setGrillOpen(false); }, [selected?.id]);
+
+  // The cooldown outlives the selected item: the next one moves under the
+  // same buttons as soon as the current item leaves the list.
+  useEffect(() => {
+    if (actionUnlockAt <= actionClock) return;
+    const timer = setTimeout(() => setActionClock(Date.now()), actionUnlockAt - actionClock);
+    return () => clearTimeout(timer);
+  }, [actionUnlockAt, actionClock]);
 
   useEffect(() => {
     if (!active) return;
@@ -212,12 +224,19 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
     refresh();
   };
 
+  const lockActions = () => {
+    const now = Date.now();
+    setActionUnlockAt(now + INBOX_ACTION_COOLDOWN_MS);
+    setActionClock(now);
+  };
+
   const runAction = async (fn: () => Promise<Item>) => {
-    if (actionBusy) return;
+    if (actionsLocked) return;
     setActionBusy(true);
     setActionError(null);
     try {
       applyItem(await fn());
+      lockActions();
     } catch (err) {
       setActionError(errText(err));
     } finally {
@@ -227,7 +246,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
 
   const sendReply = async (override?: string, permission?: string, answers?: Record<string, string | string[]>) => {
     const text = (override ?? replyText).trim();
-    if (!selected || (!text && !permission && !answers) || replyBusy) return;
+    if (!selected || (!text && !permission && !answers) || replyBusy || actionsLocked) return;
     setReplyBusy(true);
     setReplyError(null);
     setReplyOk(null);
@@ -237,6 +256,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
       setReplyText("");
       setGrillOpen(false);
       applyItem({ ...selected, status: "resolved", resolved_ms: Date.now() });
+      lockActions();
     } catch (err) {
       setReplyError(errText(err));
     } finally {
@@ -260,7 +280,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   };
 
   const archiveTask = async (task: Task) => {
-    if (actionBusy) return;
+    if (actionsLocked) return;
     setActionBusy(true);
     setActionError(null);
     try {
@@ -467,7 +487,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 <RequestArtifact key={selectedTask.id} task={selectedTask} />
                 <TaskHistoryButton taskId={selectedTask.id} title={selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"} version={eventVersion} />
                 {selectedTask.branch ? <ForcePrRefresh task={selectedTask} onChecked={refresh} /> : null}
-                <button className="btn" disabled={actionBusy} onClick={() => void archiveTask(selectedTask)} title="Archive this task and its session in Omnigent when it has one">
+                <button className="btn" disabled={actionsLocked} onClick={() => void archiveTask(selectedTask)} title="Archive this task and its session in Omnigent when it has one">
                   Archive task
                 </button>
               </div>
@@ -562,7 +582,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   <button
                     className="btn btn-primary"
                     onClick={() => void runAction(async () => { await api.approvePlan(linkedTask.id); return api.resolveItem(selected.id); })}
-                    disabled={actionBusy}
+                    disabled={actionsLocked}
                     title="Create one task per sub-project, each carrying the contract"
                   >
                     {actionBusy ? <Spinner /> : null}
@@ -575,7 +595,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     onClick={() => linkedTask.target && linkedTask.repo_path
                       ? void runAction(async () => { await api.dispatchTask(linkedTask.id, {}); return api.resolveItem(selected.id); })
                       : void (window.location.hash = "/tasks")}
-                    disabled={actionBusy}
+                    disabled={actionsLocked}
                     title={linkedTask.target && linkedTask.repo_path ? "Start the agent on this task" : "Pick a repository and a harness on the task first"}
                   >
                     {actionBusy ? <Spinner /> : null}
@@ -584,11 +604,11 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 ) : null}
                 {selected.kind === "amendment" && selected.status === "open" ? (
                   <>
-                    <button className="btn btn-primary" disabled={actionBusy} title="Write this amendment into the Jira ticket and onto the task"
+                    <button className="btn btn-primary" disabled={actionsLocked} title="Write this amendment into the Jira ticket and onto the task"
                       onClick={() => void runAction(() => api.applyAmendment(selected.id))}>
                       {actionBusy ? <Spinner /> : null}Apply to Jira
                     </button>
-                    <button className="btn" disabled={actionBusy}
+                    <button className="btn" disabled={actionsLocked}
                       onClick={() => void runAction(() => api.rejectAmendment(selected.id))}>Reject</button>
                   </>
                 ) : null}
@@ -598,14 +618,14 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 <button
                   className="btn"
                   onClick={() => void runAction(() => api.resolveItem(selected.id))}
-                  disabled={actionBusy || selected.status === "resolved"}
+                  disabled={actionsLocked || selected.status === "resolved"}
                 >
                   Acknowledge
                 </button>
                 <button
                   className="btn"
                   onClick={() => void runAction(() => api.archiveItem(selected.id))}
-                  disabled={actionBusy || selected.status === "archived"}
+                  disabled={actionsLocked || selected.status === "archived"}
                 >
                   Archive
                 </button>
@@ -613,21 +633,21 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 <button
                   className="btn"
                   onClick={() => void runAction(() => api.snoozeItem(selected.id, snoozeUntil("1h")))}
-                  disabled={actionBusy}
+                  disabled={actionsLocked}
                 >
                   1h
                 </button>
                 <button
                   className="btn"
                   onClick={() => void runAction(() => api.snoozeItem(selected.id, snoozeUntil("4h")))}
-                  disabled={actionBusy}
+                  disabled={actionsLocked}
                 >
                   4h
                 </button>
                 <button
                   className="btn"
                   onClick={() => void runAction(() => api.snoozeItem(selected.id, snoozeUntil("tomorrow")))}
-                  disabled={actionBusy}
+                  disabled={actionsLocked}
                 >
                   Tomorrow
                 </button>
@@ -650,14 +670,14 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     key={selected.id + selected.updated_ms}
                     questions={grillRound}
                     title={linkedTask?.title || itemDisplayTitle(selected.title)}
-                    disabled={replyBusy || selected.status !== "open"}
+                    disabled={replyBusy || actionsLocked || selected.status !== "open"}
                     error={replyError}
                     onSend={(answers) => sendReply(formatGrillAnswers(grillRound, answers))}
                     onClose={() => setGrillOpen(false)}
                   /> : null}
                 </> : replyQuestions(selected.elicitation).length > 0 ? <>
                   <QuestionReply key={selected.id + selected.elicitation}
-                    questions={replyQuestions(selected.elicitation)} disabled={replyBusy || selected.status !== "open"}
+                    questions={replyQuestions(selected.elicitation)} disabled={replyBusy || actionsLocked || selected.status !== "open"}
                     onSend={(answers) => sendReply("", undefined, answers)} />
                   {replyError ? <span className="inline-error">{replyError}</span> : null}
                 </> : <>
@@ -675,7 +695,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     ];
                     return <div className="option-row">{choices.map(({ value, label }) => (
                       <button key={value} className={value === "approve" ? "btn btn-primary" : "btn option-btn"}
-                        onClick={() => void sendReply("", value)} disabled={replyBusy || selected.status !== "open"}>{label}</button>
+                        onClick={() => void sendReply("", value)} disabled={replyBusy || actionsLocked || selected.status !== "open"}>{label}</button>
                     ))}</div>;
                   } catch { return null; }
                 })()}
@@ -693,7 +713,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                           key={opt}
                           className="btn option-btn"
                           onClick={() => void sendReply(opt)}
-                          disabled={replyBusy || selected.status !== "open"}
+                          disabled={replyBusy || actionsLocked || selected.status !== "open"}
                         >
                           {opt}
                         </button>
@@ -712,7 +732,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   onKeyDown={onReplyKeyDown}
                 />
                 <div className="reply-foot">
-                  <button className="btn btn-primary" onClick={() => void sendReply()} disabled={replyBusy || !replyText.trim()}>
+                  <button className="btn btn-primary" onClick={() => void sendReply()} disabled={replyBusy || actionsLocked || !replyText.trim()}>
                     {replyBusy ? <Spinner /> : null}
                     {replyBusy ? "Sending…" : "Send & acknowledge"}
                   </button>
