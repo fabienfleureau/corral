@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { Hub } from "./capture.ts";
 import type { Db } from "./db.ts";
-import { isJiraDone, type EpicJira } from "./epic.ts";
+import { isJiraDone, isJiraKilled, type EpicJira } from "./epic.ts";
 import { AMENDMENT_OPENER } from "./assistant-prompts.ts";
 import { planBlockWrite } from "./jira-blocks.ts";
 import { logTaskEvent } from "./task-events.ts";
@@ -25,14 +25,14 @@ export function ensureDesignV1(db: Db, epic: Epic): EpicDesign {
   })();
 }
 
-const isMerged = (t: Task) => t.status === "done" || isJiraDone(t.jira_status);
+const isFinished = (t: Task) => t.status === "done" || isJiraDone(t.jira_status) || isJiraKilled(t.jira_status);
 const isStarted = (t: Task) => t.status !== "open" || Boolean(t.terminal_address);
 
 /** Started, unmerged tasks that were dispatched on an older design than the current one. */
 export function impactedTaskIds(db: Db, epicId: string): Set<string> {
   const latest = db.latestDesign(epicId)?.version ?? 1;
   return new Set(db.listEpicTasks(epicId)
-    .filter((t) => t.epic_out !== 1 && isStarted(t) && !isMerged(t) && t.design_version != null && t.design_version < latest)
+    .filter((t) => t.epic_out !== 1 && isStarted(t) && !isFinished(t) && t.design_version != null && t.design_version < latest)
     .map((t) => t.id));
 }
 
@@ -115,7 +115,7 @@ export async function proposeAmendments(
   const designs = db.listDesigns(epic.id);
   const current = designs.find((d) => d.version === version);
   const previous = designs.find((d) => d.version === version - 1);
-  const tasks = db.listEpicTasks(epic.id).filter((t) => t.jira_key && t.epic_out !== 1 && !isStarted(t) && !isMerged(t));
+  const tasks = db.listEpicTasks(epic.id).filter((t) => t.jira_key && t.epic_out !== 1 && !isStarted(t) && !isFinished(t));
   if (!current || tasks.length === 0) return [];
   const found = parseAmendments(await llm(amendmentPrompt(frame, previous?.body ?? "", current.body, reason, tasks)), new Set(tasks.map((t) => t.jira_key!)));
   const out: EpicAmendment[] = [];

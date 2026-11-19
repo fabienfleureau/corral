@@ -10,6 +10,7 @@ import { errText } from "../util";
 
 const STATE_LABEL: Record<EpicTaskState, string> = {
   out: "left the epic",
+  killed: "killed in Jira",
   merged: "merged",
   pr_ready: "PR ready",
   pr_open: "PR open",
@@ -20,6 +21,7 @@ const STATE_LABEL: Record<EpicTaskState, string> = {
 
 const STATE_BADGE: Record<EpicTaskState, string> = {
   out: "badge",
+  killed: "badge",
   merged: "badge badge-ready",
   pr_ready: "badge badge-ready",
   pr_open: "badge badge-wait",
@@ -29,7 +31,7 @@ const STATE_BADGE: Record<EpicTaskState, string> = {
 };
 
 // Read the board left to right: what is stuck first, what shipped last.
-const GROUP_ORDER: EpicTaskState[] = ["blocked", "ready", "running", "pr_open", "pr_ready", "merged", "out"];
+const GROUP_ORDER: EpicTaskState[] = ["blocked", "ready", "running", "pr_open", "pr_ready", "merged", "killed", "out"];
 
 export function summaryText(s: EpicSummary): string {
   if (!s || typeof s.total !== "number") return "";

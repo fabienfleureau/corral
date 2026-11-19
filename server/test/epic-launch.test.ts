@@ -68,6 +68,7 @@ test("epic launch: only a ready task starts, from the Epic page", async () => {
     db.insertTask(task("E-1", { status: "dispatched", branch: "feat/e1", terminal_address: "s0", pr_url: "u" }));
     db.insertTask(task("E-2"));
     db.insertTask(task("E-3"));
+    db.insertTask(task("E-4", { jira_status: "Killed" }));
     db.insertTask(task("request-1", { jira_key: null, title: "Draft release notes" }));
     db.replaceEpicLinks("e", [
       { task_key: "E-2", blocked_by_key: "E-1" },
@@ -99,6 +100,11 @@ test("epic launch: only a ready task starts, from the Epic page", async () => {
     assert.equal(blocked.status, 409);
     assert.match(blocked.body.error ?? "", /blocked/);
     assert.equal(started.length, 0, "a blocked task never starts");
+
+    const killed = await post("/api/epics/e/tasks/E-4/launch");
+    assert.equal(killed.status, 409);
+    assert.match(killed.body.error ?? "", /killed/);
+    assert.equal(started.length, 0, "a killed ticket never launches");
 
     const launched = await post("/api/epics/e/tasks/E-2/launch");
     assert.equal(launched.status, 200, JSON.stringify(launched.body));

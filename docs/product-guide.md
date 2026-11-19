@@ -68,6 +68,7 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   a task, a PR or a Jira change; **Create task** tracks the work for later dispatch on the Tasks page, outside the Jira board.
   Its prompt starts with the epic's Jira ticket, summary and link, so the task keeps
   that context when you edit or dispatch it later.
+  A Jira ticket marked **Killed** is cancelled, not merged: a resync shows it as killed in its own group, removes it from the summary and no longer lets it block other tickets. A task whose prerequisite was killed keeps a note on the epic.
   A ticket's `Préconditions` are checked by the agent before it starts. The epic's
   **design** is versioned: publishing a revision writes the current version into the
   Jira epic, marks started tasks **impacted**, and an assistant proposes an

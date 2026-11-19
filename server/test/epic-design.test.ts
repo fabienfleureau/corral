@@ -77,7 +77,9 @@ test("impacted: started, unmerged tasks on an older design; unstarted and merged
   db.updateTask(a.id, { status: "dispatched", terminal_address: "s", design_version: 1 });
   await reviseDesign(db, jira, db.getEpic(id)!, { body: "new", reason: "" });
   assert.deepEqual([...impactedTaskIds(db, id)], [a.id]);
-  db.updateTask(a.id, { status: "done" });
+  db.updateTask(a.id, { jira_status: "Killed" });
+  assert.equal(impactedTaskIds(db, id).size, 0, "a killed ticket is no longer in flight");
+  db.updateTask(a.id, { status: "done", jira_status: "Done" });
   assert.equal(impactedTaskIds(db, id).size, 0);
   assert.equal(db.getTask(b.id)!.status, "open");
 }));

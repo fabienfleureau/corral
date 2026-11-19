@@ -19,6 +19,7 @@ They are required when a change makes or revisits such a decision.
 | [0007](0007-kpi-favorite-and-working-directory.md) | Proposed | KPI cycles use a favorite and a working directory |
 | [0008](0008-kpi-memory-file.md) | Proposed | KPI research memory lives in the working directory |
 | [0009](0009-interview-working-directory.md) | Proposed | Interviews accept a folder or git repo; docs mode uses a PR only in a repo |
+| [0010](0010-killed-jira-tickets.md) | Proposed | Killed Jira tickets are terminal, not merged |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.
