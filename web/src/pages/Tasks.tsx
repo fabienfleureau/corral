@@ -318,8 +318,9 @@ function TaskRow({
 
   const review = task.kind === "review";
   const spec = task.kind === "spec";
-  // A review or a spec runs in place: no worktree, no branch, no base branch.
-  const inPlace = review || spec || task.kind === "grill";
+  // Reviews, specs and interviews have no editable worktree or base branch.
+  // A docs interview may still get a worktree at dispatch when its folder is a git repo.
+  const inPlace = review || spec || task.kind === "grill" || task.kind === "grill-docs";
   const rowTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
   const selectedTarget = rowTargets.includes(target) ? target : rowTargets[0] ?? "";
 
@@ -713,6 +714,8 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const [repoPath, setRepoPath] = useState("");
   /** null reads as "use the newest spec task's folder"; an empty string is a deliberate clear. */
   const [specFolder, setSpecFolder] = useState<string | null>(null);
+  /** null follows the selected repo; a typed path may be any folder, git repo or not. */
+  const [grillFolder, setGrillFolder] = useState<string | null>(null);
   const [baseBranch, setBaseBranch] = useState("");
   const [reviewName, setReviewName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -751,17 +754,21 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
     setFiles([]);
     setPrUrl("");
     setRepoPath("");
+    setGrillFolder(null);
     setBaseBranch("");
     setError(null);
     setPrefilled(null);
   };
 
   const selectedRepo = repoTouched ? repoChoice : (repos[0]?.path ?? "");
-  const formContext = repoContext(repos, selectedRepo);
-  const shownFavorites = favoritesFor(favorites, formContext);
+  const chosenRepo = selectedRepo === "__custom__" ? repoPath : selectedRepo;
   const review = kind === "review";
   const spec = kind === "spec";
   const grill = kind === "grill" || kind === "grill-docs";
+  const grillDocs = kind === "grill-docs";
+  const workingPath = grill ? (grillFolder ?? chosenRepo) : chosenRepo;
+  const formContext = repoContext(repos, workingPath);
+  const shownFavorites = favoritesFor(favorites, formContext);
   const folderPath = specFolder ?? lastSpecFolder(tasks);
   const formTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
   const selectedTarget = formTargets.includes(target) ? target : formTargets[0] ?? "";
@@ -783,15 +790,15 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
         target: selectedTarget,
         model: selectedSettings.model.trim() || null,
         reasoning: selectedSettings.reasoning.trim() || null,
-        repo_path: spec ? folderPath.trim() : selectedRepo === "__custom__" ? repoPath.trim() : selectedRepo,
-        base_branch: review || spec || kind === "grill" ? null : baseBranch.trim() || null,
+        repo_path: spec ? folderPath.trim() : workingPath.trim(),
+        base_branch: review || spec || grill ? null : baseBranch.trim() || null,
       };
       const task = await api.createTask(input);
       clear();
       onDone();
       if (dispatch) {
         try {
-          await api.dispatchTask(task.id, { target: selectedTarget, use_worktree: !review && !spec && kind !== "grill", agent: agent || null, review: review || spec || grill ? null : reviewName || null });
+          await api.dispatchTask(task.id, { target: selectedTarget, use_worktree: !review && !spec && !grill, agent: agent || null, review: review || spec || grill ? null : reviewName || null });
           onDone();
         } catch (err) {
           setError(`Task created, but dispatch failed: ${errText(err)}`);
@@ -818,8 +825,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
         <button type="button" role="radio" aria-checked={!review && !spec && !grill} className={`seg-btn${review || spec || grill ? "" : " active"}`} onClick={() => setKind("code")}>Code change</button>
         <button type="button" role="radio" aria-checked={review} className={`seg-btn${review ? " active" : ""}`} onClick={() => setKind("review")}>Review a PR/MR</button>
         <button type="button" role="radio" aria-checked={spec} className={`seg-btn${spec ? " active" : ""}`} onClick={() => setKind("spec")}>Multi-repo</button>
-        <button type="button" role="radio" aria-checked={kind === "grill"} className={`seg-btn${kind === "grill" ? " active" : ""}`} onClick={() => setKind("grill")}>Grill me</button>
-        <button type="button" role="radio" aria-checked={kind === "grill-docs"} className={`seg-btn${kind === "grill-docs" ? " active" : ""}`} onClick={() => setKind("grill-docs")}>Grill with docs</button>
+        <button type="button" role="radio" aria-checked={grill} className={`seg-btn${grill ? " active" : ""}`} onClick={() => { setKind("grill"); setGrillFolder(null); }}>Grill me</button>
       </div>
       {review ? (
         <>
@@ -829,6 +835,17 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           </label>
           {prUrl.trim() && !prUrlValid ? <div className="inline-error">Paste a GitHub pull request or GitLab merge request URL.</div> : null}
           <p className="muted form-hint">The agent reviews with the fabien-reviewer skill and posts comments as drafts. Nothing is published until you approve the list in the inbox. No branch, no code changes.</p>
+        </>
+      ) : null}
+      {grill ? (
+        <>
+          <label className="check-inline" htmlFor="grill-with-docs">
+            <input id="grill-with-docs" type="checkbox" checked={grillDocs} disabled={busy} onChange={(e) => setKind(e.target.checked ? "grill-docs" : "grill")} />
+            <span>With docs — write documentation during the interview</span>
+          </label>
+          <p className="muted form-hint">{grillDocs
+            ? "The agent interviews in rounds, then writes documentation. A git repo gets a worktree and a PR; a plain folder is edited in place with a report and no PR."
+            : "The agent interviews in rounds without changing files."}</p>
         </>
       ) : null}
       {spec ? (
@@ -852,7 +869,17 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           />
         </label>
       </PromptAttachments>
-      {spec ? null : <div className="field-row">
+      {grill ? (
+        <label className="field" htmlFor="grill-workdir">
+          <span>Folder or git repo</span>
+          <input id="grill-workdir" list="grill-workdirs" value={workingPath} onChange={(e) => setGrillFolder(e.target.value)} placeholder="/path/to/folder-or-repo" autoComplete="off" spellCheck={false} aria-describedby="grill-workdir-help" disabled={busy} />
+          <datalist id="grill-workdirs">
+            {repos.map((r) => <option key={r.id} value={r.path}>{r.name}</option>)}
+          </datalist>
+          <small id="grill-workdir-help" className="muted form-hint">Any absolute folder works. Registered repositories are suggested.</small>
+        </label>
+      ) : null}
+      {spec || grill ? null : <div className="field-row">
         <label className="field">
           <span>Repo</span>
           <select value={selectedRepo} onChange={(e) => { setRepoTouched(true); setRepoChoice(e.target.value); }}>
@@ -871,7 +898,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
             <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/repo" />
           </label>
         ) : null}
-        {review || kind === "grill" ? null : (
+        {review ? null : (
           <label className="field">
             <span>Base branch (optional)</span>
             <input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />

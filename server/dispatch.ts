@@ -92,7 +92,7 @@ export function epicBlock(cfg: Config, task: Task): string {
   return fallback;
 }
 
-export function questionConvention(cfg: Config, task: Task, reviewCommand: string | null = null): string {
+export function questionConvention(cfg: Config, task: Task, reviewCommand: string | null = null, grillDocsInRepo = true): string {
   const read = (name: string, fallback: string): string => {
     const path = join(cfg.configDir, "skills", name);
     const local = join(process.cwd(), "skills", name);
@@ -105,8 +105,12 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
   // A review must not commit, push or open a PR: its convention replaces both
   // the finish flow of question-report.md and the PR loop.
   // A spec task never commits or opens a PR: it reports a plan instead.
-  const parts = task.kind === "grill" || task.kind === "grill-docs"
-    ? [read("grill.md", "Interview the human in rounds and report each full round to Corral."), task.kind === "grill-docs" ? read("question-report.md", "") : read("ops.md", ""), ...(task.kind === "grill-docs" ? [read("pr-loop.md", "")] : [])]
+  const grillDocs = task.kind === "grill-docs";
+  // A docs interview in a plain folder has no branch to push and no PR to
+  // open: it writes in place and reports like an ops task.
+  const docsWithPr = grillDocs && grillDocsInRepo;
+  const parts = task.kind === "grill" || grillDocs
+    ? [read("grill.md", "Interview the human in rounds and report each full round to Corral."), docsWithPr ? read("question-report.md", "") : read("ops.md", ""), ...(docsWithPr ? [read("pr-loop.md", "")] : [])]
     : task.kind === "analysis"
     ? [read("analysis.md", "Analyze the evidence and report a digest. Do not change files.")]
     : task.kind === "ops"
@@ -125,7 +129,10 @@ export function questionConvention(cfg: Config, task: Task, reviewCommand: strin
     parts.push(read("pre-pr-review.md", "").replaceAll("{review_command}", () => reviewCommand));
   }
   return parts.filter(Boolean).join("\n\n---\n\n")
-    .replaceAll("{grill_mode}", task.kind === "grill-docs" ? "documentation" : "discussion")
+    .replaceAll("{grill_mode}", grillDocs ? "documentation" : "discussion")
+    .replaceAll("{grill_docs_output}", docsWithPr
+      ? "a git worktree: commit documentation changes and open a PR after the interview"
+      : "the working folder: write documentation changes there, without a commit or PR")
     .replaceAll("{task_id}", task.id)
     .replaceAll("{corral_url}", `http://${cfg.host}:${cfg.port}`)
     .replaceAll("{corral_token}", cfg.token)
@@ -229,17 +236,24 @@ export async function dispatchTask(
   const analysis = task.kind === "analysis";
   const ops = task.kind === "ops";
   const grill = task.kind === "grill";
-  if (spec || ops) {
-    // A spec holds sub-projects; an ops task just needs its context folder.
-    // Neither is a repository itself.
-    if (!isDirectory(task.repo_path)) throw new Error(`not a directory: ${task.repo_path}`);
-  } else {
+  const grillDocs = task.kind === "grill-docs";
+  const isGit = (): boolean => {
     try {
       gitToplevel(task.repo_path);
+      return true;
     } catch {
-      throw new Error(`not a git repository: ${task.repo_path}`);
+      return false;
     }
+  };
+  if (spec || ops || grill || grillDocs) {
+    // Interviews, specs and ops tasks take any folder, git repository or not.
+    if (!isDirectory(task.repo_path)) throw new Error(`not a directory: ${task.repo_path}`);
+  } else if (!isGit()) {
+    throw new Error(`not a git repository: ${task.repo_path}`);
   }
+  // Docs interviews isolate their changes in a worktree when the folder is a
+  // repository. In a plain folder they work in place and report a digest.
+  const docsInRepo = grillDocs && isGit();
 
   const review = task.kind === "review";
   if (review) {
@@ -248,8 +262,8 @@ export async function dispatchTask(
   }
   // A review reads the MR head without checking it out: no worktree, no branch.
   // A spec, analysis or ops task uses a folder as context and never creates one.
-  const noBranch = review || spec || analysis || ops || grill;
-  const useWorktree = !noBranch && (task.kind === "grill-docs" || opts.useWorktree !== false);
+  const noBranch = review || spec || analysis || ops || grill || (grillDocs && !docsInRepo);
+  const useWorktree = !noBranch && (grillDocs || opts.useWorktree !== false);
   const originalBranch = task.branch ?? branchName(task);
   let branch = originalBranch;
 
@@ -268,14 +282,14 @@ export async function dispatchTask(
   // Resolve the reviewer before building the prompt: {base_branch} needs the
   // task's pinned branch, or the remote default when the task did not pin one.
   let reviewCommand: string | null = null;
-  if (!review && !spec && !ops && !grill && task.kind !== "grill-docs" && opts.review) {
+  if (!review && !spec && !ops && !grill && !grillDocs && opts.review) {
     const reviewer = (cfg.reviewers ?? []).find((r) => r.name === opts.review);
     if (!reviewer) throw new Error(`unknown reviewer: ${opts.review}`);
     const baseBranch = task.base_branch?.trim() || await defaultBranchName(task.repo_path);
     reviewCommand = reviewer.command.replaceAll("{base_branch}", () => baseBranch ?? "");
   }
 
-  const fullPrompt = `${taskText}\n\n---\n${questionConvention(cfg, task, reviewCommand)}`;
+  const fullPrompt = `${taskText}\n\n---\n${questionConvention(cfg, task, reviewCommand, docsInRepo)}`;
   // Files dropped on the prompt travel with it: they are not part of its text.
   const attachments = db.taskAttachmentFiles(task.id);
 
