@@ -212,6 +212,14 @@ export class Db {
     this.raw.exec("CREATE TABLE IF NOT EXISTS pull_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), fetched_ms INTEGER NOT NULL, pulls TEXT NOT NULL)");
     // Ideas were removed; discard the legacy data and index.
     this.raw.exec("DROP TABLE IF EXISTS ideas");
+    // KPI goals: one row per sourced measurement window, and the goal's baseline.
+    this.raw.exec(`CREATE TABLE IF NOT EXISTS kpi_measurements (
+      kpi_id TEXT NOT NULL, from_day TEXT NOT NULL, to_day TEXT NOT NULL,
+      value REAL NOT NULL, sources TEXT NOT NULL, recorded_ms INTEGER NOT NULL,
+      PRIMARY KEY (kpi_id, from_day, to_day)
+    )`);
+    const kpiCols = new Set((this.raw.prepare("PRAGMA table_info(kpi_monitors)").all() as { name: string }[]).map((c) => c.name));
+    if (!kpiCols.has("goal_baseline")) this.raw.exec("ALTER TABLE kpi_monitors ADD COLUMN goal_baseline TEXT");
     const cols = this.raw.prepare("PRAGMA table_info(items)").all() as { name: string }[];
     const names = new Set(cols.map((c) => c.name));
     if (!names.has("context")) this.raw.exec(`ALTER TABLE items ADD COLUMN context TEXT NOT NULL DEFAULT ''`);

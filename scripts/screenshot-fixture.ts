@@ -72,6 +72,7 @@ export function seedKpis(db: Db, now: number): void {
     unit: "accounts", sources: "warehouse.reports, dashboard/activity",
     repoPath: "/sample/example-project", favorite: "Careful review",
     intervalHours: 24, context: "Exclude test accounts.",
+    goal: { target: 1800, direction: "increase", deadline: "2025-06-30", why: "Reporting volume drives the quarterly renewal review." },
   };
   const report = {
     summary: "Reporting is steady week over week, but **mobile submissions dropped** in the latest window.\n\n- The events table has no device field\n- Weekend coverage is incomplete\n\nSee the [activity dashboard](https://example.com/activity) for the daily breakdown.",
@@ -80,12 +81,22 @@ export function seedKpis(db: Db, now: number): void {
     productQuestions: ["Should **trial accounts** count as reporters?"],
     proposals: [{ title: "Add device field to submission events", rationale: "Would explain the **mobile gap** and sharpen the weekly count:\n\n- Split mobile and desktop trends\n- Confirm the drop is real", evidence: "`dashboard/activity`, panel 3" }],
     memory: "Previous cycles confirmed the warehouse job completes by 06:00 UTC.\n\n- Keep that cut-off in mind for the next window",
+    trajectory: { onTrack: "no", confidence: "medium", rationale: "Growth of about 20 accounts a week reaches roughly 1,900 only if the mobile gap closes; at the current pace the target lands in August." },
+    goalReview: { verdict: "ambitious", rationale: "Needs +27% in six months; reachable only if mobile submissions recover." },
   };
   db.raw.prepare(`INSERT OR REPLACE INTO kpi_monitors
     (id, settings, run_state, report, report_ms, last_measurement, finished_ms)
     VALUES (?, ?, 'complete', ?, ?, ?, ?)`).run(
     "kpi-1", JSON.stringify(settings), JSON.stringify(report), now, JSON.stringify(report.measurement), now,
   );
+  db.raw.prepare("UPDATE kpi_monitors SET goal_baseline = ? WHERE id = 'kpi-1'").run(JSON.stringify({ value: 1300, to: "2024-11-11" }));
+  const weekly = [1300, 1315, 1340, 1332, 1360, 1371, 1388, 1395, 1410, 1420];
+  weekly.forEach((value, index) => {
+    const from = new Date(Date.UTC(2024, 10, 4) + index * 7 * 86_400_000).toISOString().slice(0, 10);
+    const to = new Date(Date.UTC(2024, 10, 11) + index * 7 * 86_400_000).toISOString().slice(0, 10);
+    db.raw.prepare("INSERT OR REPLACE INTO kpi_measurements (kpi_id, from_day, to_day, value, sources, recorded_ms) VALUES ('kpi-1', ?, ?, ?, ?, ?)")
+      .run(from, to, value, JSON.stringify(["warehouse.reports"]), now);
+  });
   db.raw.prepare("INSERT OR REPLACE INTO kpi_monitors (id, settings) VALUES (?, ?)").run("kpi-2", JSON.stringify({
     name: "Median review time",
     definition: "Median hours from review request to first substantive review.",

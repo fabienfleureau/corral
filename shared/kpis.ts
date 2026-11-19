@@ -12,6 +12,46 @@ export interface KpiSettings {
   favorite: string;
   intervalHours: 0 | 1 | 24;
   context: string;
+  /** Optional target the agent works towards. */
+  goal: KpiGoal | null;
+}
+
+export interface KpiGoal {
+  /** Target value, in the KPI unit. */
+  target: number;
+  direction: "increase" | "decrease";
+  /** YYYY-MM-DD UTC. */
+  deadline: string;
+  /** Why the goal matters and its constraints. */
+  why: string;
+}
+
+/** Measurement recorded when the goal was set, or the first one after. */
+export interface KpiBaseline {
+  value: number;
+  /** End of the measurement window (YYYY-MM-DD, exclusive). */
+  to: string;
+}
+
+/** Computed by Corral from the baseline, the target and the last measurement. */
+export interface KpiGoalProgress {
+  baseline: KpiBaseline | null;
+  /** target − last measured value; null without a measurement. */
+  gap: number | null;
+  /** Share of the way from baseline to target (1 = reached); null when unknown. */
+  progress: number | null;
+  reached: boolean;
+}
+
+export interface KpiTrajectory {
+  onTrack: "yes" | "no" | "unknown";
+  confidence: "high" | "medium" | "low";
+  rationale: string;
+}
+
+export interface KpiGoalReview {
+  verdict: "realistic" | "ambitious" | "unrealistic" | "unmeasurable";
+  rationale: string;
 }
 
 export interface KpiMeasurement {
@@ -28,6 +68,9 @@ export interface KpiReport {
   productQuestions: string[];
   proposals: { title: string; rationale: string; evidence: string }[];
   memory: string;
+  /** Present when the KPI has a goal. Reports saved before goals lack them. */
+  trajectory?: KpiTrajectory | null;
+  goalReview?: KpiGoalReview | null;
 }
 
 export interface KpiView {
@@ -42,4 +85,8 @@ export interface KpiView {
   nextRunMs: number | null;
   report: KpiReport | null;
   lastMeasurement: KpiMeasurement | null;
+  /** Null without a goal. */
+  goalProgress: KpiGoalProgress | null;
+  /** Sourced measurements, oldest first, latest window per period. */
+  history: KpiMeasurement[];
 }

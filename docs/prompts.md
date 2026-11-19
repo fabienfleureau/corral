@@ -200,3 +200,8 @@ Report prose is Markdown: the prompt asks for escaped newlines in the JSON
 strings, blank lines between paragraphs and bullets for separate points so the
 KPI cards show line breaks.
 The file is the source for the next cycle. KPI sessions use their own report contract.
+
+With a goal, the prompt adds the target, deadline, Corral's computed gap and
+progress, and the last 20 measurements, and asks for a `trajectory` verdict
+(on track or not, with confidence) and a `goalReview` of the goal itself.
+Without one it asks for both to be null.
