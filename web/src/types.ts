@@ -298,7 +298,7 @@ export type PlatformRateLimit = {
 export interface PrAdditionsGroup { key: string; additions: number; available: number; total: number }
 
 
-export type EpicTaskState = "out" | "merged" | "pr_ready" | "pr_open" | "running" | "ready" | "blocked";
+export type EpicTaskState = "out" | "killed" | "merged" | "pr_ready" | "pr_open" | "running" | "ready" | "blocked";
 
 export type EpicSummary = { total: number; merged: number; testable: number; ready: number; blocked: number };
 

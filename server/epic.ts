@@ -24,6 +24,11 @@ export function isJiraDone(status: string | null | undefined): boolean {
   return /^(done|closed|resolved|terminé|résolu|clos|fermé)$/i.test((status ?? "").trim());
 }
 
+/** A Killed ticket was cancelled or replaced: terminal, but never merged. */
+export function isJiraKilled(status: string | null | undefined): boolean {
+  return /^killed$/i.test((status ?? "").trim());
+}
+
 /** The repo a ticket names on a `Repo: <name>` line (name, folder name or path), if Corral knows it. */
 export function parseRepoLine(text: string, repos: Repo[]): Repo | null {
   const m = text.match(/^\s*repo\s*:\s*(.+?)\s*$/im);

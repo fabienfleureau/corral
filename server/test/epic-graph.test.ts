@@ -39,6 +39,22 @@ test("merged or Jira-done prerequisite unblocks; a ticket that left the epic is 
   assert.equal(state(out, "A-1").state, "out");
 });
 
+test("a Jira Killed ticket is terminal: shown as killed, no launch or stacking, and no longer blocks", () => {
+  const killed = task("A-1", { jira_status: "Killed", status: "dispatched", terminal_address: "s", branch: "feat/a1", pr_url: "u" });
+  const views = epicViews([killed, task("A-2")], [link("A-2", "A-1")], [pr("A-1", { ready: 1 })]);
+  assert.equal(state(views, "A-1").state, "killed", "Jira wins over a green PR");
+  assert.equal(state(views, "A-1").testable, false);
+  assert.equal(state(views, "A-2").state, "ready");
+  assert.equal(state(views, "A-2").stack_on, null, "never stack on a cancelled branch");
+  assert.deepEqual(epicSummary(views), { total: 1, merged: 0, testable: 0, ready: 1, blocked: 0 });
+});
+
+test("a killed prerequisite stays visible as a note on its dependents", () => {
+  const views = epicViews([task("A-1", { jira_status: "killed" }), task("A-2", { jira_status: "To Do" })], [link("A-2", "A-1")], []);
+  assert.equal(state(views, "A-2").state, "ready");
+  assert.match(state(views, "A-2").alert ?? "", /A-1.*killed/);
+});
+
 test("same-repo: stack on the only unmerged prerequisite branch; other repo or several blockers use the default", () => {
   const dep = (over: Partial<Task>) => task("A-1", { status: "dispatched", branch: "feat/a1", pr_url: "u", ...over });
   const ready = [pr("A-1", { ready: 1 })];

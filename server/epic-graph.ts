@@ -4,10 +4,10 @@
 
 import type { Hub } from "./capture.ts";
 import type { Db } from "./db.ts";
-import { isJiraDone } from "./epic.ts";
+import { isJiraDone, isJiraKilled } from "./epic.ts";
 import type { EpicLink, Item, Task } from "./types.ts";
 
-export type EpicTaskState = "out" | "merged" | "pr_ready" | "pr_open" | "running" | "ready" | "blocked";
+export type EpicTaskState = "out" | "killed" | "merged" | "pr_ready" | "pr_open" | "running" | "ready" | "blocked";
 
 export interface EpicBlocker {
   key: string;
@@ -57,7 +57,7 @@ export function epicViews(tasks: Task[], links: EpicLink[], items: Item[]): Epic
   const prs = prItemByTask(items);
   const prReady = (t: Task) => { const i = prs.get(t.id); return Boolean(i && i.status === "open" && i.ready === 1); };
   const closedUnmerged = (t: Task) => { const i = prs.get(t.id); return Boolean(t.pr_url && i && i.status === "resolved" && !isMerged(t)); };
-  const satisfied = (t: Task) => t.epic_out === 1 || isMerged(t) || prReady(t);
+  const satisfied = (t: Task) => t.epic_out === 1 || isJiraKilled(t.jira_status) || isMerged(t) || prReady(t);
 
   const views = boardTasks.map((task): EpicTaskView => {
     const blockers = links
@@ -66,9 +66,11 @@ export function epicViews(tasks: Task[], links: EpicLink[], items: Item[]): Epic
       .map(({ key, t }): EpicBlocker => ({ key, task_id: t?.id ?? null, satisfied: t ? satisfied(t) : true }));
     const blocked = blockers.filter((b) => !b.satisfied);
     const closed = blockers.find((b) => { const t = b.task_id ? boardTasks.find((x) => x.id === b.task_id) : null; return t ? closedUnmerged(t) : false; });
+    const killed = blockers.find((b) => { const t = b.task_id ? boardTasks.find((x) => x.id === b.task_id) : null; return t ? isJiraKilled(t.jira_status) : false; });
     const item = prs.get(task.id);
     let state: EpicTaskState;
     if (task.epic_out === 1) state = "out";
+    else if (isJiraKilled(task.jira_status)) state = "killed";
     else if (isMerged(task)) state = "merged";
     else if (prReady(task)) state = "pr_ready";
     else if (task.pr_url || item) state = "pr_open";
@@ -79,12 +81,14 @@ export function epicViews(tasks: Task[], links: EpicLink[], items: Item[]): Epic
     // prerequisite is still unmerged; otherwise the default branch.
     const open = blockers
       .map((b) => (b.task_id ? boardTasks.find((t) => t.id === b.task_id)! : null))
-      .filter((t): t is Task => Boolean(t) && !isMerged(t!) && t!.epic_out !== 1);
+      .filter((t): t is Task => Boolean(t) && !isMerged(t!) && !isJiraKilled(t!.jira_status) && t!.epic_out !== 1);
     const sameRepo = open.filter((t) => t.repo_path && t.repo_path === task.repo_path && t.branch);
     const stack_on = open.length === 1 && sameRepo.length === 1 ? sameRepo[0].branch : null;
     return {
       task, state, blockers,
-      alert: closed ? `Prerequisite ${closed.key} PR was closed without merging` : null,
+      alert: closed
+        ? `Prerequisite ${closed.key} PR was closed without merging`
+        : killed ? `Prerequisite ${killed.key} was killed in Jira` : null,
       testable: state === "merged" || state === "pr_ready",
       stack_on,
     };
@@ -101,11 +105,12 @@ export function epicViews(tasks: Task[], links: EpicLink[], items: Item[]): Epic
     return d;
   };
   const d = (v: EpicTaskView) => (v.task.jira_key ? depthOf(v.task.jira_key, new Set()) : 0);
-  return views.sort((a, b) => Number(a.state === "out") - Number(b.state === "out") || d(a) - d(b) || (a.task.jira_key ?? "").localeCompare(b.task.jira_key ?? "", undefined, { numeric: true }));
+  const terminal = (v: EpicTaskView) => v.state === "out" || v.state === "killed";
+  return views.sort((a, b) => Number(terminal(a)) - Number(terminal(b)) || d(a) - d(b) || (a.task.jira_key ?? "").localeCompare(b.task.jira_key ?? "", undefined, { numeric: true }));
 }
 
 export function epicSummary(views: EpicTaskView[]): EpicSummary {
-  const live = views.filter((v) => v.state !== "out");
+  const live = views.filter((v) => v.state !== "out" && v.state !== "killed");
   return {
     total: live.length,
     merged: live.filter((v) => v.state === "merged").length,

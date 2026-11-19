@@ -8,7 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "../db.ts";
 import { blockedByEdges, type JiraIssue } from "../jira.ts";
-import { findCycle, isJiraDone, parseRepoLine, syncEpic, type EpicJira } from "../epic.ts";
+import { findCycle, isJiraDone, isJiraKilled, parseRepoLine, syncEpic, type EpicJira } from "../epic.ts";
+import { epicViews } from "../epic-graph.ts";
 import type { Repo, Task } from "../types.ts";
 
 const issue = (key: string, summary: string, description = "", links: JiraIssue["fields"]["issuelinks"] = [], status = "To Do"): JiraIssue => ({
@@ -69,6 +70,9 @@ test("jira done statuses", () => {
   assert.equal(isJiraDone("Done"), true);
   assert.equal(isJiraDone("Terminé"), true);
   assert.equal(isJiraDone("In Progress"), false);
+  assert.equal(isJiraKilled("Killed"), true);
+  assert.equal(isJiraKilled(" killed "), true);
+  assert.equal(isJiraKilled("Kill"), false);
 });
 
 test("sync: imports children as tasks with links, repo and no duplicates on resync", withDb(async (db) => {
@@ -118,6 +122,17 @@ test("sync: an existing task is attached to the epic instead of duplicated", wit
   assert.equal(db.getTask("t1")!.prompt, "mine", "still not replaced after a second sync");
   assert.equal(db.getTask("t1")!.epic_id, epic.id);
   assert.equal(db.listTasks().length, 1);
+}));
+
+test("sync: a ticket marked Killed is detected on the next refresh", withDb(async (db) => {
+  const jira = fakeJira(issue("E-1", "Epic"), [issue("E-2", "a"), issue("E-3", "b")]);
+  const { epic } = await syncEpic(db, jira, "E-1");
+  jira.children = [issue("E-2", "a", "", [], "Killed"), issue("E-3", "b", "", [blockedBy("E-2")])];
+  await syncEpic(db, jira, "E-1");
+  assert.equal(db.getTaskByJiraKey("E-2")!.jira_status, "Killed");
+  const views = epicViews(db.listEpicTasks(epic.id), db.listEpicLinks(epic.id), db.listItems());
+  assert.equal(views.find((v) => v.task.jira_key === "E-2")!.state, "killed");
+  assert.equal(views.find((v) => v.task.jira_key === "E-3")!.state, "ready");
 }));
 
 test("sync: a ticket that left the epic is flagged, and back again is restored; a cycle is reported", withDb(async (db) => {

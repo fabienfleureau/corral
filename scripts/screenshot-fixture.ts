@@ -106,20 +106,21 @@ export function seedKpis(db: Db, now: number): void {
 
 /** A multi-repo spec with its plan waiting for approval, and a code task a
  *  previous plan created. */
-/** One epic: a merged task, a PR ready, a task ready to launch (stacked) and a blocked one. */
+/** One epic: a merged task, a PR ready, a task ready to launch (stacked), a blocked one and a killed ticket. */
 export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
   db.insertEpic({ id: "sample-epic", jira_key: "EX-100", title: "Widget sizes across the platform", description: "Design v1", error: null,
     favorite_name: "Careful review", repo_path: "/sample/example-project", synced_ms: now, created_ms: now - 86_400_000 });
-  const rows: { key: string; title: string; status: Task["status"]; repo: string; branch?: string; pr?: string }[] = [
+  const rows: { key: string; title: string; status: Task["status"]; repo: string; branch?: string; pr?: string; jiraStatus?: string }[] = [
     { key: "EX-101", title: "Add a size field to the widget API", status: "done", repo: "/sample/example-project", branch: "feat/widget-size-api", pr: "https://gitlab.com/example/platform/-/merge_requests/31" },
     { key: "EX-102", title: "Store widget sizes", status: "dispatched", repo: "/sample/example-project", branch: "feat/widget-size-store", pr: "https://gitlab.com/example/platform/-/merge_requests/32" },
     { key: "EX-103", title: "Show the size in the console", status: "open", repo: "/sample/side-project" },
     { key: "EX-104", title: "Document widget sizes", status: "open", repo: "/sample/example-project" },
+    { key: "EX-105", title: "Keep legacy size labels in sync", status: "open", repo: "/sample/example-project", jiraStatus: "Killed" },
   ];
   rows.forEach((r, i) => db.insertTask({
     id: `sample-epic-${r.key}`, title: `${r.key} ${r.title}`, prompt: r.title, repo_path: r.repo, target: "claude", target_state: "confirmed",
     base_branch: null, branch: r.branch ?? null, worktree_path: null, assignee: null, jira_key: r.key, jira_url: `https://jira.example.com/browse/${r.key}`,
-    jira_parent_key: "EX-100", jira_status: null, pr_url: r.pr ?? null, pr_meta: null, status: r.status, terminal_address: null, exit_code: null,
+    jira_parent_key: "EX-100", jira_status: r.jiraStatus ?? null, pr_url: r.pr ?? null, pr_meta: null, status: r.status, terminal_address: null, exit_code: null,
     created_ms: now - (10 - i) * 60_000, updated_ms: now - (10 - i) * 60_000, epic_id: "sample-epic",
   }));
   // A task created from the Epic page's request field: tracked on the Tasks
@@ -134,6 +135,7 @@ export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
   });
   db.replaceEpicLinks("sample-epic", [
     { task_key: "EX-102", blocked_by_key: "EX-101" },
+    { task_key: "EX-105", blocked_by_key: "EX-101" },
     { task_key: "EX-103", blocked_by_key: "EX-102" },
     { task_key: "EX-104", blocked_by_key: "EX-103" },
   ]);
