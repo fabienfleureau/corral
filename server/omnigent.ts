@@ -4,6 +4,7 @@
 // a tolerant polling loop rather than per-session streams: fewer moving parts,
 // same information (status, blocked elicitations, tree).
 
+import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import type {
   WorkerElicitation,
   WorkerEvent,
   WorkerEventSubscription,
+  WorkerDelegate,
   WorkerSession,
   WorkerStart,
   WorkerModel,
@@ -94,7 +96,9 @@ function tarHeader(name: string, size: number): Buffer {
   return h;
 }
 
-function makeTarGz(files: { name: string; content: string }[]): Buffer {
+type BundleFile = { name: string; content: string };
+
+export function makeTarGz(files: BundleFile[]): Buffer {
   const parts: Buffer[] = [];
   for (const f of files) {
     const body = Buffer.from(f.content, "utf8");
@@ -105,6 +109,62 @@ function makeTarGz(files: { name: string; content: string }[]): Buffer {
   }
   parts.push(Buffer.alloc(1024)); // end-of-archive
   return gzipSync(Buffer.concat(parts));
+}
+
+/**
+ * The bundle of a bare harness agent that may hand work to sub-agents: the
+ * parent runs the harness itself (like `corral-<harness>`) and adds `spawn`
+ * plus the declared children, each in `agents/<name>/`. The registry keys
+ * agents by name and never updates one, so a short hash of everything the
+ * bundle carries goes into the name: a changed prompt registers a new agent
+ * instead of silently running the old one.
+ */
+export function delegateBundle(
+  short: string,
+  harnessId: string,
+  children: (WorkerDelegate & { harnessId: string })[],
+): { name: string; files: BundleFile[] } {
+  for (const c of children) {
+    if (!/^[a-z][a-z0-9_]*$/.test(c.name)) throw new Error(`invalid delegate name: ${c.name}`);
+  }
+  const hash = createHash("sha256")
+    .update(JSON.stringify([short, harnessId, children.map((c) => [c.name, c.harnessId, c.prompt])]))
+    .digest("hex")
+    .slice(0, 8);
+  const name = `corral-${short}-delegate-${hash}`;
+  const parent = [
+    "spec_version: 1",
+    `name: ${name}`,
+    "description: Corral bare-harness agent that can delegate to sub-agents",
+    "spawn: true",
+    "executor:",
+    "  type: omnigent",
+    "  config:",
+    `    harness: ${harnessId}`,
+    "tools:",
+    "  agents:",
+    ...children.map((c) => `    - ${c.name}`),
+    "",
+  ].join("\n");
+  const files: BundleFile[] = [{ name: "config.yaml", content: parent }];
+  for (const c of children) {
+    files.push({
+      name: `agents/${c.name}/config.yaml`,
+      content: [
+        "spec_version: 1",
+        `name: ${c.name}`,
+        `description: Corral delegate on the ${c.harness} harness`,
+        "executor:",
+        "  type: omnigent",
+        "  config:",
+        `    harness: ${c.harnessId}`,
+        // JSON is valid YAML: a quoted scalar needs no indentation rules for the prompt.
+        `prompt: ${JSON.stringify(c.prompt)}`,
+        "",
+      ].join("\n"),
+    });
+  }
+  return { name, files };
 }
 
 function str(v: unknown): string | null {
@@ -397,7 +457,12 @@ export class OmnigentBackend implements WorkerBackend {
     if (start.reasoning) meta.reasoning_effort = start.reasoning;
 
     let agentId: string;
-    if (start.agent) {
+    if (start.delegates?.length) {
+      // An explicit agent may not be able to call sub-agents, and agents stay an
+      // explicit opt-in: the caller must not combine the two.
+      if (start.agent) throw new Error("delegates cannot be combined with an explicit agent");
+      agentId = await this.ensureDelegateAgent(start.harness, start.delegates);
+    } else if (start.agent) {
       // Explicit agent choice: JSON create bound to that registered agent.
       const agents = await this.listAgents();
       const agent =
@@ -541,29 +606,47 @@ export class OmnigentBackend implements WorkerBackend {
    * model/reasoning pins).
    */
   private async ensureHarnessAgent(short: string): Promise<string> {
-    const cached = this.harnessAgentIds.get(short);
+    return this.ensureBundleAgent(`corral-${short}`, async (name) => {
+      const harnessId = await this.harnessIdFor(short);
+      return [{
+        name: "config.yaml",
+        content: [
+          "spec_version: 1",
+          `name: ${name}`,
+          "description: Corral bare-harness agent",
+          "executor:",
+          "  type: omnigent",
+          "  config:",
+          `    harness: ${harnessId}`,
+          "",
+        ].join("\n"),
+      }];
+    });
+  }
+
+  /** The bare harness agent that can also call `delegates` (spawn + children). */
+  private async ensureDelegateAgent(short: string, delegates: WorkerDelegate[]): Promise<string> {
+    const harnessId = await this.harnessIdFor(short);
+    const children = await Promise.all(
+      delegates.map(async (d) => ({ ...d, harnessId: await this.harnessIdFor(d.harness) })),
+    );
+    const bundle = delegateBundle(short, harnessId, children);
+    return this.ensureBundleAgent(bundle.name, async () => bundle.files);
+  }
+
+  /** Find a user agent by name, or register it from a bundle (names are never updated). */
+  private async ensureBundleAgent(name: string, files: (name: string) => Promise<BundleFile[]>): Promise<string> {
+    const cached = this.harnessAgentIds.get(name);
     if (cached) return cached;
-    const name = `corral-${short}`;
     const existing = (await this.listAgents()).find((a) => a.name === name);
     if (existing) {
-      this.harnessAgentIds.set(short, existing.id);
+      this.harnessAgentIds.set(name, existing.id);
       return existing.id;
     }
-    const harnessId = await this.harnessIdFor(short);
-    const config = [
-      "spec_version: 1",
-      `name: ${name}`,
-      "description: Corral bare-harness agent",
-      "executor:",
-      "  type: omnigent",
-      "  config:",
-      `    harness: ${harnessId}`,
-      "",
-    ].join("\n");
     const form = new FormData();
     form.append(
       "bundle",
-      new Blob([makeTarGz([{ name: "config.yaml", content: config }])], { type: "application/gzip" }),
+      new Blob([makeTarGz(await files(name))], { type: "application/gzip" }),
       "agent.tar.gz",
     );
     const headers: Record<string, string> = {};
@@ -576,7 +659,7 @@ export class OmnigentBackend implements WorkerBackend {
     const created = (await res.json()) as Record<string, unknown>;
     const id = str(created.id) ?? "";
     if (!id) throw new Error("omnigent agent registration returned no id");
-    this.harnessAgentIds.set(short, id);
+    this.harnessAgentIds.set(name, id);
     return id;
   }
 

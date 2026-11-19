@@ -4,12 +4,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Db } from "../db.ts";
 import { dispatchTask } from "../dispatch.ts";
+import { createHttpServer, type AppState } from "../api.ts";
 import type { Config } from "../config.ts";
 import type { WorkerBackend, WorkerStart, WorkerSession } from "../worker.ts";
 import type { Task } from "../types.ts";
@@ -198,4 +199,101 @@ test("interview tasks accept a folder; docs run in place without a PR loop", wit
   const docsPrompt = started.at(-1)!.prompt;
   assert.match(docsPrompt, /Interview mode: \*\*documentation\*\*/);
   assert.match(docsPrompt, /Documentation output: \*\*the working folder/);
+}));
+
+const OCR_CODEX = { name: "ocr-codex", delegate: "codex" } as const;
+
+function cfgDelegate(dir: string): Config {
+  return { configDir: dir, host: "localhost", port: 4787, token: "", reviewers: [CUBIC, OCR_CODEX] } as Config;
+}
+
+test("dispatch: a delegate reviewer passes the sub-agent to the backend and the delegate review step to the prompt", withDb(async (db, dir) => {
+  execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+  const task = makeTask({ repo_path: dir, base_branch: "main" });
+  db.insertTask(task);
+  const { backend, started } = fakeBackend();
+  await dispatchTask(db, cfgDelegate(dir), backend, task, "claude", { useWorktree: false, review: "ocr-codex" });
+  assert.equal(started.length, 1);
+  const { prompt, delegates, agent } = started[0];
+  assert.deepEqual(delegates, [{ name: "ocr_codex", harness: "codex", prompt: readFileSync("skills/ocr-delegate.md", "utf8") }]);
+  assert.equal(agent, null);
+  // The parent is told to call the sub-agent, with the resolved base ref, and never to run a command.
+  assert.match(prompt, /`ocr_codex` sub-agent/);
+  assert.match(prompt, /sys_session_send/);
+  assert.match(prompt, /Base ref: main/);
+  assert.doesNotMatch(prompt, /\{base_branch\}|\{review_agent\}|\{review_command\}|Run the review from the worktree root/);
+  assert.equal(db.getTask(task.id)?.review, "sub-agent ocr_codex");
+}));
+
+test("dispatch: a delegate review step with no known base branch asks for an empty base ref", withDb(async (db, dir) => {
+  execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+  const task = makeTask({ repo_path: dir, base_branch: null });
+  db.insertTask(task);
+  const { backend, started } = fakeBackend();
+  await dispatchTask(db, cfgDelegate(dir), backend, task, "claude", { useWorktree: false, review: "ocr-codex" });
+  assert.match(started[0].prompt, /Base ref: "/);
+}));
+
+test("dispatch: a delegate reviewer is refused off the claude harness or with an explicit agent, before the backend starts", withDb(async (db, dir) => {
+  execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+  const task = makeTask({ repo_path: dir, base_branch: "main" });
+  db.insertTask(task);
+  const { backend, started } = fakeBackend();
+  await assert.rejects(
+    dispatchTask(db, cfgDelegate(dir), backend, task, "codex", { useWorktree: false, review: "ocr-codex" }),
+    /claude harness \(got codex\)/,
+  );
+  await assert.rejects(
+    dispatchTask(db, cfgDelegate(dir), backend, task, "claude", { useWorktree: false, review: "ocr-codex", agent: "my-agent" }),
+    /explicit agent/,
+  );
+  assert.equal(started.length, 0);
+  assert.equal(db.getTask(task.id)?.review ?? null, null);
+}));
+
+test("dispatch: a command reviewer sends no delegates and still runs on any harness or agent", withDb(async (db, dir) => {
+  execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+  const task = makeTask({ repo_path: dir, base_branch: "main" });
+  db.insertTask(task);
+  const { backend, started } = fakeBackend();
+  await dispatchTask(db, cfgDelegate(dir), backend, task, "codex", { useWorktree: false, review: "cubic", agent: "my-agent" });
+  assert.equal(started[0].delegates, undefined);
+  assert.equal(started[0].agent, "my-agent");
+  assert.doesNotMatch(started[0].prompt, /sys_session_send/);
+}));
+
+test("dispatch: the user's copy of the delegate skills in the config dir wins over the shipped ones", withDb(async (db, dir) => {
+  execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+  mkdirSync(join(dir, "skills"));
+  writeFileSync(join(dir, "skills", "ocr-delegate.md"), "CUSTOM CHILD PROMPT");
+  writeFileSync(join(dir, "skills", "pre-pr-delegate-review.md"), "CUSTOM PARENT STEP for {review_agent} against {base_branch}");
+  const task = makeTask({ repo_path: dir, base_branch: "main" });
+  db.insertTask(task);
+  const { backend, started } = fakeBackend();
+  await dispatchTask(db, cfgDelegate(dir), backend, task, "claude", { useWorktree: false, review: "ocr-codex" });
+  assert.equal(started[0].delegates?.[0].prompt, "CUSTOM CHILD PROMPT");
+  assert.match(started[0].prompt, /CUSTOM PARENT STEP for ocr_codex against main/);
+}));
+
+test("api: a delegate reviewer on another harness or an explicit agent is a 400, not a failed dispatch", withDb(async (db, dir) => {
+  const { backend, started } = fakeBackend();
+  const server = createHttpServer({ db, backend, hub: { broadcast: () => undefined }, cfg: { token: "test", configDir: dir, reviewers: [CUBIC, OCR_CODEX] } } as unknown as AppState);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  const call = (method: string, path: string, body?: unknown) => fetch(`http://127.0.0.1:${port}${path}`, {
+    method, headers: { Authorization: "Bearer test", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined,
+  });
+  try {
+    const created = await (await call("POST", "/api/tasks", { prompt: "x", repo_path: dir })).json() as Task;
+    const wrongHarness = await call("POST", `/api/tasks/${created.id}/dispatch`, { target: "codex", review: "ocr-codex" });
+    assert.equal(wrongHarness.status, 400);
+    assert.match((await wrongHarness.json() as { error: string }).error, /claude harness/);
+    const withAgent = await call("POST", `/api/tasks/${created.id}/dispatch`, { target: "claude", agent: "my-agent", review: "ocr-codex" });
+    assert.equal(withAgent.status, 400);
+    assert.match((await withAgent.json() as { error: string }).error, /explicit agent/);
+    assert.equal(started.length, 0);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 }));

@@ -37,7 +37,7 @@ export interface OmnigentConfig {
 
 export interface Config {
   favorites?: Favorite[];
-  /** Named review commands; a favorite picks one by name. */
+  /** Named reviews (a command, or a delegate sub-agent); a favorite picks one by name. */
   reviewers?: Reviewer[];
   /** Model facts catalog overrides (exact id or "prefix*"), merged over the
    *  shipped defaults per model key. */
@@ -96,6 +96,9 @@ function defaultConfig(): Config {
     reviewers: [
       { name: "cubic", command: "cubic review --base {base_branch} --json" },
       { name: "ocr", command: "ocr review --from {base_branch} --provider chatgpt --model gpt-6.1-sol --effort medium --audience agent --format json" },
+      // `ocr delegate` calls no model: the sub-agent's own harness does the review.
+      { name: "ocr-claude", delegate: "claude" },
+      { name: "ocr-codex", delegate: "codex" },
     ],
   };
 }
