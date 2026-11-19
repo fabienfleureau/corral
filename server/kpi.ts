@@ -290,7 +290,11 @@ export class KpiMonitor {
     this.busy.add(id);
     try {
       const session = await this.worker.start({
-        taskId: null, name, repoPath: settings.repoPath, git: null, agent: favorite.agent || null,
+        taskId: null,
+        // Match task dispatch: a registered folder uses its repo name, so the
+        // cycle lands in the same omnigent project as the repo's other work.
+        project: this.deps.repos().find((repo) => repo.path === settings.repoPath)?.name ?? settings.repoPath,
+        name, repoPath: settings.repoPath, git: null, agent: favorite.agent || null,
         harness: favorite.harness, model: favorite.model || null, reasoning: favorite.reasoning || null,
         prompt: kpiPrompt(settings, report, startedMs, memory.path, memory.excerpt),
       });

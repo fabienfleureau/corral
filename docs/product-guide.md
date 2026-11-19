@@ -214,7 +214,9 @@ dashboards or queries when known. Save the definition to name the tab.
 Choose the working directory the agent reads from. Any absolute folder works,
 git repository or not; the session runs there directly, without a worktree.
 Registered repositories are suggested and decide which favorites are available
-(an unregistered folder uses professional favorites). Pick a favorite to supply
+(an unregistered folder uses professional favorites). KPI sessions join the same
+Omnigent project as other sessions for that folder; an unregistered folder uses
+its path as the project name. Pick a favorite to supply
 the harness, agent, model and reasoning; add one in Settings if needed, with
 read-only connector access. Save the settings and use **Run now**, or set
 **Hourly** or **Daily** for automatic analysis. On a wide screen the settings
