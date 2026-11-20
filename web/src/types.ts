@@ -48,7 +48,7 @@ export type Item = {
   status: "open" | "resolved" | "archived";
   title: string;
   summary: string; // structured summary ("" until summarized)
-  body: string; // raw tail / structured body — shown when summary is empty
+  body: string; // report text or stopped-run message, rendered as Markdown
   context: string; // raw agent output captured at report time (context drawer)
   options: string | null; // JSON array of quick-reply options
   elicitation: string | null;
