@@ -261,3 +261,5 @@ Clearing the target removes the goal and its baseline.
 
 Changing the calculation or unit starts a fresh report, memory file, last measurement and measurement history for the slot.
 Edits to the name, sources, product context and goal preserve the current research.
+
+**Build team artifact** turns the saved reports into a private Claude artifact for a team update. Choose a one pager to share ahead of the meeting or slides to present live. The first four sections tell the core story — current value, evolution and why, work and impact, and next steps. You can also add goal and trajectory, data confidence, decisions needed, risks and blockers, or a short methods note; the first three are on by default. An optional audience note steers the tone. Corral starts a Claude task, and its link to the artifact appears in the inbox. Run an analysis first: with no report there is nothing to summarise. The artifact is a snapshot; build another one after the next cycle if the numbers changed.

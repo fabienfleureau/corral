@@ -11,6 +11,7 @@ Prompt families:
 | **PR-loop messages** | string builders in `server/pr.ts` | a live agent session, or a fresh respawn | when the PR loop has work for the agent |
 | **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts` | the `assistant` command | when the human clicks Summarize, or a digest runs |
 | **KPI analysis** | `kpiPrompt()` in `server/kpi.ts` | the Omnigent agent from the selected favorite | every manual or scheduled KPI cycle |
+| **KPI status artifacts** | `kpiArtifactPrompt()` in `server/kpi-artifact.ts` | a Claude `ops` task from a configured favorite | when the human builds an artifact from the KPI page |
 | **Agent control tools** | `server/agent-control.ts` | a voice or chat agent using the MCP endpoint | at MCP `initialize` and `tools/list` |
 
 ### Untrusted text: data, not instructions
@@ -209,6 +210,10 @@ Add a prompt → add its row here in the same PR.
 ### Claude artifact request (`server/api.ts`)
 
 The inbox action asks the active Claude session to create a private artifact explaining the task and report its URL. The user controls sharing in Claude.
+
+### KPI status artifact (`server/kpi-artifact.ts`)
+
+`kpiArtifactPrompt()` wraps the saved KPI reports as untrusted data (`DATA_NOT_INSTRUCTIONS`), then asks a fresh Claude task for one private artifact. It names the format (one page or slides) and the chosen sections: current value, evolution and why, work and impact, next steps, plus any of goal and trajectory, data confidence, decisions needed, risks and blockers, and a methods note. The task reports the artifact URL to the inbox through the standard ops convention; the human controls sharing.
 
 ## KPI monitoring
 

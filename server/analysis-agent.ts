@@ -24,13 +24,15 @@ export class AnalysisAgent {
     this.db.raw.prepare("UPDATE analysis_agent_settings SET repo = ? WHERE id = 1").run(repo);
   }
   /** `repo` and harness settings override the Improve defaults for one analysis. */
-  async start(title: string, prompt: string, opts: { repo?: string; target?: string; model?: string | null; reasoning?: string | null; agent?: string | null; source?: string } = {}): Promise<Task> {
+  /** `ops` runs in any folder and reports back; `analysis` is the default. */
+  async start(title: string, prompt: string, opts: { repo?: string; target?: string; model?: string | null; reasoning?: string | null; agent?: string | null; source?: string; kind?: "analysis" | "ops" } = {}): Promise<Task> {
     const repo = opts.repo ?? this.repo();
     if (!repo) throw new Error("Select a repository for Improve analyses first");
+    const kind = opts.kind ?? "analysis";
     const now = Date.now();
-    const task: Task = { id: randomUUID(), title, prompt, kind: "analysis", repo_path: repo, target: opts.target ?? "claude", target_state: opts.target ? "confirmed" : "suggested", model: opts.model ?? null, reasoning: opts.reasoning ?? null, agent: opts.agent ?? null, base_branch: null, branch: null, worktree_path: null, assignee: null, jira_key: null, jira_url: null, jira_parent_key: null, pr_url: null, pr_meta: null, status: "open", terminal_address: null, exit_code: null, created_ms: now, updated_ms: now };
+    const task: Task = { id: randomUUID(), title, prompt, kind, repo_path: repo, target: opts.target ?? "claude", target_state: opts.target ? "confirmed" : "suggested", model: opts.model ?? null, reasoning: opts.reasoning ?? null, agent: opts.agent ?? null, base_branch: null, branch: null, worktree_path: null, assignee: null, jira_key: null, jira_url: null, jira_parent_key: null, pr_url: null, pr_meta: null, status: "open", terminal_address: null, exit_code: null, created_ms: now, updated_ms: now };
     this.db.insertTask(task);
-    logTaskEvent(this.db, task.id, "created", "Analysis task created", { source: opts.source ?? "improve", harness: task.target });
+    logTaskEvent(this.db, task.id, "created", kind === "ops" ? "Action task created" : "Analysis task created", { source: opts.source ?? "improve", harness: task.target });
     this.hub.broadcast("task.updated", task);
     try { await dispatchTask(this.db, this.cfg, this.backend, task, task.target, { useWorktree: false }); }
     catch (err) { this.hub.broadcast("task.updated", this.db.getTask(task.id)); throw err; }
