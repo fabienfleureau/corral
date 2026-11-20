@@ -16,6 +16,7 @@ import { DATA_NOT_INSTRUCTIONS, questionConvention, slugify } from "./dispatch.t
 import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 import { logTaskEvent, promptData } from "./task-events.ts";
+import { cleanupFinishedTask, cleanupTerminalWorktrees } from "./worktree-cleanup.ts";
 
 export interface PrThread {
   /** Stable id (GraphQL thread id, or GitLab discussion id) for dedupe. */
@@ -692,7 +693,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
       logTaskEvent(db, task.id, "pr", `PR ${readyStatus}`, { pr: pr.url, checks: pr.checks, threads: pr.threads.length });
     }
     hub.broadcast("item.created", item);
-    if (merged) resolveMergedTask(db, hub, task);
+    if (merged) await resolveMergedTask(db, hub, task, opts.backend);
     return pr;
   }
 
@@ -729,7 +730,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
       logTaskEvent(db, task.id, "pr", `PR no longer ready: ${reasons.join(", ") || "gate failing"}`, { pr: pr.url });
     }
   }
-  if (merged) resolveMergedTask(db, hub, task);
+  if (merged) await resolveMergedTask(db, hub, task, opts.backend);
   return pr;
 }
 
@@ -763,8 +764,8 @@ function syncJiraPrStage(
   );
 }
 
-/** A merged PR completes the task and archives its inbox items. */
-function resolveMergedTask(db: Db, hub: Hub, task: Task): void {
+/** A merged or closed PR completes the task, archives its items and frees its worktree. */
+async function resolveMergedTask(db: Db, hub: Hub, task: Task, backend: WorkerBackend | undefined): Promise<void> {
   const now = Date.now();
   for (const item of db.listItems()) {
     if (item.task_id !== task.id || item.status === "archived") continue;
@@ -778,6 +779,7 @@ function resolveMergedTask(db: Db, hub: Hub, task: Task): void {
     logTaskEvent(db, task.id, "pr", "PR merged — task done, inbox items archived", { pr: current.pr_url });
     hub.broadcast("task.updated", db.getTask(task.id));
   }
+  if (backend) await cleanupFinishedTask(db, backend, task.id, { hub, reason: "pr-closed" });
 }
 
 let lastSyncAll = 0;
@@ -824,6 +826,10 @@ export function startSyncAllPrs(
       tasks.sort((a, b) => Number(reportedTasks.has(b.id)) - Number(reportedTasks.has(a.id)));
       await mapLimit(tasks, 4, (task) => syncTaskPr(db, hub, task, opts).catch(() => null));
       try { archiveEpicLaunchItems(db, hub); } catch (err) { console.error("corral: epic launch cleanup failed:", String(err)); }
+      if (opts.backend) {
+        try { await cleanupTerminalWorktrees(db, opts.backend, { hub }); }
+        catch (err) { console.error("corral: worktree cleanup failed:", String(err)); }
+      }
     } finally {
       syncAllRunning = false;
     }

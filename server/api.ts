@@ -46,6 +46,7 @@ import { cacheControlFor, etagFor, isFresh } from "./static-cache.ts";
 import { SessionFacts } from "./session-facts.ts";
 import type { SessionFact } from "./session-facts.ts";
 import { handleMcp, instructTask, InstructError } from "./agent-control.ts";
+import { cleanupFinishedTask } from "./worktree-cleanup.ts";
 
 /** The skills prompt carries more evidence than a summary: allow a longer assistant call. */
 export const SKILLS_ANALYSIS_TIMEOUT_MS = 300_000;
@@ -516,14 +517,18 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, state.db.listTaskAttachments(params.id));
   });
 
-  on("PATCH", "/api/tasks/:id", (req, res, { body, params }) => {
+  on("PATCH", "/api/tasks/:id", async (req, res, { body, params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
     const patch = body as Partial<Task>;
     delete patch.id;
     delete patch.kind; // fixed at creation: dispatch and the PR loop depend on it
+    const status = patch.status;
     state.db.updateTask(task.id, patch);
     state.hub.broadcast("task.updated", state.db.getTask(task.id));
+    if (status === "done" || status === "archived") {
+      await cleanupFinishedTask(state.db, state.backend, task.id, { hub: state.hub, reason: `status-${status}` });
+    }
     json(res, 200, state.db.getTask(task.id));
   });
 
@@ -578,9 +583,9 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     try {
       await state.backend.archive(task.terminal_address);
       state.db.updateTask(task.id, { status: "archived" });
-      const updated = state.db.getTask(task.id);
-      state.hub.broadcast("task.updated", updated);
-      json(res, 200, updated);
+      state.hub.broadcast("task.updated", state.db.getTask(task.id));
+      await cleanupFinishedTask(state.db, state.backend, task.id, { hub: state.hub, reason: "archived" });
+      json(res, 200, state.db.getTask(task.id));
     } catch (err) {
       json(res, 500, { error: String(err) });
     }

@@ -50,6 +50,7 @@ through the API. The diagram groups responsibilities, not separate services.
 | Agent instructions | [`skills/`](../skills) holds injected conventions; [`docs/prompts.md`](prompts.md) registers file-based and inline prompts |
 | KPI monitoring | [`server/kpi.ts`](../server/kpi.ts) schedules opted-in, independent KPI analysis cycles, collects typed evidence from worker outcomes, keeps a bounded report memory, the measurement history and an optional goal baseline in SQLite and a per-KPI note in the working directory ([ADR 0005](adr/0005-kpi-scheduling-and-memory.md), [ADR 0008](adr/0008-kpi-memory-file.md)); a cycle's agent comes from a configured favorite and an arbitrary working directory ([ADR 0007](adr/0007-kpi-favorite-and-working-directory.md)) |
 | Agent control | [`server/agent-control.ts`](../server/agent-control.ts) exposes three MCP tools (`corral_next`, `corral_create_task`, `corral_instruct`) through `POST /api/mcp`; results are one short line for voice use, and dispatch remains human-owned |
+| Worktree cleanup | [`server/worktree-cleanup.ts`](../server/worktree-cleanup.ts) decides when a terminal task no longer needs its worktree and asks `WorkerBackend.cleanup`; an open PR item holds the branch, and a sweep after PR sync retries leftovers ([ADR 0012](adr/0012-terminal-tasks-release-worktrees.md)) |
 
 `WorkerBackend` is an explicit interface that tests can replace with a fake.
 Platform modules are integration boundaries, but they are not all interchangeable
@@ -76,6 +77,9 @@ when a concrete change needs a narrower responsibility.
 6. A fresh PR stays orange until automated reviews pass. Green means ready for
    human review. Human approval determines the separate ready-to-merge label.
    Merging completes the task and archives its items; Corral does not merge it.
+7. A done or archived task with no open PR item asks the backend to remove its
+   worktree and local branch. The sweep after PR sync retries leftovers and
+   failed removals.
 
 Polling runs in this process: the PR loop is scheduled every two minutes and
 pull listings every three minutes in `index.ts`. Provider rate limits, failures,
