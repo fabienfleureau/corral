@@ -27,6 +27,11 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   `review` or `spec` task runs in place, with no branch. Automatic branches are
   `<jira-key>/<short-slug>` for a ticket, `corral/<short-slug>-<task-id>`
   otherwise: whole words only, no mid-word truncation.
+- **Cleanup** — when a task is done or archived, Corral asks omnigent to remove
+  its worktree and local branch. An open PR keeps them until the PR is merged or
+  closed, because the review loop still needs the branch. A periodic pass retries
+  leftovers and failed removals; the branch name stays on the task as history
+  ([ADR 0012](adr/0012-terminal-tasks-release-worktrees.md)).
   **Favorites** save a harness/model/reasoning combination, scoped to a
   professional or personal repo context. A favorite on an OpenCode DeepSeek
   model shows a pale red **2× peak** tag during its doubled-rate peak hours

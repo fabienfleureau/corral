@@ -16,6 +16,7 @@ import type { Db } from "./db.ts";
 import type { JiraTransitionGateway } from "./jira-status.ts";
 import type { WorkerBackend, WorkerElicitation, WorkerEvent, WorkerRunOutcome } from "./worker.ts";
 import { clearItemHandling, syncTaskPr } from "./pr.ts";
+import { cleanupFinishedTask } from "./worktree-cleanup.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { planMarkdown } from "./multi-repo.ts";
 import type { Item, TaskSpec } from "./types.ts";
@@ -294,8 +295,11 @@ export class CaptureEngine {
         const updated = this.db.getTask(task.id);
         this.hub.broadcast("task.updated", updated);
         if (updated) {
-          // PR discovery is best effort.
-          void syncTaskPr(this.db, this.hub, updated, { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira }).catch(() => undefined);
+          // PR discovery is best effort. Release the worktree only after it
+          // has had a chance to attach an open PR item to the task.
+          void syncTaskPr(this.db, this.hub, updated, { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira })
+            .catch(() => undefined)
+            .finally(() => void cleanupFinishedTask(this.db, this.backend, task.id, { hub: this.hub, reason: "session-finished" }));
         }
       }
     }
@@ -422,6 +426,7 @@ export class CaptureEngine {
     this.db.recordMetric("item.created", item.id, { kind: itemKind, capture: "structured", task_id: taskId });
     this.hub.broadcast("item.created", item);
     if (itemKind === "pr" && taskId) this.syncPrSoon(taskId);
+    if (isDone && taskId) void cleanupFinishedTask(this.db, this.backend, taskId, { hub: this.hub, reason: "done-report" });
     return item;
   }
 
@@ -472,6 +477,8 @@ export class CaptureEngine {
   private syncPrSoon(taskId: string): void {
     const task = this.db.getTask(taskId);
     if (!task) return;
-    void syncTaskPr(this.db, this.hub, task, { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira }).catch(() => undefined);
+    void syncTaskPr(this.db, this.hub, task, { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira })
+      .catch(() => undefined)
+      .finally(() => void cleanupFinishedTask(this.db, this.backend, taskId, { hub: this.hub, reason: "done-report" }));
   }
 }
