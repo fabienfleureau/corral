@@ -7,6 +7,7 @@ import type { Item, SessionInfo, Task, TrackedTerminal } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
 import { ExternalLinkIcon, JiraPill, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
+import { ItemBody } from "../item-body";
 import { agentRunStatus, inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxItems, selectedInboxItem, type AgentRunStatus } from "../inbox-selection";
 import { INBOX_ACTION_COOLDOWN_MS, inboxActionsLocked } from "../inbox-action-lock";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
@@ -559,21 +560,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             </div>
 
             <div className="detail-body">
-              {selected.structured ? (
-                <>
-                  {/* A PR item's summary is its gate status, already in the badge above. */}
-                  {selected.summary && selected.kind !== "pr" ? <Markdown text={selected.summary} className="body-text" /> : null}
-                  {selected.body && selected.body !== selected.summary ? (
-                    <Markdown text={selected.body} className="body-text" />
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  {/* Auto-captured: an LLM summary (if any) above the raw body. */}
-                  {selected.summary ? <Markdown text={selected.summary} className="body-text" /> : null}
-                  <pre className="body-text body-raw">{selected.body}</pre>
-                </>
-              )}
+              <ItemBody item={selected} />
               {selected.context ? (
                 <details className="context-drawer">
                   <summary>{selected.kind === "digest" && !selected.task_id ? "Analysis evidence" : "Recent agent output"}</summary>

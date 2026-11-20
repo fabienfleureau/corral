@@ -91,7 +91,9 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   it (a renamed or configured project is kept). A run that stops
   without a report —
   a plain closing message, or a backend error — is surfaced as a question item
-  carrying that last message, instead of sitting "in progress" forever.
+  carrying that last message, instead of sitting "in progress" forever. Both
+  reported and captured item text render as Markdown; only the raw context
+  drawer stays verbatim.
   The **In progress** tab marks each task with its Omnigent run state:
   **agent running** (working or waiting on you), **agent stopped** (the session
   went idle, finished or failed), or **agent status unknown** when no session

@@ -29,6 +29,9 @@ export function seedScreenshotData(db: Db): void {
     // The task behind the "PR needs work" inbox item: the PR loop's escape
     // hatch (force refresh) lives on that row's detail pane.
     { id: "sample-pr-task", title: "fix(auth): refresh expired session tokens", status: "done", target: "claude", model: null, reasoning: null, branch: "fix/auth-refresh", pr_url: "https://gitlab.com/example/platform/-/merge_requests/29" },
+    // The task behind the auto-captured question: its closing message carries
+    // Markdown, which must render as prose and not as a raw code block.
+    { id: "sample-stopped-task", title: "Investigate proposed KPI improvement", status: "dispatched", target: "claude", model: null, reasoning: null },
   ];
   const now = Date.UTC(2025, 0, 15, 12);
   rows.forEach((row, index) => db.insertTask({
@@ -56,6 +59,7 @@ function seedAgentRuns(db: Db, now: number): void {
   const runs = [
     { task_id: "sample-running", address: "fixture-session-running", agent: "claude", last_status: "working" },
     { task_id: "sample-spec", address: "fixture-session-stopped", agent: "claude", last_status: "idle" },
+    { task_id: "sample-stopped-task", address: "fixture-session-stopped-2", agent: "claude", last_status: "idle" },
     { task_id: "sample-epic-EX-102", address: "fixture-session-blocked", agent: "codex", last_status: "blocked" },
   ];
   for (const run of runs) {
@@ -353,6 +357,24 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
       structured: 1,
       created_ms: now - 30_000,
       updated_ms: now - 30_000,
+      resolved_ms: null,
+      snooze_until_ms: null,
+    },
+    {
+      id: "sample-stopped-question",
+      kind: "question",
+      status: "open",
+      title: "Agent stopped without reporting",
+      summary: "",
+      body: "**Evidence checks out** (fixture snapshot 2025-01-15T12:00Z): 30d = 202 failed / 3112.\n\n- Qovery-side failures explain most of the gap\n- The engine root cause is still unknown\n\nReview the [evidence](https://example.com/evidence) before replying.",
+      context: "",
+      options: null,
+      ready: 1,
+      source_ref: "fixture-session-stopped-2",
+      task_id: "sample-stopped-task",
+      structured: 0,
+      created_ms: now - 10 * 60 * 60_000,
+      updated_ms: now - 10 * 60 * 60_000,
       resolved_ms: null,
       snooze_until_ms: null,
     },
