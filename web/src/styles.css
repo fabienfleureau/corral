@@ -2960,6 +2960,67 @@ select:focus {
 .kpi-goal-verdict h3 { margin: 0 0 4px; font-size: 13px; }
 .kpi-main details > .kpi-copy { margin-top: 8px; }
 
+/* Artifact builder: native modal, so no focus trap or inert toggling here.
+   The two scroll rules keep the KPI page behind from moving. */
+.artifact-dialog {
+  inline-size: min(620px, calc(100vw - 32px));
+  max-block-size: min(86vh, 880px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgba(16, 20, 26, 0.22);
+  overscroll-behavior: contain;
+}
+.artifact-dialog::backdrop {
+  background: rgba(16, 20, 26, 0.42);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+.artifact-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 18px 18px;
+  max-block-size: calc(min(86vh, 880px) - 132px);
+  overflow-y: auto;
+}
+.artifact-fieldset { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.artifact-fieldset > legend { padding: 0; margin-bottom: 6px; }
+.artifact-fieldset > .kpi-meta { margin-bottom: 8px; }
+.artifact-format-grid,
+.artifact-axis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.artifact-format {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.artifact-format:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.artifact-dialog input[type="radio"],
+.artifact-dialog input[type="checkbox"] { inline-size: auto; flex: none; margin: 2px 0 0; accent-color: var(--accent); }
+.artifact-format strong, .artifact-format small { display: block; }
+.artifact-format small { margin-top: 2px; line-height: 1.35; }
+.artifact-axis {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+}
+.artifact-axis.is-required { cursor: default; }
+.artifact-axis input { grid-row: span 2; margin: 2px 0 0; }
+.artifact-axis small { line-height: 1.35; }
+.artifact-dialog-foot { padding: 0 18px 18px; justify-content: flex-end; }
+.artifact-dialog .btn { transition: transform 100ms ease-out; }
+.artifact-dialog .btn:active:not(:disabled) { transform: scale(0.97); }
+
 @media (max-width: 1000px) {
   .kpi-layout { display: block; }
   .kpi-layout > .resize-handle { display: none; }
@@ -2973,4 +3034,5 @@ select:focus {
 }
 @media (max-width: 600px) {
   .kpi-inputs { grid-template-columns: minmax(0, 1fr); }
+  .artifact-format-grid, .artifact-axis-grid { grid-template-columns: minmax(0, 1fr); }
 }

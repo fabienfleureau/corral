@@ -1,3 +1,4 @@
+import type { KpiArtifactRequest } from "../../shared/kpi-artifact";
 import type { KpiId, KpiSettings, KpiView } from "../../shared/kpis";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
@@ -318,6 +319,8 @@ export const api = {
   listKpis: (): Promise<KpiView[]> => get("/api/kpis"),
   configureKpi: (id: KpiId, settings: KpiSettings): Promise<KpiView> => put(`/api/kpis/${id}`, settings),
   runKpi: (id: KpiId): Promise<KpiView> => post(`/api/kpis/${id}/run`),
+  buildKpiArtifact: (id: KpiId, input: KpiArtifactRequest): Promise<{ task: Task }> =>
+    post(`/api/kpis/${id}/artifact`, input),
 
   analysisRepo: (): Promise<{ repo: string }> => get<{ repo: string }>("/api/analysis-repo"),
   setAnalysisRepo: (repo: string): Promise<{ repo: string }> => put<{ repo: string }>("/api/analysis-repo", { repo }),

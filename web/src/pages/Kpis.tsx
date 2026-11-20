@@ -3,6 +3,7 @@ import type { CSSProperties, FormEvent } from "react";
 import { KPI_IDS } from "../../../shared/kpis";
 import type { KpiGoal, KpiId, KpiMeasurement, KpiReport, KpiSettings, KpiView } from "../../../shared/kpis";
 import { api } from "../api";
+import { KpiArtifactDialog } from "../KpiArtifactDialog";
 import { favoritesFor, repoContext } from "../favorite-context";
 import { Markdown } from "../markdown";
 import { selectionTaskHash } from "../selection-task";
@@ -30,6 +31,7 @@ export function KpisPage() {
   const [loadError, setLoadError] = useState("");
   const [optionsError, setOptionsError] = useState("");
   const [loadingOptions, setLoadingOptions] = useState(true);
+  const [artifactOpen, setArtifactOpen] = useState(false);
   const requestVersion = useRef(0);
   const hasDefinition = views.some(({ settings }) => settings.name && settings.definition);
 
@@ -77,7 +79,10 @@ export function KpisPage() {
 
   return <div className="page">
     <div className="page-scroll kpi-page">
-      <div className="page-toolbar"><h1 className="page-title">KPI</h1></div>
+      <div className="page-toolbar">
+        <h1 className="page-title">KPI</h1>
+        <button type="button" className="btn" aria-haspopup="dialog" onClick={() => setArtifactOpen(true)}>Build team artifact</button>
+      </div>
       <nav className="kpi-tabs" aria-label="KPI metrics">
         {KPI_IDS.map((id, index) => <a key={id} href={`#/kpis?metric=${id}`} aria-current={id === selected ? "page" : undefined}>
           {views.find((row) => row.id === id)?.settings.name || `KPI ${index + 1}`}
@@ -87,6 +92,8 @@ export function KpisPage() {
       {view ? <KpiDetail key={view.id} view={view} repos={repos} favorites={favorites} loadingOptions={loadingOptions} optionsError={optionsError} onUpdate={sync} />
         : !loadError && <p role="status" className="muted">Loading KPI status…</p>}
     </div>
+    {artifactOpen && <KpiArtifactDialog id={selected} metricName={view?.settings.name || `KPI ${KPI_IDS.indexOf(selected) + 1}`}
+      onClose={() => setArtifactOpen(false)} />}
   </div>;
 }
 

@@ -26,6 +26,7 @@ import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
 import { KPI_IDS } from "../shared/kpis.ts";
 import { KpiMonitor } from "./kpi.ts";
+import { ArtifactRequestError, artifactFavorite, kpiArtifactPrompt, parseArtifactRequest } from "./kpi-artifact.ts";
 import { isInterval } from "./analysis-schedule.ts";
 import { DATA_NOT_INSTRUCTIONS, dispatchTask } from "./dispatch.ts";
 import { dailySummaryPrompt } from "./daily-summary.ts";
@@ -226,6 +227,30 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   const analysisAgent = new AnalysisAgent(state.db, state.hub, state.cfg, state.backend);
+  on("POST", "/api/kpis/:id/artifact", async (req, res, { params, body }) => {
+    const id = KPI_IDS.find((value) => value === params.id);
+    if (!id) return json(res, 404, { error: "Unknown KPI" });
+    try {
+      const view = kpis.view(id);
+      if (!view.settings.name || !view.settings.definition || !view.settings.repoPath) {
+        throw new ArtifactRequestError("Set up this KPI before building an artifact", 409);
+      }
+      if (!view.report) throw new ArtifactRequestError("Run an analysis before building an artifact", 409);
+      const request = parseArtifactRequest(body);
+      const favorite = artifactFavorite(view, state.cfg.favorites ?? [], state.db.listRepos());
+      if (!favorite) throw new ArtifactRequestError("Configure a Claude favorite in Settings to build artifacts", 409);
+      const prompt = kpiArtifactPrompt(KPI_IDS.map((slot) => kpis.view(slot)), id, request, Date.now());
+      const task = await analysisAgent.start(`KPI artifact — ${view.settings.name}`, prompt, {
+        kind: "ops", repo: view.settings.repoPath, target: "claude",
+        agent: favorite.agent || null, model: favorite.model || null, reasoning: favorite.reasoning || null,
+        source: "kpi-artifact",
+      });
+      json(res, 202, { task });
+    } catch (err) {
+      if (err instanceof ArtifactRequestError) return json(res, err.status, { error: err.message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+  });
   on("GET", "/api/analysis-repo", (_req, res) => json(res, 200, { repo: analysisAgent.repo() }));
   on("PUT", "/api/analysis-repo", (_req, res, { body }) => {
     const repo = (body as { repo?: unknown } | null)?.repo;
