@@ -65,6 +65,28 @@ test("falls back to local OpenCode models when the host catalog is unsupported",
   }
 });
 
+test("falls back to local Antigravity models when the host has no catalog", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-agy-models-"));
+  const oldPath = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "agy"), "#!/bin/sh\nprintf 'gemini-4-neon-high\\tGemini 4 Neon (High)\\ngemini-3.8-flash-low\\tGemini 3.8 Flash (Low)\\nFetching available models...\\n'\n", { mode: 0o755 });
+    process.env.PATH = dir;
+    const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "host1", agents: {} });
+    (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async (_m, path) => {
+      if (path.startsWith("/v1/agents")) return { data: [{ id: "1", name: "antigravity-native-ui", harness: "antigravity-native" }] };
+      if (path === "/v1/hosts") return { hosts: [{ host_id: "host1" }] };
+      throw new Error("unsupported");
+    };
+    assert.deepEqual((await backend.harnesses())[0].models, [
+      { id: "gemini-4-neon-high", label: "Gemini 4 Neon (High)", reasoning: [] },
+      { id: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)", reasoning: [] },
+    ]);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("finds a CLI installed outside the server PATH", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-cli-"));
   const oldPath = process.env.PATH;
