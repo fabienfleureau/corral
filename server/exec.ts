@@ -8,14 +8,15 @@ import { join } from "node:path";
 export function runAsync(
   cmd: string,
   args: string[],
-  opts: { cwd?: string; timeout?: number } = {},
+  opts: { cwd?: string; timeout?: number; allowFailure?: boolean } = {},
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       cmd,
       args,
       { encoding: "utf8", cwd: opts.cwd, timeout: opts.timeout ?? 20_000, maxBuffer: 32 * 1024 * 1024 },
-      (err, stdout) => (err ? reject(err) : resolve(stdout.trim())),
+      // Some CLIs (codexbar) print a JSON error report and exit non-zero.
+      (err, stdout) => (err && !opts.allowFailure ? reject(err) : resolve(stdout.trim())),
     );
   });
 }

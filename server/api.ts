@@ -40,6 +40,7 @@ import type { Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { PlanError, approvePlan, isDirectory, validateSubtasks } from "./multi-repo.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type UsageRange } from "./usage.ts";
+import { GoogleQuotaCache } from "./google-quota.ts";
 import { SHIPPED_CATALOG, mergeCatalog, parseCatalog } from "./model-catalog.ts";
 import { PrAdditionsCache } from "./usage-pr.ts";
 import { withDeadline } from "./deadline.ts";
@@ -74,6 +75,8 @@ export interface AppState {
   usage?: UsageScanner;
   /** Cached OpenCode Go quota snapshot (external HTTPS call, polled by the UI). */
   goQuota?: GoQuotaCache;
+  /** Cached Google quota snapshot (CodexBar CLI, polled by the UI). */
+  googleQuota?: GoogleQuotaCache;
   /** Model/reasoning per task session: finished sessions are read once. */
   sessionFacts?: SessionFacts;
   prAdditions?: PrAdditionsCache;
@@ -1257,7 +1260,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         tasks,
         prices: { ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
         range: raw as UsageRange,
-        quota: [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), await (state.goQuota ??= new GoQuotaCache()).get()],
+        quota: [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), await (state.goQuota ??= new GoQuotaCache()).get(), await (state.googleQuota ??= new GoogleQuotaCache()).get()],
         scanning: !scanner.ready,
       }), pr_additions: prAdditions },
     );

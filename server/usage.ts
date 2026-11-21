@@ -365,8 +365,10 @@ export interface QuotaWindow {
   used_percent: number;
   resets_ms: number | null;
 }
+export type QuotaAgent = UsageAgent | "google";
+
 export interface AgentQuota {
-  agent: UsageAgent | "opencode-go";
+  agent: QuotaAgent;
   /** Where the numbers come from + when they were captured. */
   source: string;
   as_of_ms: number | null;
@@ -383,41 +385,61 @@ export function emptyGoQuota(note: string): AgentQuota {
   return { agent: "opencode-go", source: "OpenCode Go", as_of_ms: null, stale: true, plan: null, windows: [], note };
 }
 
-/** How long a good snapshot stays fresh, how long a failure is remembered
- *  (enough to stop a poll loop from hammering, short enough to recover), and
- *  how long a request may wait on the upstream before the page gets a note. */
-const GO_QUOTA_TTL_MS = 60_000;
-const GO_QUOTA_ERROR_TTL_MS = 10_000;
-const GO_QUOTA_TIMEOUT_MS = 2500;
+/** How long a good snapshot stays fresh and how long a failure is remembered
+ *  (enough to stop a poll loop from hammering, short enough to recover). */
+const QUOTA_TTL_MS = 60_000;
+const QUOTA_ERROR_TTL_MS = 10_000;
 
-/** OpenCode Go quota is behind an external HTTPS call. The Usage page polls
- *  while it scans, so the snapshot is cached and one call is shared: polls
- *  never fan out upstream, and a slow upstream never delays the report. */
-export class GoQuotaCache {
+/** External quota sources are polled by the Usage page while it scans: one
+ *  call is shared and the result is cached, so polls never fan out upstream
+ *  and a slow upstream never delays the report. */
+export interface QuotaCacheOptions {
+  fetchQuota: () => Promise<AgentQuota>;
+  empty: (note: string) => AgentQuota;
+  errorNote: string;
+  slowNote: string;
+  clock?: () => number;
+  timeoutMs?: number;
+}
+
+export class QuotaCache {
   private cache: { at: number; ttl: number; value: AgentQuota } | null = null;
   private inflight: Promise<AgentQuota> | null = null;
-  private fetchQuota: () => Promise<AgentQuota>;
+  private options: QuotaCacheOptions;
   private clock: () => number;
 
-  constructor(options: { fetchQuota?: () => Promise<AgentQuota>; clock?: () => number } = {}) {
-    this.fetchQuota = options.fetchQuota ?? (() => opencodeGoQuota());
+  constructor(options: QuotaCacheOptions) {
+    this.options = options;
     this.clock = options.clock ?? Date.now;
   }
 
   async get(): Promise<AgentQuota> {
     const now = this.clock();
     if (this.cache && now - this.cache.at < this.cache.ttl) return this.cache.value;
-    this.inflight ??= this.fetchQuota()
-      .catch(() => emptyGoQuota("Could not reach OpenCode Go quota service."))
+    this.inflight ??= this.options.fetchQuota()
+      .catch(() => this.options.empty(this.options.errorNote))
       .then((value) => {
         const ok = value.as_of_ms !== null;
-        this.cache = { at: this.clock(), ttl: ok ? GO_QUOTA_TTL_MS : GO_QUOTA_ERROR_TTL_MS, value };
+        this.cache = { at: this.clock(), ttl: ok ? QUOTA_TTL_MS : QUOTA_ERROR_TTL_MS, value };
         return value;
       })
       .finally(() => {
         this.inflight = null;
       });
-    return withDeadline(this.inflight, GO_QUOTA_TIMEOUT_MS, emptyGoQuota("OpenCode Go quota is slow — retrying shortly."));
+    return withDeadline(this.inflight, this.options.timeoutMs ?? 2500, this.options.empty(this.options.slowNote));
+  }
+}
+
+/** OpenCode Go quota is behind an external HTTPS call. */
+export class GoQuotaCache extends QuotaCache {
+  constructor(options: { fetchQuota?: () => Promise<AgentQuota>; clock?: () => number } = {}) {
+    super({
+      fetchQuota: options.fetchQuota ?? (() => opencodeGoQuota()),
+      empty: emptyGoQuota,
+      errorNote: "Could not reach OpenCode Go quota service.",
+      slowNote: "OpenCode Go quota is slow — retrying shortly.",
+      clock: options.clock,
+    });
   }
 }
 
@@ -479,7 +501,7 @@ export function claudeQuota(dir: string, now = Date.now()): AgentQuota {
   return { agent: "claude", source: "ccstatusline cache", as_of_ms: best.mtime, stale, plan: null, windows, note: extra };
 }
 
-function windowLabel(minutes: number): string {
+export function windowLabel(minutes: number): string {
   if (minutes >= 10080 && minutes % 10080 === 0) return minutes === 10080 ? "Weekly" : `${minutes / 10080}-week`;
   if (minutes >= 1440 && minutes % 1440 === 0) return `${minutes / 1440}-day`;
   if (minutes >= 60 && minutes % 60 === 0) return `${minutes / 60}-hour`;

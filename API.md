@@ -10,7 +10,7 @@ with the entity JSON as `data`. Use `item.created` for desktop notifications.
 
 Page-load endpoints never wait on a third party indefinitely: per-session lookups give up
 after 3s (`/api/tasks`), the session list after 4s, the harness registry after 6s, and the
-OpenCode Go quota after 2.5s. The response then carries last-known data or a note, so a
+OpenCode Go quota after 2.5s and Google quota (CodexBar) after 10s. The response then carries last-known data or a note, so a
 stalled dependency degrades the page instead of hanging it.
 
 Static hosting: `/assets/*` (Vite content-hashed) is `Cache-Control: public, max-age=31536000,
@@ -149,7 +149,7 @@ a dispatch or a PR sync.
   estimate; models without a price count tokens only (`unpriced_calls`). Shared prices are in
   `DEFAULT_PRICES` in `server/usage.ts`, with optional overrides via `usage.prices` in config.json (`{"gpt-6*": {input, output, cacheRead?, cacheWrite5m?, cacheWrite1h?}}`, USD/MTok). Models without a reliable published price remain unpriced.
   PR additions include all-time current diff totals and `by_project`, `by_model` (configured task model; empty means unpinned), and `by_task` groups. Each group deduplicates linked PR URLs; shared PRs can appear in multiple groups. Availability counts identify incomplete data.
-  Claude quota comes from ccstatusline's cache, Codex quota from its latest `rate_limits` event, and OpenCode Go quota from its account usage endpoint using OpenCode's locally registered credential. The Go snapshot is cached for 60s (shared across concurrent polls) and a slow unreachable upstream yields an `AgentQuota` note instead of delaying the report.
+  Claude quota comes from ccstatusline's cache, Codex quota from its latest `rate_limits` event, OpenCode Go quota from its account usage endpoint using OpenCode's locally registered credential, and Google quota from `codexbar usage --provider gemini|antigravity --format json` (Gemini and Antigravity windows, labelled by CodexBar). The Go and Google snapshots are cached for 60s (shared across concurrent polls) and a slow unreachable upstream yields an `AgentQuota` note instead of delaying the report. Without CodexBar, or with both Google providers unconfigured, the card shows the CLI's note with `windows: []`.
   `scanning: true` while the first log scan runs (poll). Spend is attributed to a task when the session
   cwd is inside its `worktree_path`; `efficiency` = done tasks per $ and $ per done task.
 - `GET /api/rate-limits[?refresh=1]` → `{limits: PlatformRateLimit[], fetched_ms}` — remaining GitHub and GitLab API quota for the PR loop, shown on the Usage page. `PlatformRateLimit` is `{host: "github"|"gitlab", windows: [{name, limit, remaining, reset_ms}], note, fetched_ms}`: GitHub contributes `core`, `search` and `graphql` (from `gh api rate_limit`, which spends no quota), GitLab the authenticated throttle (from the `RateLimit-*` headers of one `glab api user` call). A platform that fails to answer returns `windows: []` and a `note` instead of an error. The answer is cached for 60s, shared across concurrent polls; `refresh=1` (the page's Refresh button) bypasses the cache.
