@@ -250,7 +250,7 @@ export type UsageTotals = {
 };
 
 export type AgentQuota = {
-  agent: UsageAgent | "opencode-go";
+  agent: UsageAgent | "google";
   source: string;
   as_of_ms: number | null;
   stale: boolean;

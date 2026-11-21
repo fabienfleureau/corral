@@ -50,6 +50,33 @@ fi
 exit 1
 SH
 chmod +x "$scratch/bin/glab"
+# Synthetic Google quota for the Usage card. The CLI owns real Google
+# credentials; captures only ever see this fixture answer.
+cat > "$scratch/bin/codexbar" <<'SH'
+#!/bin/sh
+case " $* " in
+  *' --provider gemini '*)
+    node -e '
+      const iso = (ms) => new Date(Date.now() + ms).toISOString();
+      const window = (percent, ms) => ({ usedPercent: percent, windowMinutes: 1440, resetsAt: iso(ms) });
+      process.stdout.write(JSON.stringify([{
+        provider: "gemini", source: "oauth-api",
+        usage: {
+          updatedAt: iso(0),
+          identity: { loginMethod: "Google AI Pro" },
+          primary: window(64, 3 * 3600000),
+          secondary: window(38, 5 * 3600000),
+          tertiary: window(12, 6 * 3600000),
+        },
+        rateWindowLabels: { primary: "Pro", secondary: "Flash", tertiary: "Flash Lite" },
+      }]) + "\n");
+    '
+    exit 0;;
+esac
+printf '[{"provider":"antigravity","error":{"message":"Antigravity language server not detected."}}]\n'
+exit 1
+SH
+chmod +x "$scratch/bin/codexbar"
 omnigent_url=http://127.0.0.1:1
 printf '{"omnigent":{"baseUrl":"%s"},"workspaceRoots":[]}\n' "$omnigent_url" > "$scratch/home/.config/corral/config.json"
 node "$fixture_root/scripts/screenshot-fixture.ts" "$scratch/data/corral.db" "$scratch/home/.config/corral/config.json"

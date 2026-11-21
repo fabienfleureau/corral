@@ -1,4 +1,5 @@
-// Usage — Claude Code + Codex quota, tokens and estimated cost, from local logs.
+// Usage — Claude Code + Codex quota, tokens and estimated cost, from local logs;
+// Google quota comes from CodexBar.
 // Range and metric live in the URL (#/usage?range=30d&metric=tokens).
 
 import { useEffect, useState } from "react";
@@ -16,7 +17,7 @@ const RANGES: { key: UsageRange; label: string }[] = [
 type Metric = "cost" | "tokens";
 type ChartGroup = "agent" | "model";
 type ChartSeries = { key: string; label: string; className: string; values: number[] };
-const AGENT_LABEL: Record<AgentQuota["agent"], string> = { claude: "Claude", codex: "Codex", "opencode-go": "OpenCode Go" };
+const AGENT_LABEL: Record<AgentQuota["agent"], string> = { claude: "Claude", codex: "Codex", "opencode-go": "OpenCode Go", google: "Google" };
 const MAX_MODEL_SERIES = 6;
 
 function paramsFromHash(): { range: UsageRange; metric: Metric; group: ChartGroup } {
