@@ -5,8 +5,8 @@
 //    quick-reply buttons) — the structured path
 //  - session blocked without elicitation data -> question item with a raw
 //    output tail — the fallback path
-//  - session leaves blocked -> its open question item auto-resolves (only on
-//    that transition: an agent-reported question survives the turn ending)
+//  - session leaves blocked -> its captured question auto-resolves, but an
+//    agent-reported question posted during the block stays open
 //  - session finished -> linked task marked done, open questions resolve
 //  - a `kind=done` report marks the task done and stores its handoff document
 
@@ -104,7 +104,7 @@ export class CaptureEngine {
     if (blocked) {
       await this.ensureQuestionItem(e, taskId);
     } else {
-      if (wasBlocked) this.resolveOpenQuestion(e.address, "auto");
+      if (wasBlocked) this.resolveCapturedBlockedQuestion(e.address);
       // A run ended (a status change into idle/error), or first sight of an idle
       // session whose task nobody has heard about: tell the human it stopped.
       const stopped = status === "idle" || status === "error";
@@ -268,6 +268,16 @@ export class CaptureEngine {
     }
     this.hub.broadcast("item.created", item);
     return item;
+  }
+
+  /** Leaving blocked closes the capture that caused it, not a question the
+   *  agent reported after the block began. A report reuses the same item and
+   *  clears its elicitation, so that is the distinction that survives.
+   *  A fallback capture has no elicitation and is still structured=0. */
+  private resolveCapturedBlockedQuestion(address: string): void {
+    const item = this.db.openQuestionItemForTerminal(address);
+    if (item && (!item.elicitation && item.structured === 1)) return;
+    this.resolveOpenQuestion(address, "auto");
   }
 
   resolveOpenQuestion(address: string, how: "auto" | "manual"): void {

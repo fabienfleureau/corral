@@ -434,9 +434,9 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
     assert.equal(structured.id, item.id, "supersedes the pending item");
     assert.equal(structured.options, JSON.stringify(["SQLite", "Postgres", "none"]));
 
-    // leaving blocked auto-resolves
+    // leaving blocked must not close the agent's own question
     await engine.handleEvent({ type: "status", address: "s9", status: "idle" });
-    assert.equal(db.openQuestionItemForTerminal("s9"), null, "auto-resolved");
+    assert.equal(db.openQuestionItemForTerminal("s9")?.title, "Use Postgres or SQLite?", "the report stays open");
 
     // completion report: pr item + task done + handoff stored
     const done = await engine.createStructuredQuestion({
@@ -451,7 +451,8 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
     assert.equal(task.status, "done", "task marked done by the completion report");
     assert.match(task.handoff ?? "", /keep tests green/);
 
-    // fallback path (no elicitation): raw tail
+    // fallback path (no elicitation): raw tail, after the human closes the report
+    engine.resolveOpenQuestion("s9", "manual");
     await engine.handleEvent({ type: "status", address: "s9", status: "blocked", elicitations: [] });
     const fallback = db.openQuestionItemForTerminal("s9");
     assert.ok(fallback);
