@@ -11,7 +11,7 @@ export function selectedInboxItem(previous: Item | null, items: Item[], status: 
     status === "snoozed"
       ? item.status === "open"
       : status === "in-progress"
-        ? item.status === "resolved" || isHandlingItem(item)
+        ? item.status !== "archived" && isHandlingItem(item)
         : item.status === status && !isHandlingItem(item);
   return items.find((item) => item.id === previous.id && keep(item)) ?? null;
 }
@@ -26,17 +26,29 @@ export function openInboxItems(items: Item[]): Item[] {
   return items.filter((item) => item.status === "open" && !isHandlingItem(item));
 }
 
-export function inProgressInboxItems(items: Item[], tasks: Task[]): Item[] {
-  const active = new Set(tasks.filter((task) => task.status === "dispatched").map((task) => task.id));
-  return items.filter(
-    (item) =>
-      item.status !== "archived" &&
-      (isHandlingItem(item) || (item.status === "resolved" && item.task_id !== null && active.has(item.task_id))),
-  );
+/** Items the agent is actively handling (e.g. PR review comments or rebase).
+ *  Dispatched tasks themselves are listed once by `inProgressInboxTasks`, so
+ *  resolved items for those tasks are not repeated here. */
+export function inProgressInboxItems(items: Item[], _tasks: Task[] = []): Item[] {
+  return items.filter((item) => item.status !== "archived" && isHandlingItem(item));
 }
 
-export function inProgressInboxTasks(tasks: Task[]): Task[] {
-  return tasks.filter((task) => task.status === "dispatched");
+/** Dispatched tasks not already represented by an actively handled item, so a
+ *  running session appears once under In progress instead of twice. */
+export function inProgressInboxTasks(tasks: Task[], items: Item[] = []): Task[] {
+  const handledTasks = new Set<string>();
+  const handledSessions = new Set<string>();
+  for (const item of items) {
+    if (item.status === "archived" || !isHandlingItem(item)) continue;
+    if (item.task_id) handledTasks.add(item.task_id);
+    if (item.source_ref) handledSessions.add(item.source_ref);
+  }
+  return tasks.filter(
+    (task) =>
+      task.status === "dispatched" &&
+      !handledTasks.has(task.id) &&
+      (!task.terminal_address || !handledSessions.has(task.terminal_address)),
+  );
 }
 
 export type AgentRunStatus = "running" | "stopped" | "unknown";

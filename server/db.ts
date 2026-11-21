@@ -551,6 +551,27 @@ export class Db {
     return (row as unknown as Item) ?? null;
   }
 
+  openQuestionItemForTask(taskId: string): Item | null {
+    const row = this.stmt(`SELECT * FROM items WHERE task_id = ? AND kind = 'question' AND status = 'open' ORDER BY created_ms DESC LIMIT 1`).get(taskId);
+    return (row as unknown as Item) ?? null;
+  }
+
+  openQuestionItemsFor(opts: { address?: string | null; taskId?: string | null }): Item[] {
+    const { address, taskId } = opts;
+    if (address && taskId) {
+      return this.stmt(
+        `SELECT * FROM items WHERE kind = 'question' AND status = 'open' AND (task_id = ? OR (source_ref = ? AND (task_id IS NULL OR task_id = ?))) ORDER BY created_ms DESC`,
+      ).all(taskId, address, taskId) as unknown as Item[];
+    }
+    if (taskId) {
+      return this.stmt(`SELECT * FROM items WHERE task_id = ? AND kind = 'question' AND status = 'open' ORDER BY created_ms DESC`).all(taskId) as unknown as Item[];
+    }
+    if (address) {
+      return this.stmt(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' AND status = 'open' ORDER BY created_ms DESC`).all(address) as unknown as Item[];
+    }
+    return [];
+  }
+
   questionItemForTerminal(address: string): Item | null {
     const row = this.stmt(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' AND status IN ('open', 'resolved') ORDER BY created_ms DESC LIMIT 1`).get(address);
     return (row as unknown as Item) ?? null;

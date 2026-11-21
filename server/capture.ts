@@ -223,11 +223,11 @@ export class CaptureEngine {
       title = task ? `${task.title} — needs you` : `Agent ${e.address} needs you`;
     }
 
-    const previous = this.db.questionItemForTerminal(e.address);
+    const previous = this.db.questionItemForTerminal(e.address) ?? (taskId ? this.db.openQuestionItemForTask(taskId) : null);
     if (previous) {
       this.db.updateItem(previous.id, {
         status: "open", resolved_ms: null, title, summary, body: `${previous.body}\n\n---\n\n${body}`,
-        options, structured, elicitation, task_id: taskId ?? previous.task_id,
+        options, structured, elicitation, source_ref: e.address, task_id: taskId ?? previous.task_id,
       });
       const updated = this.db.getItem(previous.id)!;
       this.hub.broadcast("item.updated", updated);
@@ -281,18 +281,26 @@ export class CaptureEngine {
   }
 
   resolveOpenQuestion(address: string, how: "auto" | "manual"): void {
-    const item = this.db.openQuestionItemForTerminal(address);
-    if (!item) return;
-    this.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now() });
-    this.db.recordMetric("item.resolved", item.id, { how });
-    this.hub.broadcast("item.updated", this.db.getItem(item.id));
+    this.resolveOpenQuestions({ address }, how);
+  }
+
+  private resolveOpenQuestions(opts: { address?: string | null; taskId?: string | null }, how: "auto" | "manual"): void {
+    const now = Date.now();
+    for (const item of this.db.openQuestionItemsFor(opts)) {
+      this.db.updateItem(item.id, { status: "resolved", resolved_ms: now });
+      this.db.recordMetric("item.resolved", item.id, { how });
+      this.hub.broadcast("item.updated", this.db.getItem(item.id));
+    }
   }
 
   private async onFinished(e: WorkerEvent): Promise<void> {
-    this.resolveOpenQuestion(e.address, "auto");
     const taskId = e.task_id ?? this.db.getTerminal(e.address)?.task_id ?? null;
+    const task = taskId ? this.db.getTask(taskId) : null;
+    this.resolveOpenQuestions({
+      address: e.address,
+      taskId: task && task.terminal_address === e.address ? task.id : null,
+    }, "auto");
     if (taskId) {
-      const task = this.db.getTask(taskId);
       // The session is gone: whatever it was handling is the human's again.
       clearItemHandling(this.db, this.hub, taskId);
       if (task && (task.status === "dispatched" || task.status === "open")) {
@@ -355,8 +363,10 @@ export class CaptureEngine {
           : opts.body.trim();
         // A merged PR already archived the task: keep it archived.
         this.db.updateTask(task.id, task.status === "archived" ? { handoff } : { status: "done", handoff });
-        const pending = address && address === task.terminal_address ? this.db.openQuestionItemForTerminal(address) : null;
-        if (pending?.task_id === task.id) this.resolveOpenQuestion(address!, "auto");
+        this.resolveOpenQuestions({
+          taskId: task.id,
+          address: address && address === task.terminal_address ? address : null,
+        }, "auto");
         logTaskEvent(this.db, task.id, "session", `Agent reported done: ${oneLine(opts.title, 100)}`, {
           report: opts.kind ?? "done",
           item_kind: itemKind,
@@ -366,9 +376,10 @@ export class CaptureEngine {
     }
 
     // A structured question supersedes any pending capture for this terminal
-    // (fallback tail or elicitation) — the agent's own framing is authoritative.
-    if (address && itemKind === "question") {
-      const existing = this.db.questionItemForTerminal(address);
+    // or open question for this task — the agent's own framing is authoritative.
+    if (itemKind === "question") {
+      const existing = (address ? this.db.questionItemForTerminal(address) : null)
+        ?? (taskId ? this.db.openQuestionItemForTask(taskId) : null);
       if (existing) {
         this.db.updateItem(existing.id, {
           title: opts.title,
@@ -379,6 +390,7 @@ export class CaptureEngine {
           elicitation: null,
           context: context || existing.body,
           options: optionsJson,
+          source_ref: address ?? existing.source_ref,
           task_id: taskId ?? existing.task_id,
           structured: 1,
         });
@@ -386,6 +398,28 @@ export class CaptureEngine {
         const updated = this.db.getItem(existing.id);
         this.hub.broadcast("item.updated", updated);
         return updated!;
+      }
+    }
+    // Completion: one open digest per task while unacknowledged.
+    if (itemKind === "digest" && taskId) {
+      const existing = this.db
+        .listItems({ kind: "digest", status: "open" })
+        .find((i) => i.task_id === taskId);
+      if (existing) {
+        this.db.updateItem(existing.id, {
+          title: opts.title,
+          summary: opts.body,
+          body: opts.body,
+          context: context || existing.context,
+          options: optionsJson,
+          source_ref: address ?? existing.source_ref,
+          structured: 1,
+        });
+        this.db.recordMetric("item.structured_report", existing.id, { task_id: taskId, kind: "digest" });
+        const updated = this.db.getItem(existing.id)!;
+        this.hub.broadcast("item.updated", updated);
+        if (isDone) void cleanupFinishedTask(this.db, this.backend, taskId, { hub: this.hub, reason: "done-report" });
+        return updated;
       }
     }
     // Completion: one PR item per task. Reuse the one the periodic sync may
