@@ -15,7 +15,7 @@ export function runAsync(
       cmd,
       args,
       { encoding: "utf8", cwd: opts.cwd, timeout: opts.timeout ?? 20_000, maxBuffer: 32 * 1024 * 1024 },
-      // Some CLIs (codexbar) print a JSON error report and exit non-zero.
+      // Some CLIs print structured output even when exiting non-zero.
       (err, stdout) => (err && !opts.allowFailure ? reject(err) : resolve(stdout.trim())),
     );
   });
