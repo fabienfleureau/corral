@@ -26,7 +26,9 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   Each task gets a fresh git worktree created by omnigent (opt out per task); a
   `review` or `spec` task runs in place, with no branch. Automatic branches are
   `<jira-key>/<short-slug>` for a ticket, `corral/<short-slug>-<task-id>`
-  otherwise: whole words only, no mid-word truncation.
+  otherwise: whole words only, no mid-word truncation. Antigravity tasks run
+  without tool-approval prompts because they have no human at the terminal
+  ([ADR 0014](adr/0014-antigravity-permission-bypass.md)).
 - **Cleanup** — when a task is done or archived, Corral asks omnigent to remove
   its worktree and local branch. An open PR keeps them until the PR is merged or
   closed, because the review loop still needs the branch. A periodic pass retries
