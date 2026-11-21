@@ -85,16 +85,10 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
 
   useEffect(() => {
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const load = () => {
-      api.getUsage("7d").then((report) => {
-        if (cancelled) return;
-        setQuotas(report.quota);
-        if (report.scanning) timer = setTimeout(load, 2000);
-      }).catch(() => undefined);
-    };
-    load();
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    api.getUsageQuota().then((res) => {
+      if (!cancelled) setQuotas(res.quota);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
   }, [eventVersion]);
 
   useEffect(() => {
