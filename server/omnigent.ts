@@ -33,8 +33,8 @@ type OmnigentProject = { id: string; name: string; config: Record<string, unknow
 /** Project membership Corral filed a session into, read before archiving. */
 type FiledProject = { project: OmnigentProject | null; label: string | null };
 
-/** Where a user install of the OpenCode CLI usually lands. */
-const OPENCODE_DIRS = [
+/** Where a user install of a coding CLI usually lands. */
+const CLI_DIRS = [
   join(homedir(), ".opencode/bin"),
   join(homedir(), ".local/bin"),
   join(homedir(), ".bun/bin"),
@@ -57,10 +57,34 @@ function parseOpenCodeModels(stdout: string): WorkerModel[] {
 }
 
 async function localOpenCodeModels(): Promise<WorkerModel[]> {
-  const bin = resolveExecutable("opencode", OPENCODE_DIRS);
+  const bin = resolveExecutable("opencode", CLI_DIRS);
   if (!bin) return [];
   try {
     return parseOpenCodeModels(await runAsync(bin, ["models"], { timeout: 5_000 }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * `agy models` prints `id<TAB>Display name` rows. Antigravity puts the effort
+ * in the id (`gemini-4-neon-high`), so the full id is what a dispatch needs.
+ */
+function parseAntigravityModels(stdout: string): WorkerModel[] {
+  const models = new Map<string, WorkerModel>();
+  for (const line of stdout.split(/\r?\n/)) {
+    const [id, label] = line.trim().split(/\t+/);
+    if (!id || !/^\S+$/.test(id)) continue;
+    models.set(id, { id, label: label?.trim() || id, reasoning: [] });
+  }
+  return [...models.values()];
+}
+
+async function localAntigravityModels(): Promise<WorkerModel[]> {
+  const bin = resolveExecutable("agy", CLI_DIRS);
+  if (!bin) return [];
+  try {
+    return parseAntigravityModels(await runAsync(bin, ["models"], { timeout: 5_000 }));
   } catch {
     return [];
   }
@@ -389,6 +413,7 @@ export class OmnigentBackend implements WorkerBackend {
         } catch { /* Fall back below when the catalog is unavailable. */ }
       }
       if (harness === "opencode" && !models.length) models = await localOpenCodeModels();
+      if (harness === "antigravity" && !models.length) models = await localAntigravityModels();
       return { harness, agents: groupAgents, ...(models.length ? { models } : {}) };
     }));
   }
