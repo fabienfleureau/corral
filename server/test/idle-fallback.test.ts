@@ -63,6 +63,51 @@ function setup(outcome: WorkerRunOutcome | null, task: Partial<Task> = {}, lastS
 
 const said: WorkerRunOutcome = { kind: "message", text: "Committed locally, but the push was refused." };
 
+test("a completion report resolves open questions from an earlier session for the same task", async () => {
+  const { db, capture } = setup(said, { terminal_address: "s2" });
+  try {
+    const oldQuestion = await capture.createStructuredQuestion({
+      kind: "question", taskId: "task-1", terminal: "s1", title: "Old session question", body: "Still open?",
+    });
+    const done = await capture.createStructuredQuestion({
+      kind: "done", taskId: "task-1", terminal: "s2", title: "PR ready", body: "Finished.",
+    });
+    assert.equal(done.kind, "pr");
+    assert.equal(db.getItem(oldQuestion.id)?.status, "resolved");
+  } finally { db.close(); }
+});
+
+test("a structured question reuses an open question for the same task across sessions", async () => {
+  const { db, capture } = setup(said, { terminal_address: "s2" });
+  try {
+    const first = await capture.createStructuredQuestion({
+      kind: "question", taskId: "task-1", terminal: "s1", title: "First question", body: "Body 1",
+    });
+    const second = await capture.createStructuredQuestion({
+      kind: "question", taskId: "task-1", terminal: "s2", title: "Updated question", body: "Body 2",
+    });
+    assert.equal(second.id, first.id);
+    assert.equal(second.source_ref, "s2");
+    assert.equal(db.listItems({ kind: "question", status: "open" }).length, 1);
+  } finally { db.close(); }
+});
+
+test("repeated done reports on a no-PR task update the open digest instead of duplicating it", async () => {
+  const { db, capture } = setup(said, { kind: "ops" });
+  try {
+    const first = await capture.createStructuredQuestion({
+      kind: "done", taskId: "task-1", terminal: "s1", title: "Ops done", body: "First pass.",
+    });
+    const second = await capture.createStructuredQuestion({
+      kind: "done", taskId: "task-1", terminal: "s1", title: "Ops done (updated)", body: "Second pass.",
+    });
+    assert.equal(first.kind, "digest");
+    assert.equal(second.id, first.id);
+    assert.equal(second.body, "Second pass.");
+    assert.equal(db.listItems({ kind: "digest", status: "open" }).length, 1);
+  } finally { db.close(); }
+});
+
 test("a completion report resolves an earlier stopped-run question", async () => {
   const { db, status, capture } = setup(said);
   try {

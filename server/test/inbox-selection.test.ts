@@ -29,21 +29,35 @@ test("snoozed view contains only open items postponed beyond the current time", 
   assert.deepEqual(visibleInboxItems(items, 2000, "snoozed"), []);
 });
 
-test("in-progress inbox contains resolved items only for dispatched tasks", async () => {
-  const { inProgressInboxItems } = await import("../../web/src/inbox-selection.ts");
-  const active = { id: "active", status: "resolved", task_id: "working" } as Item;
+test("in-progress inbox does not repeat resolved items for dispatched tasks", async () => {
+  const { inProgressInboxItems, inProgressInboxTasks, selectedInboxItem } = await import("../../web/src/inbox-selection.ts");
+  const resolved = { id: "resolved", status: "resolved", task_id: "working" } as Item;
   const open = { id: "open", status: "open", task_id: "working" } as Item;
   const archived = { id: "archived", status: "archived", task_id: "working" } as Item;
   const finished = { id: "finished", status: "resolved", task_id: "done" } as Item;
   const unlinked = { id: "unlinked", status: "resolved", task_id: null } as Item;
-  const tasks = [{ id: "working", status: "dispatched" }, { id: "done", status: "done" }] as import("../../web/src/types.ts").Task[];
-  assert.deepEqual(inProgressInboxItems([active, open, archived, finished, unlinked], tasks), [active]);
+  const tasks = [{ id: "working", status: "dispatched", terminal_address: "s1" }, { id: "done", status: "done", terminal_address: "s2" }] as Task[];
+  assert.deepEqual(inProgressInboxItems([resolved, open, archived, finished, unlinked], tasks), []);
+  assert.deepEqual(inProgressInboxTasks(tasks, [resolved, open, archived, finished, unlinked]).map((t) => t.id), ["working"]);
+  assert.equal(selectedInboxItem(resolved, [resolved], "in-progress"), null);
 });
 
-test("in-progress inbox includes dispatched tasks without any inbox item", async () => {
-  const { inProgressInboxTasks } = await import("../../web/src/inbox-selection.ts");
-  const tasks = [{ id: "working", status: "dispatched" }, { id: "new", status: "open" }, { id: "finished", status: "done" }] as import("../../web/src/types.ts").Task[];
-  assert.deepEqual(inProgressInboxTasks(tasks).map((task) => task.id), ["working"]);
+test("in-progress inbox deduplicates dispatched tasks already represented by a handled item", async () => {
+  const { inProgressInboxTasks, inProgressInboxItems } = await import("../../web/src/inbox-selection.ts");
+  const tasks = [
+    { id: "working-pr", status: "dispatched", terminal_address: "s1" },
+    { id: "working-session", status: "dispatched", terminal_address: "s2" },
+    { id: "working-alone", status: "dispatched", terminal_address: "s3" },
+    { id: "new", status: "open", terminal_address: null },
+    { id: "finished", status: "done", terminal_address: "s4" },
+  ] as Task[];
+  const items = [
+    { id: "pr-by-task", kind: "pr", status: "open", handling: 1, task_id: "working-pr", source_ref: null },
+    { id: "pr-by-session", kind: "pr", status: "open", handling: 1, task_id: null, source_ref: "s2" },
+    { id: "pr-archived", kind: "pr", status: "archived", handling: 1, task_id: "working-alone", source_ref: "s3" },
+  ] as Item[];
+  assert.deepEqual(inProgressInboxItems(items, tasks).map((i) => i.id), ["pr-by-task", "pr-by-session"]);
+  assert.deepEqual(inProgressInboxTasks(tasks, items).map((t) => t.id), ["working-alone"]);
 });
 
 test("a PR item the agent is handling leaves the open inbox for in progress", async () => {
