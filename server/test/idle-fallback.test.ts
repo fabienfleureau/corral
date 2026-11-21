@@ -76,6 +76,59 @@ test("a completion report resolves an earlier stopped-run question", async () =>
   } finally { db.close(); }
 });
 
+test("a structured report during a permission prompt survives the blocked-to-idle transition", async () => {
+  const { db, capture, status } = setup(said);
+  try {
+    await capture.handleEvent({
+      type: "status", address: "s1", task_id: "task-1", status: "blocked",
+      elicitations: [{ id: "perm-1", kind: "permission", prompt: "Allow curl?", choices: ["session"] }],
+    });
+    const elicitationItem = db.openQuestionItemForTerminal("s1");
+    assert.ok(elicitationItem, "the permission prompt opens an item");
+
+    const report = await capture.createStructuredQuestion({
+      taskId: "task-1", terminal: "s1", kind: "question", title: "Need a decision", body: "Which option?",
+    });
+    assert.equal(report.id, elicitationItem.id, "the report supersedes the permission item");
+    assert.equal(report.structured, 1);
+
+    await status("idle");
+    const item = db.openQuestionItemForTerminal("s1");
+    assert.equal(item?.id, report.id, "leaving blocked must not resolve the fresh report");
+    assert.equal(item?.title, "Need a decision");
+    assert.equal(item?.structured, 1);
+    assert.doesNotMatch(item!.body, /stopped without reporting/);
+  } finally { db.close(); }
+});
+
+test("leaving blocked resolves an unanswered elicitation capture", async () => {
+  const { db, capture } = setup(said);
+  try {
+    await capture.handleEvent({
+      type: "status", address: "s1", task_id: "task-1", status: "blocked",
+      elicitations: [{ id: "perm-1", kind: "permission", prompt: "Allow curl?", choices: ["session"] }],
+    });
+    const item = db.openQuestionItemForTerminal("s1");
+    assert.ok(item?.elicitation, "the permission prompt is captured");
+    await capture.handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "working" });
+    assert.equal(db.getItem(item.id)?.status, "resolved", "the answered prompt closes when the block ends");
+  } finally { db.close(); }
+});
+
+test("leaving blocked still replaces a captured fallback with the stopped-run report", async () => {
+  const { db, capture, status } = setup(said);
+  try {
+    await capture.handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "blocked" });
+    const captured = db.openQuestionItemForTerminal("s1");
+    assert.ok(captured);
+    assert.equal(captured.structured, 0);
+    await status("idle");
+    const item = db.openQuestionItemForTerminal("s1");
+    assert.equal(item?.id, captured.id);
+    assert.match(item!.body, /stopped without reporting/);
+  } finally { db.close(); }
+});
+
 test("a run that ends in a plain message without a report opens an inbox question", async () => {
   const { db, status } = setup(said);
   try {

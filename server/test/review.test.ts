@@ -126,10 +126,10 @@ test(
     await engine.handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "done" });
     assert.equal(db.openQuestionItemForTerminal("s1")?.title, "Which DB?");
 
-    // Leaving blocked still auto-resolves.
+    // A later blocked transition does not close the human's pending question.
     await engine.handleEvent(blockedEvent("status"));
     await engine.handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "working" });
-    assert.equal(db.openQuestionItemForTerminal("s1"), null);
+    assert.equal(db.openQuestionItemForTerminal("s1")?.title, "Which DB?");
   }),
 );
 
