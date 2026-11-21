@@ -75,7 +75,7 @@ export interface AppState {
   usage?: UsageScanner;
   /** Cached OpenCode Go quota snapshot (external HTTPS call, polled by the UI). */
   goQuota?: GoQuotaCache;
-  /** Cached Google quota snapshot (CodexBar CLI, polled by the UI). */
+  /** Cached Google quota snapshot (Antigravity local language server, polled by the UI). */
   googleQuota?: GoogleQuotaCache;
   /** Model/reasoning per task session: finished sessions are read once. */
   sessionFacts?: SessionFacts;

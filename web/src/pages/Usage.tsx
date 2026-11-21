@@ -1,5 +1,5 @@
 // Usage — Claude Code + Codex quota, tokens and estimated cost, from local logs;
-// Google quota comes from CodexBar.
+// Google quota comes from Antigravity's local language server.
 // Range and metric live in the URL (#/usage?range=30d&metric=tokens).
 
 import { useEffect, useState } from "react";
