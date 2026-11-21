@@ -270,6 +270,11 @@ export class UsageScanner {
     return this.running;
   }
 
+  /** True while the first or a forced scan is still running. */
+  get scanning(): boolean {
+    return !this.ready || this.running !== null;
+  }
+
   private async scan(): Promise<void> {
     this.opencodeRecords = readOpenCode(this.sources.opencodeDir);
     const seen = new Set<string>();
@@ -413,9 +418,9 @@ export class QuotaCache {
     this.clock = options.clock ?? Date.now;
   }
 
-  async get(): Promise<AgentQuota> {
+  async get(force = false): Promise<AgentQuota> {
     const now = this.clock();
-    if (this.cache && now - this.cache.at < this.cache.ttl) return this.cache.value;
+    if (!force && this.cache && now - this.cache.at < this.cache.ttl) return this.cache.value;
     this.inflight ??= this.options.fetchQuota()
       .catch(() => this.options.empty(this.options.errorNote))
       .then((value) => {
@@ -555,7 +560,6 @@ export interface UsageReport {
   since_ms: number | null;
   generated_ms: number;
   scanning: boolean;
-  quota: AgentQuota[];
   totals: UsageTotals;
   by_agent: ({ agent: UsageAgent } & UsageTotals)[];
   by_model: ({ agent: UsageAgent; model: string; priced: boolean } & UsageTotals)[];
@@ -619,7 +623,6 @@ export function buildReport(input: {
   tasks: Task[];
   prices: Record<string, ModelPrice>;
   range: UsageRange;
-  quota: AgentQuota[];
   scanning: boolean;
   now?: number;
 }): UsageReport {
@@ -698,7 +701,6 @@ export function buildReport(input: {
     since_ms: since,
     generated_ms: now,
     scanning: input.scanning,
-    quota: input.quota,
     totals,
     by_agent: [...byAgent.entries()].map(([agent, t]) => ({ agent, ...t })).sort((x, y) => y.cost_usd - x.cost_usd),
     by_model: [...byModel.values()].sort((x, y) => y.cost_usd - x.cost_usd || y.output - x.output),

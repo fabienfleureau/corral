@@ -265,7 +265,6 @@ export type UsageReport = {
   since_ms: number | null;
   generated_ms: number;
   scanning: boolean;
-  quota: AgentQuota[];
   totals: UsageTotals;
   by_agent: ({ agent: UsageAgent } & UsageTotals)[];
   by_model: ({ agent: UsageAgent; model: string; priced: boolean } & UsageTotals)[];

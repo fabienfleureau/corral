@@ -155,7 +155,6 @@ test("buildReport: range filter, task attribution and efficiency", () => {
     tasks,
     prices: DEFAULT_PRICES,
     range: "7d",
-    quota: [],
     scanning: false,
     now,
   });
@@ -189,7 +188,6 @@ test("buildReport: timeline keeps per-model cost and tokens in each bucket", () 
     tasks: [],
     prices: DEFAULT_PRICES,
     range: "7d",
-    quota: [],
     scanning: false,
     now,
   });
@@ -236,7 +234,7 @@ test("UsageScanner reads OpenCode Go messages and includes them in the timeline"
     db.close();
     const scanner = new UsageScanner({ claudeDir: dir + "/none", codexDir: dir + "/none", claudeQuotaDir: dir, opencodeDir: dir });
     await scanner.refresh();
-    const report = buildReport({ records: scanner.records(), tasks: [], prices: { mimo: { input: 1, output: 2 } }, range: "24h", quota: [], scanning: false, now });
+    const report = buildReport({ records: scanner.records(), tasks: [], prices: { mimo: { input: 1, output: 2 } }, range: "24h", scanning: false, now });
     assert.equal(report.by_model[0].agent, "opencode-go");
     assert.equal(report.totals.input, 100);
     assert.equal(report.totals.cache_read, 30);

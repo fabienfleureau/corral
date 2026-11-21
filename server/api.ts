@@ -39,7 +39,7 @@ import { cachedPulls, platformRateLimits, refreshPulls } from "./pulls.ts";
 import type { Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { PlanError, approvePlan, isDirectory, validateSubtasks } from "./multi-repo.ts";
-import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type UsageRange } from "./usage.ts";
+import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type AgentQuota, type UsageRange } from "./usage.ts";
 import { GoogleQuotaCache } from "./google-quota.ts";
 import { SHIPPED_CATALOG, mergeCatalog, parseCatalog } from "./model-catalog.ts";
 import { PrAdditionsCache } from "./usage-pr.ts";
@@ -1243,15 +1243,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/terminals", (_req, res) => json(res, 200, state.db.listTerminals()));
 
   // ---- usage (Claude Code + Codex local logs) ----
-  on("GET", "/api/usage", async (_req, res, { url }) => {
+  // The report never waits on a log scan or an external quota service. The UI
+  // renders its cards from the first answer and polls while `scanning` is set.
+  on("GET", "/api/usage", (_req, res, { url }) => {
     const raw = url.searchParams.get("range") ?? "7d";
     if (!USAGE_RANGES.includes(raw as UsageRange)) return json(res, 400, { error: `range must be one of ${USAGE_RANGES.join(", ")}` });
     const scanner = (state.usage ??= new UsageScanner(defaultSources()));
     const tasks = state.db.listTasks();
     const prAdditions = (state.prAdditions ??= new PrAdditionsCache()).get(tasks, url.searchParams.get("refresh") === "1");
-    // First scan of ~1GB of logs takes a while: answer "scanning" instead of hanging.
-    const pass = scanner.refresh(url.searchParams.get("refresh") === "1");
-    if (scanner.ready) await pass;
+    void scanner.refresh(url.searchParams.get("refresh") === "1").catch(() => undefined);
     json(
       res,
       200,
@@ -1260,10 +1260,22 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         tasks,
         prices: { ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
         range: raw as UsageRange,
-        quota: [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), await (state.goQuota ??= new GoQuotaCache()).get(), await (state.googleQuota ??= new GoogleQuotaCache()).get()],
-        scanning: !scanner.ready,
+        scanning: scanner.scanning,
       }), pr_additions: prAdditions },
     );
+  });
+
+  // Quota has its own endpoint: Google can need ~10s to boot a language server,
+  // which must not hold up the usage numbers or any other page using them.
+  on("GET", "/api/usage/quota", async (_req, res, { url }) => {
+    const scanner = (state.usage ??= new UsageScanner(defaultSources()));
+    const refresh = url.searchParams.get("refresh") === "1";
+    const [go, google] = await Promise.all([
+      (state.goQuota ??= new GoQuotaCache()).get(refresh),
+      (state.googleQuota ??= new GoogleQuotaCache()).get(refresh),
+    ]);
+    const quota: AgentQuota[] = [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), go, google];
+    json(res, 200, { quota, fetched_ms: Date.now() });
   });
 
   on("GET", "/api/config", (_req, res) => {

@@ -4,7 +4,7 @@ import type { KpiId, KpiSettings, KpiView } from "../../shared/kpis";
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
 import type { AttachmentInput } from "./attachments";
-import type { Config, DailyActivity, Epic, EpicDetail, EpicSummary, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, TrackedTerminal, UsageRange, UsageReport } from "./types";
+import type { AgentQuota, Config, DailyActivity, Epic, EpicDetail, EpicSummary, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, TrackedTerminal, UsageRange, UsageReport } from "./types";
 
 /** Schedule and run state of a server-side analysis (improvement, skills). */
 export type AnalysisStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
@@ -312,6 +312,9 @@ export const api = {
   // ---- misc ----
   getUsage: (range: UsageRange, refresh = false): Promise<UsageReport> =>
     get<UsageReport>(`/api/usage?range=${range}${refresh ? "&refresh=1" : ""}`),
+
+  getUsageQuota: (refresh = false): Promise<{ quota: AgentQuota[]; fetched_ms: number }> =>
+    get<{ quota: AgentQuota[]; fetched_ms: number }>(`/api/usage/quota${refresh ? "?refresh=1" : ""}`),
 
   getRateLimits: (refresh = false): Promise<{ limits: PlatformRateLimit[]; fetched_ms: number }> =>
     get<{ limits: PlatformRateLimit[]; fetched_ms: number }>(`/api/rate-limits${refresh ? "?refresh=1" : ""}`),
