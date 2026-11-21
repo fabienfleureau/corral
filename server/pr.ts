@@ -513,11 +513,15 @@ function snapshotPr(pr: PrInfo, ready: boolean, reasons: string[], checkedMs: nu
 /** The agent has this task's PR item in flight: the item waits under
  *  "In progress" instead of asking the human for something nobody can act on
  *  yet. Cleared when the run ends or the gate passes. */
-function setItemHandling(db: Db, hub: Hub, taskId: string, handling: boolean): void {
+function setItemHandling(db: Db, hub: Hub, taskId: string, handling: boolean, opts: { unsnooze?: boolean } = {}): void {
   const item = db.listItems({ kind: "pr" }).find((i) => i.task_id === taskId && i.status !== "archived");
   const value = handling ? 1 : 0;
-  if (!item || (item.handling ?? 0) === value) return;
-  db.updateItem(item.id, { handling: value });
+  if (!item) return;
+  const patch: Partial<Item> = {};
+  if ((item.handling ?? 0) !== value) patch.handling = value;
+  if (handling && opts.unsnooze && item.snooze_until_ms !== null) patch.snooze_until_ms = null;
+  if (Object.keys(patch).length === 0) return;
+  db.updateItem(item.id, patch);
   hub.broadcast("item.updated", db.getItem(item.id));
 }
 
@@ -618,7 +622,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
           opts.onDelivered?.({ address, comments: work.comments, conflict: work.conflict });
           if (!address) return; // not delivered: retry on the next sync
           // The agent owns the item now: it shows under "In progress".
-          setItemHandling(db, hub, task.id, true);
+          setItemHandling(db, hub, task.id, true, { unsnooze: opts.force === true });
           patchMeta(db, task.id, {
             ...(work.comments ? { pushed: sig } : {}),
             ...(work.conflict ? { conflict: true } : {}),

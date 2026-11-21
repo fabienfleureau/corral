@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.ts";
-import type { CaptureEngine, Hub } from "./capture.ts";
+import { resumeSnoozedItems, type CaptureEngine, type Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncEpic } from "./epic.ts";
 import { createEpicRequestTask, EpicRequestError, saveEpicRequestSettings, type EpicRequestSettings } from "./epic-request.ts";
@@ -378,11 +378,26 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         { item_id: item.id, item_kind: item.kind, session: address },
       ));
     }
-    state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now(), body: `${item.body}\n\n**Reply:** ${content !== undefined ? JSON.stringify(content) : permission || text.trim()}` });
+    const replyBody = `${item.body}\n\n**Reply:** ${content !== undefined ? JSON.stringify(content) : permission || text.trim()}`;
+    if (item.kind === "pr") {
+      // The agent is working on the PR again: move it to "In progress" under
+      // the handling phase and clear any snooze so it surfaces when done.
+      state.db.updateItem(item.id, { status: "open", resolved_ms: null, handling: 1, snooze_until_ms: null, body: replyBody });
+    } else {
+      state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now(), snooze_until_ms: null, body: replyBody });
+      if (item.task_id) {
+        const linked = state.db.getTask(item.task_id);
+        if (linked && linked.status === "done") {
+          state.db.updateTask(linked.id, { status: "dispatched" });
+          state.hub.broadcast("task.updated", state.db.getTask(linked.id));
+        }
+      }
+    }
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.replied", item.id, { address });
-    state.hub.broadcast("item.updated", state.db.getItem(item.id));
-    json(res, 200, { ok: true, sent_to: address });
+    const updatedItem = state.db.getItem(item.id);
+    state.hub.broadcast("item.updated", updatedItem);
+    json(res, 200, { ok: true, sent_to: address, item: updatedItem });
   });
 
   on("POST", "/api/items/:id/summarize", async (_req, res, { params }) => {
@@ -402,7 +417,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/items/:id/resolve", (_req, res, { params }) => {
     const item = state.db.getItem(params.id);
     if (!item) return json(res, 404, { error: "item not found" });
-    state.db.updateItem(params.id, { status: "resolved", resolved_ms: Date.now() });
+    state.db.updateItem(params.id, { status: "resolved", resolved_ms: Date.now(), snooze_until_ms: null });
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.resolved", params.id, { how: "manual" });
     state.hub.broadcast("item.updated", state.db.getItem(params.id));
@@ -410,7 +425,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   on("POST", "/api/items/:id/archive", (_req, res, { params }) => {
-    state.db.updateItem(params.id, { status: "archived" });
+    state.db.updateItem(params.id, { status: "archived", snooze_until_ms: null });
     state.hub.broadcast("item.updated", state.db.getItem(params.id));
     json(res, 200, state.db.getItem(params.id));
   });
@@ -599,6 +614,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
     const prompt = "Create a Claude artifact that explains this task and its results to colleagues. Publish it privately and report the artifact URL in the Corral inbox. Do not share it publicly.";
     await state.backend.send(task.terminal_address, prompt);
+    resumeSnoozedItems(state.db, state.hub, { taskId: task.id, address: task.terminal_address });
     logTaskEvent(state.db, task.id, "prompt", "Requested a Claude artifact", promptData(prompt, { session: task.terminal_address }));
     json(res, 200, { ok: true });
   });
