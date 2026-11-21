@@ -28,6 +28,12 @@ import type {
 
 const POLL_MS = 4000;
 
+/** agy's only pre-emptive permission control is an all-or-nothing bypass flag.
+ *  Corral dispatches are unattended, so leaving agy's default request-review
+ *  prompt on parks the task on a human approval card. Passed as session launch
+ *  args, it also survives a relaunch of the session. */
+const ANTIGRAVITY_LAUNCH_ARGS = ["--dangerously-skip-permissions"];
+
 type OmnigentProject = { id: string; name: string; config: Record<string, unknown> };
 
 /** Project membership Corral filed a session into, read before archiving. */
@@ -464,6 +470,11 @@ export class OmnigentBackend implements WorkerBackend {
       },
       workspace: start.repoPath,
     };
+    if (harnessOf(start.harness) === "antigravity") {
+      // Set before create so the native terminal launches in yolo mode; the
+      // worktree, not an interactive prompt, is the boundary for these tools.
+      meta.terminal_launch_args = ANTIGRAVITY_LAUNCH_ARGS;
+    }
     if (start.git) {
       // omnigent's host daemon creates the worktree (`<repo>-worktrees/<branch>`)
       meta.git = {

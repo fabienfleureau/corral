@@ -203,6 +203,27 @@ test("rejects an agent belonging to a different harness before creating a sessio
   await assert.rejects(backend.start({ taskId: "t", name: null, repoPath: "/repo", git: null, prompt: "go", harness: "codex", agent: "a", model: "terra", reasoning: null }), /opencode.*codex/);
 });
 
+test("antigravity sessions launch with permission bypass; other harnesses keep their default", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  const created: any[] = [];
+  (backend as unknown as { request: (m: string, p: string, b?: any) => Promise<any> }).request = async (method, path, body) => {
+    if (path.startsWith("/v1/agents")) return { data: [
+      { id: "ag", name: "corral-antigravity", harness: "antigravity-native" },
+      { id: "cx", name: "corral-codex", harness: "codex-native" },
+    ] };
+    if (method === "POST" && path === "/v1/sessions") { created.push(body); return { id: "s" }; }
+    if (method === "GET") return { id: "s" };
+    return {};
+  };
+  const base = { taskId: null, name: null, repoPath: "/repo", git: null, prompt: "go", model: null, reasoning: null };
+  await backend.start({ ...base, harness: "antigravity" });
+  await backend.start({ ...base, harness: "codex" });
+  // agy's request-review prompt would park an unattended task on an approval
+  // card, so the launch args must be on the create body, not just the bundle.
+  assert.deepEqual(created[0].terminal_launch_args, ["--dangerously-skip-permissions"]);
+  assert.equal("terminal_launch_args" in created[1], false);
+});
+
 test("includes paginated user agents alongside built-in agents", async () => {
   const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
   (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async (_m, path) => {

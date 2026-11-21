@@ -41,7 +41,7 @@ through the API. The diagram groups responsibilities, not separate services.
 | Browser | [`web/src/api.ts`](../web/src/api.ts) is the HTTP/SSE client; [`web/public/sw.js`](../web/public/sw.js) caches the shell and last-known API responses |
 | HTTP | [`server/api.ts`](../server/api.ts) authenticates API requests, handles routes and serves `web/dist`; [`API.md`](../API.md) describes the contract |
 | Dispatch | [`server/dispatch.ts`](../server/dispatch.ts) assembles prompts and attachments, selects a base and requests an agent session |
-| Agent execution | [`server/worker.ts`](../server/worker.ts) defines `WorkerBackend`; [`server/omnigent.ts`](../server/omnigent.ts) implements it, including polling and event normalization |
+| Agent execution | [`server/worker.ts`](../server/worker.ts) defines `WorkerBackend`; [`server/omnigent.ts`](../server/omnigent.ts) implements it, including polling, event normalization and Antigravity's unattended launch args ([ADR 0014](adr/0014-antigravity-permission-bypass.md)) |
 | Inbox lifecycle | [`server/capture.ts`](../server/capture.ts) turns backend events and agent reports into actionable items and handles completion/fallbacks |
 | PR lifecycle | [`server/pr.ts`](../server/pr.ts) discovers and refreshes task PRs, computes readiness, and returns comments/conflicts to agents |
 | Platform listing | [`server/pulls.ts`](../server/pulls.ts) lists GitHub/GitLab PRs; [`server/repos.ts`](../server/repos.ts) handles git repositories; subprocesses use [`server/exec.ts`](../server/exec.ts) |
