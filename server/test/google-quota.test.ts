@@ -8,6 +8,8 @@ import {
   GoogleQuotaCache,
   emptyGoogleQuota,
   googleQuota,
+  listAntigravityServers,
+  listListeningPorts,
   parseLanguageServers,
   parseListeningPorts,
   parseQuotaSummary,
@@ -45,6 +47,32 @@ test("parseListeningPorts extracts deduplicated loopback TCP ports from lsof", (
     "agy       3055 dev   15u  IPv4 0x1237      0t0  TCP 127.0.0.1:51236 (ESTABLISHED)",
   ].join("\n");
   assert.deepEqual(parseListeningPorts(lsof), [51234, 51235]);
+});
+
+test("listAntigravityServers and listListeningPorts resolve ps and lsof when PATH omits system dirs", async () => {
+  const prevPath = process.env.PATH;
+  process.env.PATH = "/nonexistent";
+  try {
+    let psCmd = "";
+    await listAntigravityServers(async (cmd) => {
+      psCmd = cmd;
+      return "";
+    });
+    let lsofCmd = "";
+    await listListeningPorts(1234, async (cmd) => {
+      lsofCmd = cmd;
+      return "";
+    });
+    assert.match(psCmd, /^\/(?:bin|usr\/bin)\/ps$/);
+    if (process.platform === "darwin") {
+      assert.equal(lsofCmd, "/usr/sbin/lsof");
+    } else {
+      assert.ok(lsofCmd === "lsof" || /^\/(?:usr\/sbin|sbin|usr\/bin|bin)\/lsof$/.test(lsofCmd));
+    }
+  } finally {
+    if (prevPath === undefined) delete process.env.PATH;
+    else process.env.PATH = prevPath;
+  }
 });
 
 test("parseQuotaSummary reads model-family buckets with disambiguated labels", () => {

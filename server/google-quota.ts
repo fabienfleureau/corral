@@ -282,9 +282,13 @@ export async function postConnectJson(
   }
 }
 
+const PS_DIRS = ["/bin", "/usr/bin"];
+const LSOF_DIRS = ["/usr/sbin", "/sbin", "/usr/bin", "/bin"];
+
 export async function listAntigravityServers(run: Run = runAsync): Promise<LanguageServerProcess[]> {
   try {
-    const out = await run("ps", ["-ax", "-o", "pid=,ppid=,command="], { timeout: 3000, allowFailure: true });
+    const ps = resolveExecutable("ps", PS_DIRS) ?? "ps";
+    const out = await run(ps, ["-ax", "-o", "pid=,ppid=,command="], { timeout: 3000, allowFailure: true });
     return parseLanguageServers(out);
   } catch {
     return [];
@@ -293,7 +297,8 @@ export async function listAntigravityServers(run: Run = runAsync): Promise<Langu
 
 export async function listListeningPorts(pid: number, run: Run = runAsync): Promise<number[]> {
   try {
-    const out = await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", String(pid)], { timeout: 3000, allowFailure: true });
+    const lsof = resolveExecutable("lsof", LSOF_DIRS) ?? "lsof";
+    const out = await run(lsof, ["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", String(pid)], { timeout: 3000, allowFailure: true });
     return parseListeningPorts(out);
   } catch {
     return [];
