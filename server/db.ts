@@ -265,6 +265,33 @@ export class Db {
       FROM tasks
       WHERE NOT EXISTS (SELECT 1 FROM task_events WHERE task_events.task_id = tasks.id)
     `);
+    // Earlier sweeps logged "Worktree cleanup failed" on every PR sync for the
+    // same broken task. Collapse consecutive identical failures, keeping the first.
+    this.raw.exec(`
+      DELETE FROM task_events
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+                 kind,
+                 message,
+                 data,
+                 LAG(kind) OVER (PARTITION BY task_id ORDER BY ts, id) AS prev_kind,
+                 LAG(message) OVER (PARTITION BY task_id ORDER BY ts, id) AS prev_message,
+                 LAG(data) OVER (PARTITION BY task_id ORDER BY ts, id) AS prev_data
+          FROM task_events
+          WHERE task_id IN (
+            SELECT task_id FROM task_events
+            WHERE kind = 'session' AND message = 'Worktree cleanup failed'
+            GROUP BY task_id HAVING COUNT(*) > 1
+          )
+        )
+        WHERE kind = 'session'
+          AND message = 'Worktree cleanup failed'
+          AND prev_kind = 'session'
+          AND prev_message = 'Worktree cleanup failed'
+          AND COALESCE(data, '') = COALESCE(prev_data, '')
+      )
+    `);
   }
 
   close(): void {

@@ -880,10 +880,18 @@ export class OmnigentBackend implements WorkerBackend {
 
   async cleanup(address: string): Promise<void> {
     // omnigent removes the worktree with the session (delete_branch=true).
+    // A 404 means the session is already gone (deleted earlier, or from a
+    // previous backend) — treat cleanup as idempotent so retries stop.
     try {
       await this.request("DELETE", `/v1/sessions/${address}?delete_branch=true`);
-    } catch {
-      await this.request("DELETE", `/v1/sessions/${address}`);
+    } catch (err) {
+      if (err instanceof OmnigentHttpError && err.status === 404) return;
+      try {
+        await this.request("DELETE", `/v1/sessions/${address}`);
+      } catch (fallbackErr) {
+        if (fallbackErr instanceof OmnigentHttpError && fallbackErr.status === 404) return;
+        throw fallbackErr;
+      }
     }
   }
 

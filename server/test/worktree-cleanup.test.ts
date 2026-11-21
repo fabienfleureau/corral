@@ -4,11 +4,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "../db.ts";
 import { createHttpServer, type AppState } from "../api.ts";
 import { CaptureEngine } from "../capture.ts";
+import { OmnigentBackend } from "../omnigent.ts";
 import { syncTaskPr, type PrInfo } from "../pr.ts";
 import { cleanupFinishedTask, cleanupTerminalWorktrees } from "../worktree-cleanup.ts";
 import type { WorkerBackend } from "../worker.ts";
@@ -290,4 +292,119 @@ test("a merged PR completes the task and removes the worktree", async () => {
   assert.deepEqual(cleaned, ["s1"]);
   assert.deepEqual(archived, ["s1"]);
   db.close();
+});
+
+test("repeated identical cleanup failures only log one history event", async () => {
+  const db = new Db(":memory:");
+  try {
+    db.insertTask(makeTask());
+    const { backend } = fakeBackend();
+    let msg = "backend down";
+    backend.cleanup = async () => { throw new Error(msg); };
+
+    assert.equal(await cleanupTerminalWorktrees(db, backend), 0);
+    assert.equal(await cleanupTerminalWorktrees(db, backend), 0);
+    assert.equal(await cleanupTerminalWorktrees(db, backend), 0);
+    let events = db.listTaskEvents("task-1").filter((e) => e.message === "Worktree cleanup failed");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].data, JSON.stringify({ error: "Error: backend down" }));
+
+    msg = "worktree locked";
+    assert.equal(await cleanupTerminalWorktrees(db, backend), 0);
+    assert.equal(await cleanupTerminalWorktrees(db, backend), 0);
+    events = db.listTaskEvents("task-1").filter((e) => e.message === "Worktree cleanup failed");
+    assert.equal(events.length, 2);
+    assert.equal(events[1].data, JSON.stringify({ error: "Error: worktree locked" }));
+  } finally { db.close(); }
+});
+
+test("OmnigentBackend.cleanup treats 404 as already removed, falls back on non-404, and throws on 500", async () => {
+  const calls: string[] = [];
+  let mode: "404" | "fallback-ok" | "500" = "404";
+  const server = createServer((req, res) => {
+    calls.push(`${req.method} ${req.url}`);
+    if (mode === "404") {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "not_found", message: "Session not found" } }));
+      return;
+    }
+    if (mode === "fallback-ok") {
+      if (req.url?.includes("delete_branch=true")) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "unsupported query" }));
+      } else {
+        res.writeHead(204);
+        res.end();
+      }
+      return;
+    }
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "internal error" }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  const backend = new OmnigentBackend({ baseUrl: `http://127.0.0.1:${port}`, token: "", hostId: "", agents: {} });
+  const db = new Db(":memory:");
+  try {
+    db.insertTask(makeTask());
+    assert.equal(await cleanupFinishedTask(db, backend, "task-1"), true);
+    assert.equal(db.getTask("task-1")?.worktree_path, null);
+    assert.deepEqual(calls, ["DELETE /v1/sessions/s1?delete_branch=true"]);
+
+    calls.length = 0;
+    mode = "fallback-ok";
+    await backend.cleanup("s2");
+    assert.deepEqual(calls, [
+      "DELETE /v1/sessions/s2?delete_branch=true",
+      "DELETE /v1/sessions/s2",
+    ]);
+
+    calls.length = 0;
+    mode = "500";
+    await assert.rejects(() => backend.cleanup("s3"), /500/);
+    assert.deepEqual(calls, [
+      "DELETE /v1/sessions/s3?delete_branch=true",
+      "DELETE /v1/sessions/s3",
+    ]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
+});
+
+test("Db.migrate collapses consecutive duplicate worktree cleanup failure events", () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-cleanup-migrate-"));
+  const dbPath = join(dir, "test.db");
+  try {
+    const first = new Db(dbPath);
+    first.insertTask(makeTask());
+    const errA = JSON.stringify({ error: "Error: 404" });
+    const errB = JSON.stringify({ error: "Error: 500" });
+    first.insertTaskEvent({ task_id: "task-1", ts: 100, kind: "created", message: "Created", data: null });
+    first.insertTaskEvent({ task_id: "task-1", ts: 200, kind: "session", message: "Worktree cleanup failed", data: errA });
+    first.insertTaskEvent({ task_id: "task-1", ts: 300, kind: "session", message: "Worktree cleanup failed", data: errA });
+    first.insertTaskEvent({ task_id: "task-1", ts: 400, kind: "session", message: "Worktree cleanup failed", data: errA });
+    first.insertTaskEvent({ task_id: "task-1", ts: 500, kind: "session", message: "Worktree cleanup failed", data: errB });
+    first.insertTaskEvent({ task_id: "task-1", ts: 600, kind: "session", message: "Worktree cleanup failed", data: errB });
+    first.insertTaskEvent({ task_id: "task-1", ts: 700, kind: "status", message: "Status: done → archived", data: null });
+    first.insertTaskEvent({ task_id: "task-1", ts: 800, kind: "session", message: "Worktree cleanup failed", data: errA });
+    first.close();
+
+    const reopened = new Db(dbPath);
+    const events = reopened.listTaskEvents("task-1");
+    assert.deepEqual(
+      events.map((e) => [e.ts, e.message, e.data]),
+      [
+        [100, "Created", null],
+        [200, "Worktree cleanup failed", errA],
+        [500, "Worktree cleanup failed", errB],
+        [700, "Status: done → archived", null],
+        [800, "Worktree cleanup failed", errA],
+      ],
+    );
+    reopened.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

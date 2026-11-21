@@ -40,7 +40,17 @@ export async function cleanupFinishedTask(
     opts.hub?.broadcast("task.updated", db.getTask(task.id));
     return true;
   } catch (err) {
-    if (task) logTaskEvent(db, task.id, "session", "Worktree cleanup failed", { error: String(err) });
+    if (task) {
+      const error = String(err);
+      const expectedData = error ? JSON.stringify({ error }) : null;
+      const last = db.listTaskEvents(task.id, 1)[0];
+      const sameFailure = last?.kind === "session"
+        && last.message === "Worktree cleanup failed"
+        && last.data === expectedData;
+      if (!sameFailure) {
+        logTaskEvent(db, task.id, "session", "Worktree cleanup failed", { error });
+      }
+    }
     return false;
   } finally {
     if (task) inFlight.delete(task.id);
