@@ -30,6 +30,7 @@ test("Usage renders every card before quota and report data arrive", () => {
       assert.ok(html.includes(label), `missing card ${label}`);
     }
     assert.equal((html.match(/class="usage-card"/g) ?? []).length, 11, "all quota, platform and overview cards have a shell");
+    assert.ok(html.includes('class="usage-grid usage-quota-grid"'), "quota cards use the dedicated 4-column grid");
     assert.equal((html.match(/class="usage-big">—<\/div>/g) ?? []).length, 5, "overview values start empty");
     assert.match(html, /Loading quota/);
     assert.match(html, /Loading rate limits/);

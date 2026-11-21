@@ -379,7 +379,7 @@ export function UsagePage() {
         ) : null}
 
         <h2 className="usage-h">Quota</h2>
-        <div className="usage-grid">
+        <div className="usage-grid usage-quota-grid">
           {QUOTA_AGENTS.map((agent) => (
             <QuotaCard
               key={agent}
