@@ -9,6 +9,7 @@ import type { WorkerBackend } from "./worker.ts";
 import type { Item, Task } from "./types.ts";
 import { taskLabel } from "./types.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
+import { resumeSnoozedItems } from "./capture.ts";
 
 /** Sent in the MCP initialize result. Register it in docs/prompts.md. */
 export const MCP_INSTRUCTIONS =
@@ -94,6 +95,7 @@ export async function instructTask(state: AgentState, taskId: string, raw: unkno
     } catch (err) {
       throw new InstructError(502, `could not reach the agent: ${err instanceof Error ? err.message : String(err)}`);
     }
+    resumeSnoozedItems(state.db, state.hub, { taskId: task.id, address: task.terminal_address });
     logTaskEvent(state.db, task.id, "prompt", `Instruction sent: ${oneLine(text, 90)}`, promptData(text, { source: "agent", mode: "session", session: task.terminal_address }));
     state.db.recordMetric("task.instructed", task.id, { mode: "session" });
     return "session";

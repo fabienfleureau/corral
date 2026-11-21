@@ -9,7 +9,7 @@ export function selectedInboxItem(previous: Item | null, items: Item[], status: 
   if (!previous) return null;
   const keep = (item: Item) =>
     status === "snoozed"
-      ? item.status === "open"
+      ? item.status === "open" && !isHandlingItem(item)
       : status === "in-progress"
         ? item.status !== "archived" && isHandlingItem(item)
         : item.status === status && !isHandlingItem(item);
@@ -17,7 +17,7 @@ export function selectedInboxItem(previous: Item | null, items: Item[], status: 
 }
 
 export function visibleInboxItems(items: Item[], now: number, view: "visible" | "snoozed" = "visible"): Item[] {
-  if (view === "snoozed") return items.filter((item) => item.status === "open" && item.snooze_until_ms !== null && item.snooze_until_ms > now);
+  if (view === "snoozed") return items.filter((item) => item.status === "open" && !isHandlingItem(item) && item.snooze_until_ms !== null && item.snooze_until_ms > now);
   return items.filter((item) => item.status !== "open" || item.snooze_until_ms === null || item.snooze_until_ms <= now);
 }
 

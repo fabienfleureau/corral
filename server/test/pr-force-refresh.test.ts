@@ -123,6 +123,27 @@ test("periodic PR sync delivers new comments while the item is snoozed", { timeo
   assert.equal(db.getItem(item.id)!.snooze_until_ms, until);
 }));
 
+test("pr sync: force refresh on a snoozed PR clears snooze only when work is handed to the agent", withDb(async (db, dir) => {
+  db.insertTask(makeTask());
+  const hub = { broadcast: () => undefined };
+  const { backend } = fakeBackend();
+  const greenPr: PrInfo = { ...prWithComment, threads: [] };
+  await syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => greenPr, backend, cfg: cfg(dir) });
+  const item = db.listItems({ kind: "pr" })[0];
+  const until = Date.now() + 60_000;
+  db.updateItem(item.id, { snooze_until_ms: until });
+
+  // Nothing to hand off -> stays snoozed.
+  await syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => greenPr, backend, cfg: cfg(dir), force: true });
+  assert.equal(db.getItem(item.id)!.handling, 0);
+  assert.equal(db.getItem(item.id)!.snooze_until_ms, until);
+
+  // Comments handed off -> moves to handling and clears snooze.
+  await syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => prWithComment, backend, cfg: cfg(dir), force: true });
+  assert.equal(db.getItem(item.id)!.handling, 1);
+  assert.equal(db.getItem(item.id)!.snooze_until_ms, null);
+}));
+
 test("pr sync: a forced refresh with nothing to hand off leaves the agent alone", withDb(async (db, dir) => {
   db.insertTask(makeTask());
   const hub = { broadcast: () => undefined };

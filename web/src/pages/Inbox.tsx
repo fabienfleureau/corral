@@ -273,7 +273,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
       setReplyOk(`Sent to ${res.sent_to}`);
       setReplyText("");
       setGrillOpen(false);
-      applyItem({ ...selected, status: "resolved", resolved_ms: Date.now() });
+      applyItem(res.item ?? { ...selected, status: "resolved", resolved_ms: Date.now(), snooze_until_ms: null });
       lockActions();
     } catch (err) {
       setReplyError(errText(err));
@@ -413,7 +413,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
           ) : (
             items.map((item) => {
               const needsYou = item.status === "open" && (item.kind === "question" || item.kind === "plan" || item.kind === "launch" || item.kind === "amendment");
-              const snoozed = item.snooze_until_ms !== null && item.snooze_until_ms > Date.now();
+              const snoozed = item.status === "open" && !isHandlingItem(item) && item.snooze_until_ms !== null && item.snooze_until_ms > Date.now();
               const rowTask = item.task_id ? tasksById[item.task_id] : undefined;
               const rowPr = itemPrUrl(item.body, rowTask?.pr_url);
               return (

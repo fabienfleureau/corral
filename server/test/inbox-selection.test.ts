@@ -61,15 +61,18 @@ test("in-progress inbox deduplicates dispatched tasks already represented by a h
 });
 
 test("a PR item the agent is handling leaves the open inbox for in progress", async () => {
-  const { openInboxItems, inProgressInboxItems, selectedInboxItem } = await import("../../web/src/inbox-selection.ts");
-  const handling = { id: "handling", kind: "pr", status: "open", handling: 1, ready: 0, task_id: "done-task" } as Item;
-  const waiting = { id: "waiting", kind: "pr", status: "open", handling: 0, ready: 0, task_id: "done-task" } as Item;
+  const { openInboxItems, inProgressInboxItems, selectedInboxItem, visibleInboxItems } = await import("../../web/src/inbox-selection.ts");
+  const handling = { id: "handling", kind: "pr", status: "open", handling: 1, ready: 0, task_id: "done-task", snooze_until_ms: null } as Item;
+  const snoozedHandling = { id: "snoozed-handling", kind: "pr", status: "open", handling: 1, ready: 0, task_id: "done-task", snooze_until_ms: 2000 } as Item;
+  const waiting = { id: "waiting", kind: "pr", status: "open", handling: 0, ready: 0, task_id: "done-task", snooze_until_ms: null } as Item;
   // The task already reported done: only the handling flag keeps the item around.
   const tasks = [{ id: "done-task", status: "done" }] as import("../../web/src/types.ts").Task[];
   assert.deepEqual(openInboxItems([handling, waiting]).map((i) => i.id), ["waiting"]);
-  assert.deepEqual(inProgressInboxItems([handling, waiting], tasks).map((i) => i.id), ["handling"]);
+  assert.deepEqual(inProgressInboxItems([handling, snoozedHandling, waiting], tasks).map((i) => i.id), ["handling", "snoozed-handling"]);
+  assert.deepEqual(visibleInboxItems([snoozedHandling], 1000, "snoozed"), []);
   assert.equal(selectedInboxItem(handling, [handling], "in-progress"), handling);
   assert.equal(selectedInboxItem(handling, [handling], "open"), null);
+  assert.equal(selectedInboxItem(snoozedHandling, [snoozedHandling], "snoozed"), null);
 });
 
 test("an archived item leaves in progress even while it is handled", async () => {

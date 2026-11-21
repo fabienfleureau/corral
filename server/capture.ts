@@ -79,6 +79,8 @@ export class CaptureEngine {
     const status = e.status ?? null;
     // A run ended: the PR item the agent was handling goes back to the inbox.
     const runEnded = tracked?.last_status === "working" && (status === "idle" || status === "done" || status === "error");
+    // A stopped session started acting again: any snoozed item moves to in progress.
+    const runResumed = status === "working" && (tracked?.last_status === "idle" || tracked?.last_status === "done" || tracked?.last_status === "error");
     this.db.upsertTerminal({
       address: e.address,
       task_id: taskId,
@@ -100,6 +102,7 @@ export class CaptureEngine {
       })
       : false;
     if (runEnded && taskId) clearItemHandling(this.db, this.hub, taskId);
+    if (runResumed) resumeSnoozedItems(this.db, this.hub, { taskId, address: e.address });
 
     if (blocked) {
       await this.ensureQuestionItem(e, taskId);
@@ -287,7 +290,7 @@ export class CaptureEngine {
   private resolveOpenQuestions(opts: { address?: string | null; taskId?: string | null }, how: "auto" | "manual"): void {
     const now = Date.now();
     for (const item of this.db.openQuestionItemsFor(opts)) {
-      this.db.updateItem(item.id, { status: "resolved", resolved_ms: now });
+      this.db.updateItem(item.id, { status: "resolved", resolved_ms: now, snooze_until_ms: null });
       this.db.recordMetric("item.resolved", item.id, { how });
       this.hub.broadcast("item.updated", this.db.getItem(item.id));
     }
@@ -525,4 +528,45 @@ export class CaptureEngine {
       .catch(() => undefined)
       .finally(() => void cleanupFinishedTask(this.db, this.backend, taskId, { hub: this.hub, reason: "done-report" }));
   }
+}
+
+/** Move any snoozed open items for a task or session into "In progress" once
+ *  the session is acting again: PR items enter the agent-handling phase, and
+ *  other items resolve (reopening a done task so it surfaces under In progress). */
+export function resumeSnoozedItems(
+  db: Db,
+  hub: Hub,
+  target: { taskId?: string | null; address?: string | null },
+  now = Date.now(),
+): Item[] {
+  const { taskId = null, address = null } = target;
+  if (!taskId && !address) return [];
+  const snoozed = db.listItems({ status: "open" }).filter(
+    (item) =>
+      item.snooze_until_ms !== null &&
+      item.snooze_until_ms > now &&
+      ((taskId !== null && item.task_id === taskId) || (address !== null && item.source_ref === address)),
+  );
+  if (snoozed.length === 0) return [];
+  const updated: Item[] = [];
+  let reopenTaskId: string | null = null;
+  for (const item of snoozed) {
+    if (item.kind === "pr") {
+      db.updateItem(item.id, { handling: 1, snooze_until_ms: null });
+    } else {
+      db.updateItem(item.id, { status: "resolved", resolved_ms: now, snooze_until_ms: null });
+      if (item.task_id) reopenTaskId ??= item.task_id;
+    }
+    const next = db.getItem(item.id);
+    if (next) {
+      hub.broadcast("item.updated", next);
+      updated.push(next);
+    }
+  }
+  const taskToReopen = reopenTaskId ? db.getTask(reopenTaskId) : null;
+  if (taskToReopen && taskToReopen.status === "done") {
+    db.updateTask(taskToReopen.id, { status: "dispatched" });
+    hub.broadcast("task.updated", db.getTask(taskToReopen.id));
+  }
+  return updated;
 }
