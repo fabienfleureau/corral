@@ -22,6 +22,7 @@ They are required when a change makes or revisits such a decision.
 | [0010](0010-killed-jira-tickets.md) | Proposed | Killed Jira tickets are terminal, not merged |
 | [0012](0012-terminal-tasks-release-worktrees.md) | Proposed | Terminal tasks release their worktree and branch |
 | [0013](0013-kpi-status-artifacts.md) | Proposed | KPI status artifacts run as Claude tasks |
+| [0014](0014-annotated-multi-repo-plan-revisions.md) | Proposed | Annotated revisions and revision-pinned approval for multi-repo plans |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.
