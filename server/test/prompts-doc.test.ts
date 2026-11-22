@@ -36,6 +36,7 @@ test("prompts doc: the inline prompt builders are documented", () => {
     ["questionConvention", "server/dispatch.ts"],
     ["commentsSection", "server/pr.ts"],
     ["conflictSection", "server/pr.ts"],
+    ["planRevisionPrompt", "server/multi-repo.ts"],
     ["summarizeText", "server/llm.ts"],
     ["dailySummaryPrompt", "server/daily-summary.ts"],
     ["ImprovementAnalysis", "server/improvement.ts"],

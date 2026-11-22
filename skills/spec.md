@@ -44,7 +44,9 @@ curl -s -X POST "{corral_url}/api/reports" \
 ```
 
 Build the JSON with a tool (`jq -n`, a heredoc) so quotes and newlines in the
-markdown are escaped. After the plan is accepted, stop: the human approves it.
+markdown are escaped. After the plan is accepted, wait idle for approval or
+revision feedback (do not exit the session). When revision comments arrive,
+address all of them and submit a fresh `POST /api/reports` with `kind: "plan"`.
 
 ## If you need the human: report a question
 

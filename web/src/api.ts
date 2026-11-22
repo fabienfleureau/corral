@@ -4,18 +4,20 @@ import type { KpiId, KpiSettings, KpiView } from "../../shared/kpis";
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
 import type { AttachmentInput } from "./attachments";
-import type { AgentQuota, Config, DailyActivity, Epic, EpicDetail, EpicSummary, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, TrackedTerminal, UsageRange, UsageReport } from "./types";
+import type { AgentQuota, Config, DailyActivity, Epic, EpicDetail, EpicSummary, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlanReview, PlanReviewComment, PlanRevisionsResponse, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, TrackedTerminal, UsageRange, UsageReport } from "./types";
 
 /** Schedule and run state of a server-side analysis (improvement, skills). */
 export type AnalysisStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly data?: Record<string, unknown>;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, data?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -101,13 +103,17 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
   }
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
+    let errorData: Record<string, unknown> | undefined;
     try {
-      const data = (await res.json()) as { error?: string };
-      if (data && typeof data.error === "string") message = data.error;
+      const data = (await res.json()) as Record<string, unknown>;
+      if (data && typeof data === "object") {
+        errorData = data;
+        if (typeof data.error === "string") message = data.error;
+      }
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, errorData);
   }
   if (method !== "GET") mutationVersion++;
   try {
@@ -246,7 +252,15 @@ export const api = {
   listTasks: (status?: Task["status"]): Promise<Task[]> =>
     get<Task[]>(`/api/tasks${query({ status })}`),
   createTask: (input: NewTaskInput): Promise<Task> => post<Task>("/api/tasks", input),
-  approvePlan: (taskId: string): Promise<{ children: Task[] }> => post<{ children: Task[] }>(`/api/tasks/${taskId}/approve-plan`),
+  getPlanRevisions: (taskId: string): Promise<PlanRevisionsResponse> =>
+    get<PlanRevisionsResponse>(`/api/tasks/${taskId}/plan-revisions`),
+  requestPlanChanges: (
+    taskId: string,
+    input: { revision_id: string; note?: string; comments?: PlanReviewComment[] },
+  ): Promise<{ review: PlanReview; item: Item | null; sent_to: string }> =>
+    post<{ review: PlanReview; item: Item | null; sent_to: string }>(`/api/tasks/${taskId}/request-plan-changes`, input),
+  approvePlan: (taskId: string, revisionId?: string): Promise<{ children: Task[] }> =>
+    post<{ children: Task[] }>(`/api/tasks/${taskId}/approve-plan`, revisionId ? { revision_id: revisionId } : undefined),
   patchTask: (id: string, input: Partial<Task>): Promise<Task> => patch<Task>(`/api/tasks/${id}`, input),
   requestArtifact: (id: string): Promise<{ ok: boolean }> => post(`/api/tasks/${id}/artifact`),
   /** Archive a task with its session when it has one; otherwise just archive the task. */

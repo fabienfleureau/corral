@@ -1,13 +1,15 @@
 // Inbox — mail-style two-pane dispatch-and-review view.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { api } from "../api";
+import { ApiError, api } from "../api";
 import type { Item, SessionInfo, Task, TrackedTerminal } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
 import { ExternalLinkIcon, JiraPill, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
 import { ItemBody } from "../item-body";
+import { PlanView, type PlanStaleConflict } from "../PlanView";
+import { clearPlanDraft } from "../plan-draft";
 import { agentRunStatus, inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxItems, selectedInboxItem, type AgentRunStatus } from "../inbox-selection";
 import { INBOX_ACTION_COOLDOWN_MS, inboxActionsLocked } from "../inbox-action-lock";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
@@ -144,11 +146,23 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [openBusy, setOpenBusy] = useState(false);
   const [attachCmd, setAttachCmd] = useState<string | null>(null);
   const [grillOpen, setGrillOpen] = useState(false);
+  const [planViewing, setPlanViewing] = useState<{ revisionId: string | null; version: number | null }>({ revisionId: null, version: null });
+  const [planConflict, setPlanConflict] = useState<PlanStaleConflict | null>(null);
 
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // A different item must not inherit an open interview round.
-  useEffect(() => { setGrillOpen(false); }, [selected?.id]);
+  const handlePlanViewingChange = useCallback((revisionId: string | null, version: number | null) => {
+    setPlanViewing((prev) => (prev.revisionId === revisionId && prev.version === version ? prev : { revisionId, version }));
+  }, []);
+
+  const clearPlanConflict = useCallback(() => setPlanConflict(null), []);
+
+  // A different item must not inherit an open interview round or stale plan notice.
+  useEffect(() => {
+    setGrillOpen(false);
+    setPlanConflict(null);
+    setPlanViewing({ revisionId: null, version: null });
+  }, [selected?.id]);
 
   // The cooldown outlives the selected item: the next one moves under the
   // same buttons as soon as the current item leaves the list.
@@ -447,6 +461,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                         ) : (
                           <span className="badge badge-wait">needs work</span>
                         )
+                      ) : item.kind === "plan" && item.status === "open" && item.handling === 1 ? (
+                        <span className="badge badge-mine">agent revising</span>
                       ) : null}
                     </span>
                   </span>
@@ -560,7 +576,22 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             </div>
 
             <div className="detail-body">
-              <ItemBody item={selected} />
+              {selected.kind === "plan" && linkedTask?.kind === "spec" ? (
+                <PlanView
+                  item={selected}
+                  task={linkedTask}
+                  eventVersion={eventVersion}
+                  externalConflict={planConflict}
+                  onClearExternalConflict={clearPlanConflict}
+                  onViewingRevisionChange={handlePlanViewingChange}
+                  onChangesRequested={(updated) => {
+                    if (updated) applyItem(updated);
+                    else refresh();
+                  }}
+                />
+              ) : (
+                <ItemBody item={selected} />
+              )}
               {selected.context ? (
                 <details className="context-drawer">
                   <summary>{selected.kind === "digest" && !selected.task_id ? "Analysis evidence" : "Recent agent output"}</summary>
@@ -589,7 +620,31 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 {selected.kind === "plan" && selected.status === "open" && linkedTask?.kind === "spec" ? (
                   <button
                     className="btn btn-primary"
-                    onClick={() => void runAction(async () => { await api.approvePlan(linkedTask.id); return api.resolveItem(selected.id); })}
+                    onClick={() => void (async () => {
+                      if (actionsLocked) return;
+                      setActionBusy(true);
+                      setActionError(null);
+                      setPlanConflict(null);
+                      try {
+                        await api.approvePlan(linkedTask.id, planViewing.revisionId ?? undefined);
+                        if (planViewing.revisionId) clearPlanDraft(window.localStorage, linkedTask.id, planViewing.revisionId);
+                        applyItem({ ...selected, status: "resolved", resolved_ms: Date.now() });
+                        lockActions();
+                      } catch (err: unknown) {
+                        if (err instanceof ApiError && err.status === 409 && err.data?.current_revision_id) {
+                          setPlanConflict({
+                            fromRevisionId: planViewing.revisionId ?? "",
+                            fromVersion: planViewing.version ?? 1,
+                            toRevisionId: typeof err.data.current_revision_id === "string" ? err.data.current_revision_id : null,
+                            toVersion: typeof err.data.current_version === "number" ? err.data.current_version : null,
+                          });
+                        } else {
+                          setActionError(errText(err));
+                        }
+                      } finally {
+                        setActionBusy(false);
+                      }
+                    })()}
                     disabled={actionsLocked}
                     title="Create one task per sub-project, each carrying the contract"
                   >
@@ -667,7 +722,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 </div>
               ) : null}
 
-              {selected.kind === "launch" || selected.kind === "amendment" ? null : <div className="reply-block">
+              {selected.kind === "launch" || selected.kind === "amendment" || (selected.kind === "plan" && linkedTask?.kind === "spec") ? null : <div className="reply-block">
                 {grillRound.length > 0 ? <>
                   <button type="button" className="btn btn-primary"
                     title="Open the interview round in a modal"
