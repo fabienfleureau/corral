@@ -148,7 +148,9 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
     repoPath,
   );
   const d = JSON.parse(out) as Record<string, unknown>;
-  const slug = await repoSlug(repoPath);
+  const state = String(d.state).toUpperCase();
+  // Merged/closed PRs are terminal: skip reviews and GraphQL thread fetches.
+  const slug = state === "OPEN" ? await repoSlug(repoPath) : null;
   let humanApprovals: string[] | null = null;
   if (slug) {
     try {
@@ -222,8 +224,18 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
   };
 }
 
+const GITLAB_MR_URL = /^(https?:\/\/.+?)(?:\/-)?\/merge_requests\/(\d+)(?:[/?#].*)?$/;
+
+function gitlabHost(repoUrl: string): string | null {
+  try {
+    return new URL(repoUrl).host || null;
+  } catch {
+    return null;
+  }
+}
+
 async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | null> {
-  const match = branch.match(/^(https?:\/\/.+?)\/-\/merge_requests\/(\d+)(?:[/?#].*)?$/);
+  const match = branch.match(GITLAB_MR_URL);
   const out = match
     ? await run("glab", ["mr", "view", match[2], "--repo", match[1], "--output", "json"], repoPath)
     : await run("glab", ["mr", "list", "--source-branch", branch, "--all", "--output", "json"], repoPath);
@@ -232,20 +244,30 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
   if (list.length === 0) return null;
   const mr = list[0];
   const iid = Number(mr.iid ?? 0);
-  const api = (path: string) => run("glab", ["api", `projects/:id/merge_requests/${iid}${path}`], repoPath);
+  const rawState = String(mr.state ?? "opened").toUpperCase();
+  const state = rawState === "OPENED" ? "OPEN" : rawState;
+  const host = match ? gitlabHost(match[1]) : null;
+  // The MR may live in another project than the task repo (`:id` resolves from
+  // the cwd's remote): address it by its own project_id when available.
+  const project = Number(mr.project_id) > 0 ? String(Number(mr.project_id)) : ":id";
+  const api = (path: string) =>
+    run("glab", ["api", ...(host ? ["--hostname", host] : []), `projects/${project}/merge_requests/${iid}${path}`], repoPath);
 
-  // Each fetch is independent: a failing one degrades only its own field.
-  const [full, approvals, changes, discussions] = await Promise.all([
-    api("").then((s) => JSON.parse(s) as { description?: string; has_conflicts?: boolean; head_pipeline?: { status?: string } | null }).catch(() => null),
-    api("/approvals").then((s) => JSON.parse(s) as { approved_by?: { user?: { username?: string; bot?: boolean } }[] }).catch(() => null),
-    api("/changes").then((s) => JSON.parse(s) as { changes?: { diff?: string }[] }).catch(() => null),
-    api("/discussions?per_page=100")
-      .then((s) => JSON.parse(s) as {
-        id?: string;
-        notes?: { resolvable?: boolean; resolved?: boolean; author?: { username?: string }; body?: string }[];
-      }[])
-      .catch(() => null),
-  ]);
+  // Merged/closed MRs are terminal: skip the four extra API calls so sweeps
+  // stay fast and don't burn GitLab rate limits on non-open MRs.
+  const [full, approvals, changes, discussions] = state === "OPEN"
+    ? await Promise.all([
+        api("").then((s) => JSON.parse(s) as { description?: string; has_conflicts?: boolean; head_pipeline?: { status?: string } | null }).catch(() => null),
+        api("/approvals").then((s) => JSON.parse(s) as { approved_by?: { user?: { username?: string; bot?: boolean } }[] }).catch(() => null),
+        api("/changes").then((s) => JSON.parse(s) as { changes?: { diff?: string }[] }).catch(() => null),
+        api("/discussions?per_page=100")
+          .then((s) => JSON.parse(s) as {
+            id?: string;
+            notes?: { resolvable?: boolean; resolved?: boolean; author?: { username?: string }; body?: string }[];
+          }[])
+          .catch(() => null),
+      ])
+    : [null, null, null, null];
 
   let additions = 0;
   let deletions = 0;
@@ -266,12 +288,17 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
       body: String(note.body ?? "").slice(0, 2000),
     });
   }
-  // Pipeline unknown (MR fetch failed) = pending, never "no checks".
-  const checks = full ? gitlabPipelineChecks(full.head_pipeline?.status) : { total: 1, failed: 0, pending: true };
+  const pipelineStatus = full ? full.head_pipeline?.status : (mr.head_pipeline as { status?: string } | null | undefined)?.status;
+  // Pipeline unknown on an open MR (MR fetch failed) = pending, never "no checks".
+  const checks = state !== "OPEN"
+    ? gitlabPipelineChecks(pipelineStatus)
+    : full
+      ? gitlabPipelineChecks(full.head_pipeline?.status)
+      : { total: 1, failed: 0, pending: true };
   return {
     url: String(mr.web_url ?? ""),
     title: String(mr.title ?? ""),
-    state: String(mr.state ?? "opened").toUpperCase() === "OPENED" ? "OPEN" : String(mr.state).toUpperCase(),
+    state,
     number: iid,
     description: String(mr.description ?? "") || full?.description || "",
     additions,
@@ -283,7 +310,7 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
     human_approvals: approvals?.approved_by ? approvals.approved_by.flatMap(({ user }) => user?.username && !user.bot && !/^gitlab[ _-]*duo$/i.test(user.username) ? [user.username] : []) : null,
     checks,
     threads,
-    threads_known: discussions !== null,
+    threads_known: state !== "OPEN" || discussions !== null,
   };
 }
 
@@ -292,11 +319,14 @@ export async function findPr(repoPath: string, branch: string): Promise<PrInfo |
   // local checkout. A bare branch still needs a repo to resolve it against.
   const urlRef = /^https?:\/\//.test(branch);
   if (!branch || (!repoPath && !urlRef)) return null;
+  const gitlabUrl = GITLAB_MR_URL.test(branch);
   const lookup = async (cwd: string): Promise<PrInfo | null> => {
-    try {
-      return await findPrGitHub(cwd, branch);
-    } catch {
-      /* not GitHub or gh missing — try GitLab */
+    if (!gitlabUrl) {
+      try {
+        return await findPrGitHub(cwd, branch);
+      } catch {
+        /* not GitHub or gh missing — try GitLab */
+      }
     }
     try {
       return await findPrGitLab(cwd, branch);
@@ -567,7 +597,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   if (staleTask.kind === "review" || staleTask.kind === "spec" || staleTask.kind === "analysis" || staleTask.kind === "ops" || staleTask.kind === "grill") return null;
   const finder = opts.finder ?? findPr;
   const item = db.listItems({ kind: "pr" }).find((i) => i.task_id === staleTask.id && i.status !== "archived");
-  const reportedUrl = item?.body.match(/https?:\/\/[^\s<>]+(?:\/pull\/|\/-\/merge_requests\/)\d+/)?.[0];
+  const reportedUrl = item?.body.match(/https?:\/\/[^\s<>)]+(?:\/pull\/|(?:\/-)?\/merge_requests\/)\d+/)?.[0];
   const ref = staleTask.pr_url || reportedUrl || staleTask.branch || "";
   const pr = await finder(staleTask.repo_path, ref);
   if (!pr) return null;
@@ -585,7 +615,8 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   // left the queue. Its status still needs following, but no agent should be
   // respawned for work on a task nobody is running.
   const agentTask = task.status === "dispatched" || task.status === "done";
-  const existing = db.listItems({ kind: "pr" }).find((i) => i.task_id === task.id) ?? null;
+  const taskPrItems = db.listItems({ kind: "pr" }).filter((i) => i.task_id === task.id);
+  const existing = taskPrItems.find((i) => i.status !== "archived") ?? taskPrItems[0] ?? null;
   const shouldResolve = pr.state !== "OPEN";
   const merged = pr.state === "MERGED";
   syncJiraPrStage(db, hub, task, pr, ready, merged, opts);
@@ -840,9 +871,18 @@ export function startSyncAllPrs(
   })();
 }
 
-/** Tasks whose branch may have a PR: dispatched/done, with a repo and branch. */
+/** Tasks whose branch may have a PR: dispatched/done, with a repo and branch,
+ *  excluding done tasks whose PR was already recorded as merged (a merged
+ *  PR/MR cannot reopen; polling historical merged tasks stalls the sweep and
+ *  burns platform rate limits). Any task that still has a live PR item is
+ *  followed separately by startSyncAllPrs. */
 export function prCandidateTasks(db: Db): Task[] {
   return db
     .listTasks()
-    .filter((t) => t.kind !== "review" && t.kind !== "spec" && t.kind !== "analysis" && t.kind !== "ops" && t.kind !== "grill" && (t.status === "dispatched" || t.status === "done") && t.branch && t.repo_path);
+    .filter((t) =>
+      t.kind !== "review" && t.kind !== "spec" && t.kind !== "analysis" && t.kind !== "ops" && t.kind !== "grill"
+      && (t.status === "dispatched" || t.status === "done")
+      && t.branch && t.repo_path
+      && !(t.status === "done" && readMeta(t.pr_meta).pr?.state === "MERGED"),
+    );
 }

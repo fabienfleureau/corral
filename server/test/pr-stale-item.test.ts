@@ -2,11 +2,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "../db.ts";
-import { findPr, syncAllPrs, syncTaskPr, type PrInfo } from "../pr.ts";
+import { findPr, prCandidateTasks, syncAllPrs, syncTaskPr, type PrInfo } from "../pr.ts";
 import type { Config } from "../config.ts";
 import type { Item, Task } from "../types.ts";
 import type { WorkerBackend } from "../worker.ts";
@@ -134,4 +134,108 @@ test("a task with no live session is never respawned by a PR sync", withDb(async
   });
 
   assert.deepEqual(started, [], "no agent is respawned for an archived task");
+}));
+
+test("periodic sync skips already-merged done tasks with no live PR item", withDb(async (db) => {
+  const mergedMeta = JSON.stringify({ pr: { url: URL, state: "MERGED" } });
+  db.insertTask(task({ id: "merged-archived", status: "done", pr_meta: mergedMeta, pr_url: "https://gitlab.example/g/p/-/merge_requests/1" }));
+  db.insertItem(prItem({ id: "item-archived", task_id: "merged-archived", status: "archived" }));
+  db.insertTask(task({ id: "merged-still-open", status: "done", pr_meta: mergedMeta, pr_url: "https://gitlab.example/g/p/-/merge_requests/2" }));
+  db.insertItem(prItem({ id: "item-open", task_id: "merged-still-open", status: "open" }));
+  db.insertTask(task({ id: "active", status: "done", pr_meta: JSON.stringify({ pr: { url: URL, state: "OPEN" } }), pr_url: "https://gitlab.example/g/p/-/merge_requests/3" }));
+
+  assert.deepEqual(prCandidateTasks(db).map((t) => t.id), ["active"]);
+
+  const checked: string[] = [];
+  await syncAllPrs(db, hub, { finder: (_repo, ref) => { checked.push(ref); return pr({ url: ref }); } }, 0);
+
+  assert.deepEqual(
+    checked,
+    ["https://gitlab.example/g/p/-/merge_requests/2", "https://gitlab.example/g/p/-/merge_requests/3"],
+    "historical merged tasks without live items are skipped while live items still resolve",
+  );
+  assert.equal(db.getItem("item-open")?.status, "archived");
+}));
+
+test("findPr routes GitLab MR URLs straight to glab and skips detail calls when merged", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-glab-merged-"));
+  const originalPath = process.env.PATH;
+  const logFile = join(dir, "calls.log");
+  try {
+    writeFileSync(join(dir, "gh"), `#!/bin/sh\necho "gh $*" >> "${logFile}"\nexit 1\n`, { mode: 0o755 });
+    writeFileSync(join(dir, "glab"), `#!/bin/sh
+echo "glab $*" >> "${logFile}"
+case "$*" in
+  "mr view 42 --repo https://gitlab.example/group/sub/proj --output json")
+    echo '{"iid":42,"project_id":99,"state":"merged","title":"Ship it","web_url":"https://gitlab.example/group/sub/proj/-/merge_requests/42"}'
+    ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+    process.env.PATH = `${dir}:${originalPath}`;
+
+    const found = await findPr(dir, "https://gitlab.example/group/sub/proj/-/merge_requests/42");
+    assert.equal(found?.state, "MERGED");
+    assert.equal(found?.url, "https://gitlab.example/group/sub/proj/-/merge_requests/42");
+    // Legacy URL without /-/ also resolves.
+    const legacy = await findPr(dir, "https://gitlab.example/group/sub/proj/merge_requests/42");
+    assert.equal(legacy?.state, "MERGED");
+
+    const calls = readFileSync(logFile, "utf8").trim().split("\n");
+    assert.equal(calls.some((line) => line.startsWith("gh ")), false, "gh is never invoked for GitLab MR URLs");
+    assert.equal(calls.some((line) => line.startsWith("glab api ")), false, "extra glab api calls are skipped for merged MRs");
+  } finally {
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findPr reads open GitLab MR details from the MR's own project and host", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-glab-cross-"));
+  const originalPath = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(dir, "glab"), `#!/bin/sh
+case "$*" in
+  "mr view 23 --repo https://gitlab.example/g/other --output json")
+    echo '{"iid":23,"project_id":42,"state":"opened","title":"Cross","web_url":"https://gitlab.example/g/other/-/merge_requests/23"}'
+    ;;
+  "api --hostname gitlab.example projects/42/merge_requests/23/approvals")
+    echo '{"approved_by":[{"user":{"username":"alice","bot":false}}]}'
+    ;;
+  "api --hostname gitlab.example projects/42/merge_requests/23/changes")
+    echo '{"changes":[]}'
+    ;;
+  "api --hostname gitlab.example projects/42/merge_requests/23/discussions?per_page=100")
+    echo '[]'
+    ;;
+  "api --hostname gitlab.example projects/42/merge_requests/23")
+    echo '{"has_conflicts":false,"head_pipeline":{"status":"success"}}'
+    ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+    process.env.PATH = `${dir}:${originalPath}`;
+
+    const found = await findPr(dir, "https://gitlab.example/g/other/-/merge_requests/23");
+    assert.ok(found);
+    assert.equal(found.state, "OPEN");
+    assert.deepEqual(found.human_approvals, ["alice"]);
+    assert.equal(found.mergeable, "MERGEABLE");
+  } finally {
+    process.env.PATH = originalPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("syncTaskPr updates the live PR item even when a newer archived PR item exists", withDb(async (db) => {
+  const now = Date.now();
+  db.insertTask(task({ id: "task-1", status: "done" }));
+  db.insertItem(prItem({ id: "item-live", status: "open", created_ms: now - 1000 }));
+  db.insertItem(prItem({ id: "item-archived", status: "archived", created_ms: now }));
+
+  await syncTaskPr(db, hub, db.getTask("task-1")!, { finder: () => pr({ state: "CLOSED" }) });
+
+  assert.equal(db.getItem("item-live")?.status, "resolved");
+  assert.equal(db.getItem("item-archived")?.status, "archived");
 }));

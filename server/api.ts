@@ -734,7 +734,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (task.kind === "spec") return json(res, 400, { error: "spec tasks have no PR of their own" });
     if (task.kind === "grill") return json(res, 400, { error: "interview tasks have no PR of their own" });
     if (task.kind === "ops") return json(res, 400, { error: "ops tasks have no PR of their own" });
-    if (!task.branch) return json(res, 400, { error: "task has no branch (dispatch it first)" });
+    const hasPrItem = state.db.listItems({ kind: "pr" }).some((i) => i.task_id === task.id && i.status !== "archived");
+    if (!task.branch && !task.pr_url && !hasPrItem) return json(res, 400, { error: "task has no branch or PR URL (dispatch it first)" });
     const force = (body as { force?: unknown } | undefined)?.force === true;
     const report: { delivered: PrDelivery | null } = { delivered: null };
     try {
