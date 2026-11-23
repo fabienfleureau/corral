@@ -26,7 +26,7 @@ import { ImprovementAnalysis } from "./improvement.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
 import { KPI_IDS } from "../shared/kpis.ts";
-import { KpiMonitor } from "./kpi.ts";
+import { KpiMonitor, parseOneTimeInstruction } from "./kpi.ts";
 import { ArtifactRequestError, artifactFavorite, kpiArtifactPrompt, parseArtifactRequest } from "./kpi-artifact.ts";
 import { isInterval } from "./analysis-schedule.ts";
 import { DATA_NOT_INSTRUCTIONS, dispatchTask } from "./dispatch.ts";
@@ -225,10 +225,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     try { json(res, 200, kpis.configure(id, body)); }
     catch (err) { json(res, 400, { error: (err as Error).message }); }
   });
-  on("POST", "/api/kpis/:id/run", (_req, res, { params }) => {
+  on("POST", "/api/kpis/:id/run", (_req, res, { params, body }) => {
     const id = KPI_IDS.find((value) => value === params.id);
     if (!id) return json(res, 404, { error: "Unknown KPI" });
-    try { json(res, 202, kpis.runNow(id)); }
+    let instruction: string;
+    try { instruction = parseOneTimeInstruction(body); }
+    catch (err) { return json(res, 400, { error: (err as Error).message }); }
+    try { json(res, 202, kpis.runNow(id, instruction)); }
     catch (err) { json(res, 409, { error: (err as Error).message }); }
   });
 
@@ -1063,9 +1066,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     catch (err) { json(res, 400, { error: (err as Error).message }); }
   });
 
-  on("POST", "/api/epics/:id/agent/run", (_req, res, { params }) => {
+  on("POST", "/api/epics/:id/agent/run", (_req, res, { params, body }) => {
     if (!state.db.getEpic(params.id)) return json(res, 404, { error: "epic not found" });
-    try { json(res, 202, epicAgents.runNow(params.id)); }
+    let instruction: string;
+    try { instruction = parseOneTimeInstruction(body); }
+    catch (err) { return json(res, 400, { error: (err as Error).message }); }
+    try { json(res, 202, epicAgents.runNow(params.id, instruction)); }
     catch (err) { json(res, 409, { error: (err as Error).message }); }
   });
 

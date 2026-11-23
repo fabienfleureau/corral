@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { Db } from "../db.ts";
-import { KpiMonitor, parseKpiReport, type KpiDeps } from "../kpi.ts";
+import { KpiMonitor, parseKpiReport, parseOneTimeInstruction, type KpiDeps } from "../kpi.ts";
 import type { Favorite } from "../favorites.ts";
 import type { Repo } from "../types.ts";
 import type { WorkerSession, WorkerStart } from "../worker.ts";
@@ -277,5 +277,51 @@ test("the favorite is resolved at launch, not copied into the settings", async (
     assert.equal(launches.length, 2);
     assert.equal(launches[1].model, "sonnet");
     assert.equal(launches[1].reasoning, "low");
+  } finally { db.close(); }
+});
+
+test("one-time KPI instructions are sent once, ask the agent to update memory, and are never saved in persistent context", async () => {
+  assert.equal(parseOneTimeInstruction(undefined), "");
+  assert.equal(parseOneTimeInstruction({}), "");
+  assert.equal(parseOneTimeInstruction({ instruction: "  Exclude staging events.  " }), "Exclude staging events.");
+  assert.throws(() => parseOneTimeInstruction("bad"), /object/i);
+  assert.throws(() => parseOneTimeInstruction({ instruction: 42 }), /one-time instruction/i);
+  assert.throws(() => parseOneTimeInstruction({ instruction: "x".repeat(6001) }), /6000/);
+
+  const db = new Db(":memory:");
+  try {
+    const launches: WorkerStart[] = [];
+    let session: WorkerSession;
+    const worker = {
+      start: async (input: WorkerStart) => {
+        launches.push(input);
+        session = { address: `inst-${launches.length}`, name: input.name, status: "done", state: "finished" } as WorkerSession;
+        return session;
+      },
+      get: async () => session,
+      list: async () => [session],
+      lastRunOutcome: async () => ({ kind: "message" as const, text: JSON.stringify(report) }),
+    };
+    const service = new KpiMonitor(db, worker, deps, () => start);
+    service.configure("kpi-1", { ...metric, ...agentSettings, intervalHours: 0, context: "Always use UTC." });
+
+    service.runNow("kpi-1", "Count duplicate events only once per user.");
+    await new Promise((resolve) => setImmediate(resolve));
+    await service.tick();
+
+    assert.equal(launches.length, 1);
+    assert.match(launches[0].prompt, /Always use UTC/);
+    assert.match(launches[0].prompt, /One-time operator instruction/);
+    assert.match(launches[0].prompt, /Count duplicate events only once per user\./);
+    assert.match(launches[0].prompt, /workspace memory file/i);
+    assert.equal(service.view("kpi-1").settings.context, "Always use UTC.");
+
+    // Next cycle does not repeat the one-time instruction.
+    service.runNow("kpi-1");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(launches.length, 2);
+    assert.match(launches[1].prompt, /Always use UTC/);
+    assert.doesNotMatch(launches[1].prompt, /One-time operator instruction/);
+    assert.doesNotMatch(launches[1].prompt, /Count duplicate events only once per user/);
   } finally { db.close(); }
 });

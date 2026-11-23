@@ -11,6 +11,7 @@ import type {
 import { api } from "./api";
 import { favoritesFor, repoContext } from "./favorite-context";
 import { Markdown } from "./markdown";
+import { OneTimeInstructionForm } from "./OneTimeInstructionForm";
 import type { PaneLimits } from "./pane-size";
 import { ResizeHandle } from "./ResizeHandle";
 import type { Favorite, Repo } from "./types";
@@ -112,18 +113,26 @@ export function EpicAgentPanel({
     }
   };
 
-  const run = async () => {
+  const run = async (instruction?: string) => {
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      onUpdate(await api.runEpicAgent(view.epicId));
+      onUpdate(await api.runEpicAgent(view.epicId, instruction));
     } catch (err) {
+      if (instruction) throw err;
       setError(errText(err));
     } finally {
       setBusy(false);
     }
   };
+
+  const canRun = !dirty && Boolean(settings.repoPath) && favoriteAvailable;
+  const runDisabledReason = dirty
+    ? "Save persistent settings before running."
+    : !settings.repoPath || !favoriteAvailable
+      ? "Configure a working directory and favorite in the settings pane first."
+      : undefined;
 
   const stepsDone = report?.steps.filter((step) => step.status === "done").length ?? 0;
   const attentionCount = (report?.problems.length ?? 0) + (report?.specGaps.length ?? 0) + (report?.clarifications.length ?? 0);
@@ -195,6 +204,19 @@ export function EpicAgentPanel({
             <AgentFindings title="Missing specs & info" entries={report?.specGaps} empty="No missing specifications or information." />
             <AgentFindings title="Clarifications needed" entries={report?.clarifications} empty="No clarifications requested." />
           </div>
+
+          <OneTimeInstructionForm
+            idPrefix="epic-agent-instruction"
+            resetKey={view.epicId}
+            headingLevel="h4"
+            helpText="Sent once to the agent, then cleared. Use this to answer clarifications or steer the next cycle — the agent will fold durable answers into its memory."
+            placeholder="Answer a clarification or give a one-time instruction for this run…"
+            busy={busy}
+            running={running}
+            canRun={canRun}
+            disabledReason={runDisabledReason}
+            onSend={(instruction) => run(instruction)}
+          />
 
           {report && (report.actionsTaken.length > 0 || report.nextSteps.length > 0) && (
             <div className="kpi-inputs">
@@ -312,7 +334,7 @@ export function EpicAgentPanel({
             </div>
 
             <div className="field">
-              <label htmlFor="epic-agent-context">Answers &amp; guidance</label>
+              <label htmlFor="epic-agent-context">Persistent context</label>
               <textarea
                 id="epic-agent-context"
                 name="context"
@@ -324,7 +346,7 @@ export function EpicAgentPanel({
                 onChange={(event) => change({ context: event.target.value })}
               />
               <small id="epic-agent-context-help" className="muted kpi-meta">
-                Answer clarification requests, fill spec gaps, or add constraints for the next cycle.
+                Saved across every cycle. Use for standing constraints, conventions, or durable epic context — not one-off answers.
               </small>
             </div>
           </div>

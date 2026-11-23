@@ -6,6 +6,7 @@ import { api } from "../api";
 import { KpiArtifactDialog } from "../KpiArtifactDialog";
 import { favoritesFor, repoContext } from "../favorite-context";
 import { Markdown } from "../markdown";
+import { OneTimeInstructionForm } from "../OneTimeInstructionForm";
 import { selectionTaskHash } from "../selection-task";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePaneWidth } from "../use-pane-size";
@@ -167,12 +168,22 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
     } catch (error) { setError(errText(error)); }
     finally { setBusy(false); }
   };
-  const run = async () => {
+  const run = async (instruction?: string) => {
     setBusy(true); setError(""); setNotice("");
-    try { onUpdate(await api.runKpi(id)); }
-    catch (error) { setError(errText(error)); }
+    try { onUpdate(await api.runKpi(id, instruction)); }
+    catch (error) {
+      if (instruction) throw error;
+      setError(errText(error));
+    }
     finally { setBusy(false); }
   };
+
+  const canRun = !dirty && Boolean(settings.repoPath) && favoriteAvailable;
+  const runDisabledReason = dirty
+    ? "Save persistent settings before running."
+    : !settings.repoPath || !favoriteAvailable
+      ? "Configure a working directory and favorite in the settings pane first."
+      : undefined;
 
   const paneStyle = { "--kpi-settings-width": `${settingsPane.width}px` } as CSSProperties;
 
@@ -197,6 +208,19 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
         <Findings title="Data and connectors" entries={report?.dataNeeds} empty="No data gaps reported." />
         <Findings title="Product questions" entries={report?.productQuestions} empty="No open product questions." />
       </div>
+
+      <OneTimeInstructionForm
+        idPrefix={`kpi-${id}-instruction`}
+        resetKey={id}
+        headingLevel="h2"
+        helpText="Sent once to the agent, then cleared. Use this to answer product questions or guide the next analysis — the agent will fold durable answers into its memory."
+        placeholder="Answer a product question or give a one-time instruction for this run…"
+        busy={busy}
+        running={running}
+        canRun={canRun}
+        disabledReason={runDisabledReason}
+        onSend={(instruction) => run(instruction)}
+      />
 
       <section className="panel-form">
         <h2 className="panel-title">Proposed improvements</h2>
@@ -310,12 +334,14 @@ function KpiDetail({ view, repos, favorites, loadingOptions, optionsError, onUpd
           </label>
           <p className="muted kpi-meta">Automatic cycles require Corral and the Omnigent runner to stay online.</p>
           {view.nextRunMs !== null && <p className="muted kpi-meta">Next cycle {view.nextRunMs <= Date.now() ? "due now" : new Date(view.nextRunMs).toLocaleString()}</p>}
-          <label className="field">
-            Product context and answers
-            <textarea name="context" rows={4} maxLength={6000} value={settings.context} disabled={busy}
+          <div className="field">
+            <label htmlFor="kpi-context">Persistent context</label>
+            <textarea id="kpi-context" name="context" rows={4} maxLength={6000} value={settings.context} disabled={busy}
               onChange={(event) => change({ context: event.target.value })} aria-describedby="kpi-context-help" />
-          </label>
-          <p id="kpi-context-help" className="muted kpi-meta">Add constraints or answers to product questions for the next cycle.</p>
+            <small id="kpi-context-help" className="muted kpi-meta">
+              Saved across every cycle. Use for standing product context, caveats, or constraints — not one-off answers.
+            </small>
+          </div>
           {optionsError && <div className="inline-error" role="alert">{optionsError}</div>}
         </>}
       </div>
