@@ -1,6 +1,6 @@
 // Record the README demo GIF: a scripted tour of the screenshot fixture
-// (inbox → tasks → pull requests), captured frame by frame over the Chrome
-// DevTools Protocol and encoded with ffmpeg. Run it through
+// (inbox → tasks → epics → pull requests → KPI), captured frame by frame over
+// the Chrome DevTools Protocol and encoded with ffmpeg. Run it through
 // capture-screenshot.sh with a .gif output; never point it at the live app.
 // The tour only selects, types and filters: nothing it clicks dispatches a
 // task, answers an agent or calls an LLM.
@@ -130,49 +130,70 @@ try {
   await page.send("Page.navigate", { url });
   await page.waitForEvent("Page.loadEventFired", 10000);
   await waitFor(`document.querySelectorAll(".item-list .item-row").length >= 5`);
+  await sleep(400);
   await page.evaluate(overlay);
   await setPointer(cursor.x, cursor.y);
 
+  // Select the Jira-backed question first so the opening frame shows a rich
+  // item with one-click answers and full task history rather than an empty PR.
+  const firstQuestion = await locate(".item-row", "Which keyboard shortcut");
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await page.send("Input.dispatchMouseEvent", { type, x: firstQuestion.x, y: firstQuestion.y, button: "left", clickCount: 1 });
+  }
+  await waitFor(`document.body.textContent.includes("Cmd/Ctrl+K")`);
+  await sleep(200);
+
   await caption("Everything your agents need from you, in one inbox");
-  await shot(2.6);
+  await shot(2.4);
   await caption("Agents ask questions with one-click answers");
-  await shot(2.2);
+  await shot(2.0);
 
   await caption("Every task keeps its history, from dispatch to PR");
   await click("button", "History", "document.querySelector('dialog[open]')");
-  await shot(2.6);
+  await shot(2.2);
   await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await waitFor("!document.querySelector('dialog[open]')");
 
   await caption("Review a multi-repo plan before it fans out");
-  await click(".item-row", "Add a size to widgets");
-  await shot(2.6);
+  await click(".item-row", "Add a size to widgets", "document.querySelector('.plan-diff-toggle')");
+  await shot(1.8);
+  await caption("Compare annotated plan revisions before approving");
+  await click(".plan-diff-toggle", "Changes since v1", "document.querySelector('.plan-diff')");
+  await shot(2.4);
 
-  await caption("A PR shows up once its checks and reviews pass");
+  await caption("A PR turns green once its checks and reviews pass");
   await click(".item-row", "rank results by recency");
-  await shot(2.6);
+  await shot(2.2);
 
   await caption("Until then it stays with the agent to fix");
   await click(".item-row", "refresh expired session");
-  await shot(2.4);
+  await shot(2.0);
 
-  await caption("Write a task, pick a harness, dispatch");
+  await caption("Write a task, pick a harness or favorite, dispatch");
   await click(".nav-item", "Tasks", `document.querySelector('textarea[placeholder="What should the agent do?"]')`);
   await click('textarea[placeholder="What should the agent do?"]', "");
   await type("Add a dark mode toggle to the settings page");
-  await shot(2.2);
+  await shot(2.0);
+
+  await caption("Track Jira epics, designs, and autonomous agent runs");
+  await click(".nav-item", "Epics", "document.querySelector('.epic-head')");
+  await shot(2.4);
 
   await caption("All your PRs and MRs, GitHub and GitLab");
   await click(".nav-item", "Pull Requests", "document.querySelector('.chip-row')");
-  await shot(2.4);
+  await shot(2.0);
   await caption("Spot the failing ones at a glance");
   await click(".chip-row .chip", "Failing");
+  await shot(2.0);
+
+  await caption("Monitor KPIs on a schedule with goals and proposals");
+  await click(".nav-item", "KPI", "document.querySelector('.kpi-goal-panel')");
   await shot(2.4);
 
   await caption("Corral: the work layer over your coding agents");
   await click(".nav-item", "Inbox", `document.querySelectorAll(".item-list .item-row").length >= 5`);
-  await shot(3);
+  await shot(2.8);
 } catch (err) {
   // Keep the frame the tour stopped on: it usually shows why.
   const { data } = await page.send("Page.captureScreenshot", { format: "png" });
