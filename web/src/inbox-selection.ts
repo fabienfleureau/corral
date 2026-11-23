@@ -1,4 +1,4 @@
-import type { Item, SessionInfo, Task, TrackedTerminal } from "./types.js";
+import type { Item, Repo, SessionInfo, Task, TrackedTerminal } from "./types.js";
 
 /** The agent has the item: no human action needed while its run is in flight. */
 export function isHandlingItem(item: Item): boolean {
@@ -69,4 +69,39 @@ export function agentRunStatus(task: Task, sessions: SessionInfo[], terminals: T
   const terminal = terminals.find((t) => address ? t.address === address : t.task_id === task.id);
   if (!terminal?.last_status) return "unknown";
   return STOPPED_STATUSES.has(terminal.last_status) ? "stopped" : "running";
+}
+
+export type TaskLocation = {
+  /** Registered repo name, or the folder's basename when unregistered. */
+  label: string;
+  /** Full path (for tooltips and the detail pane). */
+  path: string;
+  /** True when the path matches a registered repository. */
+  isRepo: boolean;
+};
+
+function trimTrailingSlashes(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed) return "";
+  const withoutTrailing = trimmed.replace(/[\\/]+$/, "");
+  return withoutTrailing || trimmed[0];
+}
+
+function pathBasename(path: string): string {
+  const normalized = trimTrailingSlashes(path);
+  if (!normalized) return "";
+  const parts = normalized.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? normalized;
+}
+
+/** Resolve a task's repo or working folder for display in the inbox. */
+export function taskLocation(task: Pick<Task, "repo_path"> | null | undefined, repos: Repo[]): TaskLocation | null {
+  const raw = task?.repo_path?.trim();
+  if (!raw) return null;
+  const normalized = trimTrailingSlashes(raw);
+  const repo = repos.find((r) => trimTrailingSlashes(r.path) === normalized);
+  if (repo) {
+    return { label: repo.name || pathBasename(repo.path), path: repo.path, isRepo: true };
+  }
+  return { label: pathBasename(normalized), path: raw, isRepo: false };
 }

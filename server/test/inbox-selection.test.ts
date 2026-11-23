@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agentRunStatus, selectedInboxItem } from "../../web/src/inbox-selection.ts";
-import type { Item, SessionInfo, Task, TrackedTerminal } from "../../web/src/types.ts";
+import { agentRunStatus, selectedInboxItem, taskLocation } from "../../web/src/inbox-selection.ts";
+import type { Item, Repo, SessionInfo, Task, TrackedTerminal } from "../../web/src/types.ts";
 
 test("an archived selected item leaves the open inbox detail", () => {
   const open = { id: "one", status: "open" } as Item;
@@ -116,4 +116,39 @@ test("a session with no terminal address is matched by task id", () => {
   const noAddress = task("one", null);
   assert.equal(agentRunStatus(noAddress, [{ ...session("other", "working"), task_id: "one" }], []), "running");
   assert.equal(agentRunStatus(noAddress, [], [{ ...terminal("other", "idle"), task_id: "one" }]), "stopped");
+});
+
+test("taskLocation resolves registered repos by name and unregistered folders by basename", () => {
+  const repos = [
+    { id: "r1", name: "example-project", path: "/sample/example-project" },
+    { id: "r2", name: "Side App", path: "/sample/side-project/" },
+  ] as Repo[];
+
+  assert.deepEqual(
+    taskLocation({ repo_path: "/sample/example-project" }, repos),
+    { label: "example-project", path: "/sample/example-project", isRepo: true },
+  );
+  assert.deepEqual(
+    taskLocation({ repo_path: "/sample/example-project/" }, repos),
+    { label: "example-project", path: "/sample/example-project", isRepo: true },
+  );
+  assert.deepEqual(
+    taskLocation({ repo_path: "/sample/side-project" }, repos),
+    { label: "Side App", path: "/sample/side-project/", isRepo: true },
+  );
+  assert.deepEqual(
+    taskLocation({ repo_path: "/sample/workspace" }, repos),
+    { label: "workspace", path: "/sample/workspace", isRepo: false },
+  );
+  assert.deepEqual(
+    taskLocation({ repo_path: "/sample/workspace/" }, repos),
+    { label: "workspace", path: "/sample/workspace/", isRepo: false },
+  );
+  assert.deepEqual(
+    taskLocation({ repo_path: "/" }, repos),
+    { label: "/", path: "/", isRepo: false },
+  );
+  assert.equal(taskLocation({ repo_path: "" }, repos), null);
+  assert.equal(taskLocation({ repo_path: "   " }, repos), null);
+  assert.equal(taskLocation(null, repos), null);
 });

@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { ApiError, api } from "../api";
-import type { Item, SessionInfo, Task, TrackedTerminal } from "../types";
+import type { Item, Repo, SessionInfo, Task, TrackedTerminal } from "../types";
 import { errText, formatTs, itemPrUrl, prLabel, snoozeUntil, timeAgo } from "../util";
 import { ExternalLinkIcon, JiraPill, KindIcon, Spinner } from "../ui";
 import { Markdown } from "../markdown";
 import { ItemBody } from "../item-body";
 import { PlanView, type PlanStaleConflict } from "../PlanView";
 import { clearPlanDraft } from "../plan-draft";
-import { agentRunStatus, inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxItems, selectedInboxItem, type AgentRunStatus } from "../inbox-selection";
+import { agentRunStatus, inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxItems, selectedInboxItem, taskLocation, type AgentRunStatus } from "../inbox-selection";
 import { INBOX_ACTION_COOLDOWN_MS, inboxActionsLocked } from "../inbox-action-lock";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle, itemDisplayTitle } from "../inbox-title";
@@ -124,6 +124,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("open");
   const [allItems, setAllItems] = useState<Item[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [repos, setRepos] = useState<Repo[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [terminals, setTerminals] = useState<TrackedTerminal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -179,13 +180,15 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
     Promise.all([
       api.listItems(),
       api.listTasks(),
+      api.listRepos().catch(() => [] as Repo[]),
       api.listSessions().catch(() => [] as SessionInfo[]),
       api.listTerminals().catch(() => [] as TrackedTerminal[]),
     ])
-      .then(([itemList, taskList, sessionList, terminalList]) => {
+      .then(([itemList, taskList, repoList, sessionList, terminalList]) => {
         if (cancelled) return;
         setAllItems(itemList);
         setTasks(taskList);
+        setRepos(repoList);
         setSessions(sessionList);
         setTerminals(terminalList);
         setError(null);
@@ -370,6 +373,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
 
   const linkedTask = selected?.task_id ? tasksById[selected.task_id] ?? null : null;
   const selectedTask = selectedTaskId ? inProgressTasks.find((task) => task.id === selectedTaskId) ?? null : null;
+  const selectedTaskLocation = taskLocation(selectedTask, repos);
+  const linkedTaskLocation = taskLocation(linkedTask, repos);
   const grillRound = selected && linkedTask && (linkedTask.kind === "grill" || linkedTask.kind === "grill-docs") && !selected.elicitation
     ? parseGrillRound(selected.structured ? (selected.summary || selected.body) : selected.body)
     : [];
@@ -402,24 +407,32 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
         </div>
         {error ? <div className="inline-error">{error}</div> : null}
         <div className="item-list">
-          {statusFilter === "in-progress" && inProgressTasks.map((task) => (
-            <div key={task.id} role="button" tabIndex={0}
-              className={`item-row ${selectedTaskId === task.id ? "selected" : ""}`}
-              onClick={() => { setSelected(null); setSelectedTaskId(task.id); }}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(null); setSelectedTaskId(task.id); } }}>
-              <span className="item-row-main">
-                <span className="item-row-title">{task.title || task.prompt.trim().split("\n")[0] || "Untitled task"}</span>
-                <span className="item-row-sub">
-                  <span>Task · in progress</span>
-                  <AgentRunBadge status={agentRunStatus(task, sessions, terminals)} />
+          {statusFilter === "in-progress" && inProgressTasks.map((task) => {
+            const location = taskLocation(task, repos);
+            return (
+              <div key={task.id} role="button" tabIndex={0}
+                className={`item-row ${selectedTaskId === task.id ? "selected" : ""}`}
+                onClick={() => { setSelected(null); setSelectedTaskId(task.id); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(null); setSelectedTaskId(task.id); } }}>
+                <span className="item-row-main">
+                  <span className="item-row-title">{task.title || task.prompt.trim().split("\n")[0] || "Untitled task"}</span>
+                  {location ? (
+                    <span className="item-row-context" title={location.path}>
+                      {location.isRepo ? location.label : location.path}
+                    </span>
+                  ) : null}
+                  <span className="item-row-sub">
+                    <span>Task · in progress</span>
+                    <AgentRunBadge status={agentRunStatus(task, sessions, terminals)} />
+                  </span>
                 </span>
-              </span>
-              <span className="item-row-side">
-                <JiraPill jiraKey={task.jira_key} jiraUrl={task.jira_url} />
-                <span className="time" title={formatTs(task.created_ms)}>{timeAgo(task.created_ms)}</span>
-              </span>
-            </div>
-          ))}
+                <span className="item-row-side">
+                  <JiraPill jiraKey={task.jira_key} jiraUrl={task.jira_url} />
+                  <span className="time" title={formatTs(task.created_ms)}>{timeAgo(task.created_ms)}</span>
+                </span>
+              </div>
+            );
+          })}
           {loading && items.length === 0 && (statusFilter !== "in-progress" || inProgressTasks.length === 0) ? (
             <div className="pane-note">
               <Spinner label="Loading…" />
@@ -431,6 +444,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               const needsYou = item.status === "open" && (item.kind === "question" || item.kind === "plan" || item.kind === "launch" || item.kind === "amendment");
               const snoozed = item.status === "open" && !isHandlingItem(item) && item.snooze_until_ms !== null && item.snooze_until_ms > Date.now();
               const rowTask = item.task_id ? tasksById[item.task_id] : undefined;
+              const rowLocation = statusFilter === "in-progress" ? taskLocation(rowTask, repos) : null;
               const rowPr = itemPrUrl(item.body, rowTask?.pr_url);
               return (
                 <div
@@ -451,6 +465,11 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   <KindIcon kind={item.kind} />
                   <span className="item-row-main">
                     <span className="item-row-title">{inboxTitle(item, sessions)}</span>
+                    {rowLocation ? (
+                      <span className="item-row-context" title={rowLocation.path}>
+                        {rowLocation.isRepo ? rowLocation.label : rowLocation.path}
+                      </span>
+                    ) : null}
                     <span className="item-row-sub">
                       <span className="kind-label">{item.kind}</span>
                       <span>·</span>
@@ -513,6 +532,14 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               <div className="detail-meta">
                 <span className="chip chip-static status-dispatched">in progress</span>
                 <AgentRunBadge status={agentRunStatus(selectedTask, sessions, terminals)} />
+                {selectedTaskLocation ? (
+                  <span className="task-context" title={selectedTaskLocation.path}>
+                    <span className={`chip chip-static${selectedTaskLocation.isRepo ? "" : " mono"}`}>
+                      {selectedTaskLocation.isRepo ? selectedTaskLocation.label : selectedTaskLocation.path}
+                    </span>
+                    {selectedTaskLocation.isRepo ? <span className="mono muted task-context-path">{selectedTaskLocation.path}</span> : null}
+                  </span>
+                ) : null}
                 <JiraPill jiraKey={selectedTask.jira_key} jiraUrl={selectedTask.jira_url} />
               </div>
             </div>
@@ -568,6 +595,11 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 {linkedTask ? (
                   <span className="meta-task">
                     Task: <strong>{linkedTask.title || linkedTask.prompt.trim().split("\n")[0].slice(0, 120) || "Untitled task"}</strong>
+                    {selectedInProgress && linkedTaskLocation ? (
+                      <span className={`chip chip-static${linkedTaskLocation.isRepo ? "" : " mono"}`} title={linkedTaskLocation.path}>
+                        {linkedTaskLocation.isRepo ? linkedTaskLocation.label : linkedTaskLocation.path}
+                      </span>
+                    ) : null}
                     <JiraPill jiraKey={linkedTask.jira_key} jiraUrl={linkedTask.jira_url} />
                   </span>
                 ) : null}
