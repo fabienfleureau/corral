@@ -11,6 +11,7 @@ export interface KpiSettings {
   /** Configured favorite supplying harness, agent, model and reasoning. */
   favorite: string;
   intervalHours: 0 | 1 | 24;
+  /** Persistent product context, caveats and constraints saved across cycles. */
   context: string;
   /** Optional target the agent works towards. */
   goal: KpiGoal | null;

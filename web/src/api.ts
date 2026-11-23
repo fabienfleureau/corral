@@ -239,7 +239,8 @@ export const api = {
   getEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await get(`/api/epics/${id}`), "GET", `/api/epics/${id}`),
   getEpicAgent: (id: string): Promise<EpicAgentView> => get(`/api/epics/${id}/agent`),
   configureEpicAgent: (id: string, settings: EpicAgentSettings): Promise<EpicAgentView> => put(`/api/epics/${id}/agent`, settings),
-  runEpicAgent: (id: string): Promise<EpicAgentView> => post(`/api/epics/${id}/agent/run`),
+  runEpicAgent: (id: string, instruction?: string): Promise<EpicAgentView> =>
+    post(`/api/epics/${id}/agent/run`, instruction ? { instruction } : undefined),
   importEpic: async (key: string): Promise<EpicDetail> => checkEpicDetail(await post("/api/epics", { key }), "POST", "/api/epics"),
   syncEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await post(`/api/epics/${id}/sync`), "POST", `/api/epics/${id}/sync`),
   launchEpicTask: (epicId: string, taskId: string): Promise<DispatchResult> =>
@@ -341,7 +342,8 @@ export const api = {
 
   listKpis: (): Promise<KpiView[]> => get("/api/kpis"),
   configureKpi: (id: KpiId, settings: KpiSettings): Promise<KpiView> => put(`/api/kpis/${id}`, settings),
-  runKpi: (id: KpiId): Promise<KpiView> => post(`/api/kpis/${id}/run`),
+  runKpi: (id: KpiId, instruction?: string): Promise<KpiView> =>
+    post(`/api/kpis/${id}/run`, instruction ? { instruction } : undefined),
   buildKpiArtifact: (id: KpiId, input: KpiArtifactRequest): Promise<{ task: Task }> =>
     post(`/api/kpis/${id}/artifact`, input),
 

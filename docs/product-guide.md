@@ -79,7 +79,7 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   Its prompt starts with the epic's Jira ticket, summary and link, so the task keeps
   that context when you edit or dispatch it later.
   A Jira ticket marked **Killed** is cancelled, not merged: a resync hides it from the Epics page, removes it from the summary and no longer lets it block other tickets. A task whose prerequisite was killed keeps a note on the epic.
-  Each epic also has an optional **Autonomous implementation agent** (configured with a working directory, favorite, optional hourly/daily cadence, and answers/guidance — mirroring KPI monitoring). When run, it discovers implementation steps autonomously, implements unblocked work, runs E2E tests when possible, reports problems, missing specs/information and clarification requests on the Epic page, and keeps durable memory in `.corral/epic-<key>-memory.md`.
+  Each epic also has an optional **Autonomous implementation agent** (configured with a working directory, favorite, optional hourly/daily cadence, and persistent context — mirroring KPI monitoring). When run, it discovers implementation steps autonomously, implements unblocked work, runs E2E tests when possible, reports problems, missing specs/information and clarification requests on the Epic page, and keeps durable memory in `.corral/epic-<key>-memory.md`. Use the **One-time instruction** form on the Epic page to answer clarifications or steer a single run without saving the message into persistent settings; the agent addresses it and folds durable answers into its memory.
   A ticket's `Préconditions` are checked by the agent before it starts. The epic's
   **design** is versioned: publishing a revision writes the current version into the
   Jira epic, marks started tasks **impacted**, and an assistant proposes an
@@ -260,8 +260,7 @@ a restart Corral resumes checking the active session or starts a due cycle.
 Each tab shows the last report, measurement window and evidence, missing
 data, product questions and proposals. Report text uses Markdown, so agent
 findings keep their headings, lists, emphasis, code and links. The last
-sourced value stays visible if a newer cycle lacks a measurement. Use **Product context and answers** to
-reply to questions. The next cycle reads the prior report and research memory. The durable memory is a file in the working directory: `.corral/kpi-1-memory.md` or `.corral/kpi-2-memory.md`. Corral creates it, the agent updates it during a cycle, and the page shows a bounded copy. Once the file has notes it is the source for the next cycle.
+sourced value stays visible if a newer cycle lacks a measurement. Use **Persistent context** in the settings pane for standing product context or constraints saved across every cycle, and use **One-time instruction** to answer product questions or steer a single analysis without saving the message into settings; the agent addresses it and folds durable answers into its memory. The next cycle reads the prior report and research memory. The durable memory is a file in the working directory: `.corral/kpi-1-memory.md` or `.corral/kpi-2-memory.md`. Corral creates it, the agent updates it during a cycle, and the page shows a bounded copy. Once the file has notes it is the source for the next cycle.
 **Draft task** opens the editable Tasks form for a proposal.
 
 Set an optional **Goal**: a target value in the KPI unit, whether the KPI

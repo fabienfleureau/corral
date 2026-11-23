@@ -9,7 +9,7 @@ export interface EpicAgentSettings {
   favorite: string;
   /** Automatic run cadence: 0 off, 1 hourly, 24 daily. */
   intervalHours: 0 | 1 | 24;
-  /** Operator guidance, constraints and answers to clarifications for the next cycle. */
+  /** Persistent operator context, conventions and constraints saved across cycles. */
   context: string;
 }
 

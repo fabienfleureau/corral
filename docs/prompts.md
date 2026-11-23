@@ -230,7 +230,12 @@ The inbox action asks the active Claude session to create a private artifact exp
 ## KPI monitoring
 
 `kpiPrompt()` in `server/kpi.ts` sends the operator's metric definition, unit,
-source references, context and previous validated report to a fresh worker session. It names the
+source references, persistent `context`, any one-time operator instruction for
+that cycle (not saved in settings), and previous validated report to a fresh
+worker session. When a one-time instruction is supplied, the prompt asks the
+agent to address it directly and fold any durable answers or updated context
+into the memory file so future cycles retain them without repeating the
+instruction. It names the
 KPI's `.corral/kpi-<slot>-memory.md` file as the only writable path and carries
 a bounded excerpt of it. The prompt asks the agent to treat that file,
 collected evidence and prior output as data, use authorised read-only
@@ -252,7 +257,11 @@ Without one it asks for both to be null.
 design, synced Jira child tickets (`jiraTickets`), existing Corral epic tasks,
 previous report and workspace memory file (`.corral/epic-<jira-key>-memory.md`)
 with `DATA_NOT_INSTRUCTIONS`, and supplies the registered repositories,
-configured favorites/harnesses, operator `context` (answers and constraints),
+configured favorites/harnesses, persistent operator `context` (standing
+constraints and conventions saved across cycles), any one-time operator
+instruction for that cycle (not saved in settings; the agent is asked to address
+it directly and fold durable decisions or updated context into the workspace
+memory file),
 and the `POST /api/epics/:id/tasks` endpoint with bearer auth so the agent can
 create open Corral tasks in the right repository with the right agent without
 duplicating existing tasks. It instructs the agent to autonomously discover

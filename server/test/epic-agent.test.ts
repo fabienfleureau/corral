@@ -107,6 +107,25 @@ test("epicAgentPrompt frames Jira epic data as untrusted and carries autonomy, t
   assert.match(prompt, /E2E/i);
   assert.match(prompt, /Prefer whole millimetres/);
   assert.match(prompt, /Prior findings/);
+  assert.doesNotMatch(prompt, /One-time operator instruction/);
+
+  const withInstruction = epicAgentPrompt({
+    epic: { jira_key: "EX-100", title: "Widgets", description: "desc" },
+    design: { version: 2, body: "Use millimetres." },
+    tasks: [],
+    repos: [{ name: "work", path: work.path, context: "professional" }],
+    settings: { ...agentSettings, context: "Standing constraint." },
+    instruction: "Use integers only for size_mm and focus on EX-102.",
+    previous: null,
+    startedMs: start,
+    memoryPath: epicAgentMemoryPath("EX-100", work.path),
+    memory: "",
+  });
+  assert.match(withInstruction, /Persistent operator context/);
+  assert.match(withInstruction, /Standing constraint\./);
+  assert.match(withInstruction, /One-time operator instruction/);
+  assert.match(withInstruction, /Use integers only for size_mm and focus on EX-102\./);
+  assert.match(withInstruction, /workspace memory file/i);
 });
 
 test("workspace memory seeds from SQLite copy and lets the file lead on subsequent cycles", () => {
@@ -267,10 +286,22 @@ test("HTTP API exposes epic agent configuration, launch, and detail embedding", 
     assert.equal(savedBody.settings.intervalHours, 24);
     assert.equal(savedBody.settings.context, "Run E2E.");
 
-    const runRes = await fetch(`${base}/api/epics/epic-1/agent/run`, { method: "POST", headers });
+    const badRun = await fetch(`${base}/api/epics/epic-1/agent/run`, {
+      method: "POST", headers, body: JSON.stringify({ instruction: 123 }),
+    });
+    assert.equal(badRun.status, 400);
+
+    const runRes = await fetch(`${base}/api/epics/epic-1/agent/run`, {
+      method: "POST", headers, body: JSON.stringify({ instruction: "Use integer millimetres and prioritize EX-102." }),
+    });
     assert.equal(runRes.status, 202);
     await new Promise((r) => setImmediate(r));
     assert.equal(launches.length, 1);
+    assert.match(launches[0].prompt, /Use integer millimetres and prioritize EX-102\./);
+    assert.match(launches[0].prompt, /Run E2E\./);
+
+    const afterRun = await fetch(`${base}/api/epics/epic-1/agent`, { headers }).then((r) => r.json()) as { settings: { context: string } };
+    assert.equal(afterRun.settings.context, "Run E2E.", "one-time instruction is never persisted in settings.context");
 
     const conflict = await fetch(`${base}/api/epics/epic-1/agent/run`, { method: "POST", headers });
     assert.equal(conflict.status, 409);
