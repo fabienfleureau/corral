@@ -227,6 +227,8 @@ button {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .nav-item {
@@ -306,6 +308,282 @@ button {
   font-size: 11px;
 }
 
+/* Sidebar quota rings sit above the live status footer. When present, they
+   claim the vertical spacer so the footer stays pinned directly beneath them. */
+@property --value {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+.sidebar-quotas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 12px 4px 8px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-quotas + .sidebar-foot {
+  margin-top: 0;
+}
+
+.sidebar-quota-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 150ms ease;
+}
+
+.sidebar-quota-btn:active {
+  transform: scale(0.95);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-quota-btn:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.sidebar-quota-stale {
+  opacity: 0.65;
+}
+
+.sidebar-quota-rings {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+}
+
+progress.quota-ring {
+  grid-area: 1 / 1;
+  appearance: none;
+  -webkit-appearance: none;
+  --size: 36px;
+  --thickness: 3px;
+  --track-color: var(--chip-bg);
+  --fill-color: var(--sig-green);
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--fill-color) calc(var(--value) * 1%),
+    var(--track-color) 0
+  );
+  background-clip: border-area;
+  border: var(--thickness) solid transparent;
+  background-origin: border-box;
+  pointer-events: none;
+  transition: --value 0s ease-in-out;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  progress.quota-ring {
+    transition-duration: 0.35s;
+  }
+}
+
+@supports not (background-clip: border-area) {
+  progress.quota-ring {
+    border: 0;
+    mask-image: radial-gradient(
+      transparent calc(50% - var(--thickness)),
+      black calc(50% - var(--thickness) + 0.5px)
+    );
+  }
+}
+
+@media (forced-colors: active) {
+  progress.quota-ring {
+    forced-color-adjust: none;
+    --fill-color: CanvasText;
+    --track-color: Canvas;
+  }
+}
+
+progress.quota-ring::-webkit-progress-bar {
+  display: none;
+  background: none;
+}
+
+progress.quota-ring::-webkit-progress-value {
+  display: none;
+  background: none;
+}
+
+progress.quota-ring::-moz-progress-bar {
+  display: none;
+  background: none;
+}
+
+progress.quota-ring::slider-fill {
+  display: none;
+  background: none;
+}
+
+progress.quota-ring-inner {
+  --size: 27px;
+  --thickness: 3px;
+}
+
+progress.quota-ring-warn {
+  --fill-color: var(--sig-orange);
+}
+
+progress.quota-ring-hot {
+  --fill-color: var(--sig-red);
+}
+
+.sidebar-quota-icon {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+}
+
+.sidebar-quota-mark {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.sidebar-quota-mark-claude {
+  color: #d97757;
+}
+
+.sidebar-quota-mark-google {
+  color: #4285f4;
+}
+
+.sidebar-quota-tooltip {
+  position: fixed;
+  z-index: 60;
+  min-width: 210px;
+  max-width: 260px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(16, 20, 26, 0.16);
+  transform: translateY(-50%) scale(1);
+  transform-origin: left center;
+  opacity: 1;
+  transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1), opacity 150ms cubic-bezier(0.23, 1, 0.32, 1);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.97);
+  }
+}
+
+.sidebar-quota-tooltip-instant {
+  transition-duration: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-quota-btn {
+    transition: none;
+  }
+  .sidebar-quota-tooltip {
+    transition: opacity 150ms ease;
+    @starting-style {
+      opacity: 0;
+      transform: translateY(-50%);
+    }
+  }
+}
+
+.sidebar-quota-tooltip-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+}
+
+.sidebar-quota-tooltip-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-quota-tooltip-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sidebar-quota-tooltip-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 11.5px;
+}
+
+.sidebar-quota-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--sig-green);
+}
+
+.sidebar-quota-pct-warn {
+  color: var(--sig-orange);
+}
+
+.sidebar-quota-pct-hot {
+  color: var(--sig-red);
+}
+
+.sidebar-quota-tooltip-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  overflow: hidden;
+}
+
+.sidebar-quota-tooltip-fill {
+  height: 100%;
+  background: var(--sig-green);
+}
+
+.sidebar-quota-fill-warn {
+  background: var(--sig-orange);
+}
+
+.sidebar-quota-fill-hot {
+  background: var(--sig-red);
+}
+
+.sidebar-quota-tooltip-reset {
+  font-size: 11px;
+}
+
+.sidebar-quota-tooltip-foot {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
 .sidebar-foot-text {
   min-width: 0;
 }
@@ -377,6 +655,12 @@ button {
 
 .sidebar-collapsed .nav-count-zero {
   display: none;
+}
+
+.sidebar-collapsed .sidebar-quotas {
+  flex-direction: column;
+  padding-inline: 0;
+  gap: 8px;
 }
 
 .sidebar-collapsed .sidebar-foot {

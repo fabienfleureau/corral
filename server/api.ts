@@ -1346,6 +1346,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const [go, google] = await Promise.all([
       (state.goQuota ??= new GoQuotaCache()).get(refresh),
       (state.googleQuota ??= new GoogleQuotaCache()).get(refresh),
+      scanner.refresh(refresh).catch(() => undefined),
     ]);
     const quota: AgentQuota[] = [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), go, google];
     json(res, 200, { quota, fetched_ms: Date.now() });

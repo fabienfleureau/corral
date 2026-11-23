@@ -5,9 +5,10 @@ import type { FormEvent } from "react";
 import { ApiError, api, setCacheStateHandler, setUnauthorizedHandler, subscribeEvents } from "./api";
 import { errText } from "./util";
 import { createNotificationTracker, sendDesktopNotification } from "./notifications";
-import type { Item } from "./types";
+import type { AgentQuota, Item } from "./types";
 import { useVisibleInboxItems } from "./use-visible-inbox-items";
 import { Spinner } from "./ui";
+import { SidebarQuotas } from "./SidebarQuotas";
 import { SelectionToTask } from "./SelectionToTask";
 import { MarkdownFileProvider } from "./MarkdownFileDialog";
 import { openInboxItems } from "./inbox-selection";
@@ -84,6 +85,7 @@ export function App() {
   const [errors, setErrors] = useState<{ source: string; message: string; updated_ms: number }[]>([]);
   const [bootError, setBootError] = useState<string | null>(null);
   const [omnigentUrl, setOmnigentUrl] = useState<string | null>(null);
+  const [quotas, setQuotas] = useState<AgentQuota[] | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = usePaneFlag("corral.sidebarCollapsed");
   const sidebarSize = usePaneWidth("corral.sidebarWidth", SIDEBAR_DEFAULT_WIDTH, SIDEBAR_LIMITS);
 
@@ -170,6 +172,29 @@ export function App() {
     };
   }, [eventVersion]);
 
+  // Sidebar quota rings: load on mount and refresh gently while visible.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      api
+        .getUsageQuota()
+        .then((res) => {
+          if (!cancelled) setQuotas(res.quota);
+        })
+        .catch(() => {
+          /* non-fatal: keep last known snapshot */
+        });
+    };
+    load();
+    const timer = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") load();
+    }, 120_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
   useEffect(() => {
     const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     if (icon) icon.href = unseenInboxItems(openHumanItems, seenItems) ? "/favicon-inbox.svg" : "/favicon.svg";
@@ -248,6 +273,7 @@ export function App() {
             );
           })}
         </nav>
+        <SidebarQuotas quotas={quotas} onOpenUsage={() => selectTab("usage")} />
         {bootError ? (
           <div className="sidebar-foot sidebar-foot-error inline-error" title={bootError}>
             <span className="status-dot" aria-hidden="true" />
