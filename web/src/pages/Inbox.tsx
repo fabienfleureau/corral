@@ -370,7 +370,9 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
 
   const linkedTask = selected?.task_id ? tasksById[selected.task_id] ?? null : null;
   const selectedTask = selectedTaskId ? inProgressTasks.find((task) => task.id === selectedTaskId) ?? null : null;
-  const grillRound = selected && linkedTask && (linkedTask.kind === "grill" || linkedTask.kind === "grill-docs") && !selected.elicitation ? parseGrillRound(selected.summary || selected.body) : [];
+  const grillRound = selected && linkedTask && (linkedTask.kind === "grill" || linkedTask.kind === "grill-docs") && !selected.elicitation
+    ? parseGrillRound(selected.structured ? (selected.summary || selected.body) : selected.body)
+    : [];
   const prUrl = selected ? itemPrUrl(selected.body, linkedTask?.pr_url) : null;
   /** An item the agent is handling reads as "in progress", not "open". */
   const selectedInProgress = selected !== null && isHandlingItem(selected) && selected.status === "open";
