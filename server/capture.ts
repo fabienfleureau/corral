@@ -19,12 +19,31 @@ import { clearItemHandling, syncTaskPr } from "./pr.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { PlanConflictError, planMarkdown, readSpec } from "./multi-repo.ts";
+import {
+  STOPPED_STATUSES,
+  classifyStoppedRun,
+  resolveStoppedRetryConfig,
+  stoppedEscalationContent,
+  stoppedRetryBudget,
+  stoppedRetryDelayMs,
+  stoppedRetryPrompt,
+  type StoppedCategory,
+  type StoppedRetryConfig,
+} from "./stopped-retry.ts";
 import type { Item, TaskSpec } from "./types.ts";
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
 
 const TAIL_LINES = 40;
 const STOPPED_TEXT_MAX = 6000;
+const DEFAULT_RETRY_STALL_MS = 30_000;
+
+export interface CaptureEngineOptions {
+  /** Override stopped-run retry policy (takes precedence over cfg.stoppedRetry). */
+  stoppedRetry?: Partial<StoppedRetryConfig>;
+  /** How long a session may stay stopped after an auto-retry send before another poll treats it as stopped again. */
+  retryStallMs?: number;
+}
 
 export class CaptureEngine {
   private db: Db;
@@ -33,16 +52,48 @@ export class CaptureEngine {
   private cfg: Config | null;
   /** Jira status sync for PR-stage transitions (null = build one from cfg). */
   private jira: JiraTransitionGateway | null;
+  private retryPolicy: StoppedRetryConfig;
+  private retryStallMs: number;
   private retrying = new Set<string>();
   /** Sessions that stopped but whose last run could not be read: retried on the next idle poll. */
   private unreadStops = new Set<string>();
+  /** Pending delayed auto-retries, keyed by session address. */
+  private pendingRetries = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Timestamp when an auto-retry was sent to a session that has not yet transitioned to working. */
+  private retrySentAt = new Map<string, number>();
+  /** Monotonic metrics_events.id watermark per session after a manual human intervention. */
+  private resetAfterId = new Map<string, number>();
 
-  constructor(db: Db, backend: WorkerBackend, hub: Hub, cfg: Config | null = null, jira: JiraTransitionGateway | null = null) {
+  constructor(
+    db: Db,
+    backend: WorkerBackend,
+    hub: Hub,
+    cfg: Config | null = null,
+    jira: JiraTransitionGateway | null = null,
+    opts: CaptureEngineOptions = {},
+  ) {
     this.db = db;
     this.backend = backend;
     this.hub = hub;
     this.cfg = cfg;
     this.jira = jira;
+    this.retryPolicy = resolveStoppedRetryConfig(opts.stoppedRetry ?? cfg?.stoppedRetry);
+    this.retryStallMs = opts.retryStallMs ?? DEFAULT_RETRY_STALL_MS;
+  }
+
+  /** Cancel any pending retry timer and start a fresh retry episode for this session
+   *  (called when the human manually replies or sends a new instruction). */
+  resetStoppedRetries(address: string): void {
+    this.cancelPendingRetry(address);
+    this.retrySentAt.delete(address);
+    this.unreadStops.delete(address);
+    this.resetAfterId.set(address, this.latestMetricId());
+  }
+
+  /** Cancel all pending retry timers (for clean shutdown / tests). */
+  dispose(): void {
+    for (const timer of this.pendingRetries.values()) clearTimeout(timer);
+    this.pendingRetries.clear();
   }
 
   async handleEvent(e: WorkerEvent): Promise<void> {
@@ -105,41 +156,195 @@ export class CaptureEngine {
     if (runResumed) resumeSnoozedItems(this.db, this.hub, { taskId, address: e.address });
 
     if (blocked) {
+      this.cancelPendingRetry(e.address);
+      this.retrySentAt.delete(e.address);
       await this.ensureQuestionItem(e, taskId);
     } else {
       if (wasBlocked) this.resolveCapturedBlockedQuestion(e.address);
-      // A run ended (a status change into idle/error), or first sight of an idle
-      // session whose task nobody has heard about: tell the human it stopped.
-      const stopped = status === "idle" || status === "error";
-      if (!stopped) this.unreadStops.delete(e.address);
-      const ended = tracked?.last_status !== status || this.unreadStops.has(e.address) ||
-        (e.type === "created" && !this.db.questionItemForTerminal(e.address));
-      if (stopped && ended && !retried && taskId) await this.reportStoppedRun(e, taskId);
+      // A run ended (a status change into idle/done/error), or first sight of a
+      // stopped session whose task nobody has heard about: retry boundedly, then
+      // surface to the inbox.
+      const stopped = status !== null && STOPPED_STATUSES.has(status);
+      if (!stopped) {
+        this.unreadStops.delete(e.address);
+        this.cancelPendingRetry(e.address);
+        this.retrySentAt.delete(e.address);
+      }
+      const sentAt = this.retrySentAt.get(e.address);
+      const stalledAfterRetry = sentAt !== undefined && Date.now() - sentAt >= this.retryStallMs;
+      const ended = tracked?.last_status !== status || this.unreadStops.has(e.address) || stalledAfterRetry ||
+        (e.type === "created" && !this.hasDismissedQuestion(e.address));
+      if (stopped && ended && !retried && taskId) await this.handleStoppedRun(e, taskId);
     }
   }
 
   /** The agent's turn ended and nothing in the inbox says why: no report, no
-   *  question. Without this the task reads "in progress" forever. The agent
-   *  prompt promises it ("Corral's fallback capture will pick you up when you
-   *  go idle"). Nothing is closed on the agent's behalf; the human decides. */
-  private async reportStoppedRun(e: WorkerEvent, taskId: string): Promise<void> {
+   *  question. Without this the task reads "in progress" forever. Bounded
+   *  automatic retries absorb transient failures and silent stops (ADR 0016);
+   *  once the budget is spent (or on a fatal error), an inbox item hands control
+   *  back to the human. Nothing is closed on the agent's behalf. */
+  private async handleStoppedRun(e: WorkerEvent, taskId: string): Promise<void> {
     this.unreadStops.delete(e.address);
-    if (!this.backend.lastRunOutcome || !this.awaitingNobody(e.address, taskId)) return;
-    let outcome: WorkerRunOutcome | null;
-    try {
-      outcome = await this.backend.lastRunOutcome(e.address);
-    } catch {
-      this.unreadStops.add(e.address); // the stop is not consumed: look again on the next idle poll
-      return;
+    if (!this.awaitingNobody(e.address, taskId) || this.pendingRetries.has(e.address)) return;
+    let outcome: WorkerRunOutcome | null = null;
+    if (this.backend.lastRunOutcome) {
+      try {
+        outcome = await this.backend.lastRunOutcome(e.address);
+      } catch {
+        this.unreadStops.add(e.address); // the stop is not consumed: look again on the next stopped poll
+        return;
+      }
     }
     // While the session was being read the agent may have reported, or started a new run.
-    if (!outcome || !this.awaitingNobody(e.address, taskId) || this.db.getTerminal(e.address)?.last_status !== e.status) return;
+    if (!this.awaitingNobody(e.address, taskId) || this.db.getTerminal(e.address)?.last_status !== e.status) return;
+    if (this.pendingRetries.has(e.address)) return;
+
+    const initialRetryExhausted = Boolean(
+      this.db.raw.prepare("SELECT 1 FROM metrics_events WHERE name = ? AND ref = ? LIMIT 1").get("task.initial_retry", e.address),
+    );
+    const category = classifyStoppedRun(e.status ?? null, outcome, { initialRetryExhausted });
+    const budget = stoppedRetryBudget(this.retryPolicy, category);
+    const used = category === "fatal" ? 0 : this.episodeAttempts(e.address, category);
+
+    if (category !== "fatal" && used < budget) {
+      const delayMs = stoppedRetryDelayMs(this.retryPolicy, category, used);
+      const timer = setTimeout(() => {
+        this.pendingRetries.delete(e.address);
+        void this.executeStoppedRetry(e, taskId, category, outcome, budget).catch((err) => {
+          console.error("corral: stopped-run retry failed", err);
+        });
+      }, delayMs);
+      timer.unref?.();
+      this.pendingRetries.set(e.address, timer);
+      return;
+    }
+
+    await this.escalateStoppedRun(e, taskId, outcome, category, used);
+  }
+
+  private async executeStoppedRetry(
+    e: WorkerEvent,
+    taskId: string,
+    category: "error" | "silent",
+    outcome: WorkerRunOutcome | null,
+    budget: number,
+  ): Promise<void> {
+    const currentStatus = this.db.getTerminal(e.address)?.last_status ?? null;
+    if (!this.awaitingNobody(e.address, taskId) || !STOPPED_STATUSES.has(currentStatus ?? "")) return;
+    const used = this.episodeAttempts(e.address, category);
+    if (used >= budget) {
+      await this.escalateStoppedRun(e, taskId, outcome, category, used);
+      return;
+    }
+    const attempt = used + 1;
+    const prompt = stoppedRetryPrompt(category, outcome, attempt, budget);
+    // Record before sending so an uncertain delivery never exceeds the retry budget.
+    this.db.recordMetric("task.stopped_retry", e.address, {
+      task_id: taskId,
+      category,
+      attempt,
+      max_attempts: budget,
+      status: e.status ?? null,
+    });
+    this.retrySentAt.set(e.address, Date.now());
+    try {
+      await this.backend.send(e.address, prompt);
+    } catch (err) {
+      this.retrySentAt.delete(e.address);
+      await this.escalateStoppedRun(e, taskId, outcome, category, attempt, err instanceof Error ? err.message : String(err));
+      return;
+    }
+    const label = category === "silent" ? "nudge" : "retry";
+    const reason = outcome?.text ? ` (${oneLine(outcome.text, 80)})` : "";
+    logTaskEvent(
+      this.db,
+      taskId,
+      "prompt",
+      `Auto-${label} ${attempt}/${budget} after agent stopped${reason}`,
+      promptData(prompt, { source: "stopped-retry", category, attempt, max_attempts: budget, session: e.address }),
+    );
+  }
+
+  private async escalateStoppedRun(
+    e: WorkerEvent,
+    taskId: string,
+    outcome: WorkerRunOutcome | null,
+    category: StoppedCategory,
+    attemptsUsed: number,
+    sendError: string | null = null,
+  ): Promise<void> {
+    this.retrySentAt.delete(e.address);
+    if (!this.awaitingNobody(e.address, taskId)) return;
     const task = this.db.getTask(taskId);
-    const label = task?.title.trim();
-    const text = outcome.text.length > STOPPED_TEXT_MAX ? `${outcome.text.slice(0, STOPPED_TEXT_MAX)}…` : outcome.text;
-    await this.ensureQuestionItem(e, taskId, outcome.kind === "error"
-      ? { title: label ? `${label} — run failed` : "Agent run failed", body: `**The run failed.** Fix the cause, then reply to resume it, or mark the task done.\n\n${text}` }
-      : { title: label ? `${label} — stopped without reporting` : "Agent stopped without reporting", body: `**The agent stopped without reporting.** Reply to continue it, or mark the task done.\n\n${text}` });
+    const content = stoppedEscalationContent({
+      label: task?.title.trim(),
+      status: e.status ?? null,
+      outcome,
+      category,
+      attemptsUsed,
+      maxTextLen: STOPPED_TEXT_MAX,
+      sendError,
+    });
+    await this.ensureQuestionItem(e, taskId, content);
+  }
+
+  private cancelPendingRetry(address: string): void {
+    const timer = this.pendingRetries.get(address);
+    if (timer) {
+      clearTimeout(timer);
+      this.pendingRetries.delete(address);
+    }
+  }
+
+  private latestMetricId(): number {
+    const row = this.db.raw.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM metrics_events").get() as { id: number };
+    return row.id;
+  }
+
+  private lastResetMetricId(address: string): number {
+    let since = this.resetAfterId.get(address) ?? 0;
+    const rows = this.db.raw
+      .prepare("SELECT id, data FROM metrics_events WHERE name = 'item.replied' AND id > ? ORDER BY id DESC LIMIT 50")
+      .all(since) as { id: number; data: string | null }[];
+    for (const row of rows) {
+      if (!row.data) continue;
+      try {
+        const parsed = JSON.parse(row.data) as { address?: unknown };
+        if (parsed.address === address) {
+          since = Math.max(since, row.id);
+          break;
+        }
+      } catch { /* ignore malformed metric data */ }
+    }
+    return since;
+  }
+
+  private episodeAttempts(address: string, category: "error" | "silent"): number {
+    const sinceId = this.lastResetMetricId(address);
+    const rows = this.db.raw
+      .prepare("SELECT data FROM metrics_events WHERE name = 'task.stopped_retry' AND ref = ? AND id > ?")
+      .all(address, sinceId) as { data: string | null }[];
+    let count = 0;
+    for (const row of rows) {
+      if (!row.data) continue;
+      try {
+        const parsed = JSON.parse(row.data) as { category?: unknown };
+        if (parsed.category === category) count++;
+      } catch { /* ignore malformed metric data */ }
+    }
+    return count;
+  }
+
+  /** True when the terminal's latest question item was dismissed without a reply,
+   *  so a server restart does not re-surface a stop the human already acknowledged. */
+  private hasDismissedQuestion(address: string): boolean {
+    const existing = this.db.questionItemForTerminal(address);
+    if (!existing) return false;
+    if (existing.status === "open") return true;
+    const replied = this.db.raw
+      .prepare("SELECT 1 FROM metrics_events WHERE name = 'item.replied' AND ref = ? LIMIT 1")
+      .get(existing.id);
+    return !replied;
   }
 
   /** True while the task is in flight on this session and no open item asks the human anything. */
@@ -297,6 +502,9 @@ export class CaptureEngine {
   }
 
   private async onFinished(e: WorkerEvent): Promise<void> {
+    this.cancelPendingRetry(e.address);
+    this.retrySentAt.delete(e.address);
+    this.unreadStops.delete(e.address);
     const taskId = e.task_id ?? this.db.getTerminal(e.address)?.task_id ?? null;
     const task = taskId ? this.db.getTask(taskId) : null;
     this.resolveOpenQuestions({
@@ -346,6 +554,10 @@ export class CaptureEngine {
     const address =
       opts.terminal ??
       (taskId ? this.db.getTask(taskId)?.terminal_address ?? null : null);
+    if (address) {
+      this.cancelPendingRetry(address);
+      this.retrySentAt.delete(address);
+    }
     let context = "";
     if (address) {
       try {
@@ -484,6 +696,10 @@ export class CaptureEngine {
   async createPlan(taskId: string, title: string, spec: TaskSpec): Promise<Item> {
     const task = this.db.getTask(taskId);
     if (!task) throw new Error("task not found");
+    if (task.terminal_address) {
+      this.cancelPendingRetry(task.terminal_address);
+      this.retrySentAt.delete(task.terminal_address);
+    }
     const prevSpec = readSpec(task);
     if (prevSpec?.children?.length) {
       throw new PlanConflictError("this plan was already approved", {

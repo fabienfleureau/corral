@@ -396,6 +396,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.replied", item.id, { address });
+    state.capture?.resetStoppedRetries?.(address);
     const updatedItem = state.db.getItem(item.id);
     state.hub.broadcast("item.updated", updatedItem);
     json(res, 200, { ok: true, sent_to: address, item: updatedItem });
@@ -615,6 +616,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
     const prompt = "Create a Claude artifact that explains this task and its results to colleagues. Publish it privately and report the artifact URL in the Corral inbox. Do not share it publicly.";
     await state.backend.send(task.terminal_address, prompt);
+    state.capture?.resetStoppedRetries?.(task.terminal_address);
     resumeSnoozedItems(state.db, state.hub, { taskId: task.id, address: task.terminal_address });
     logTaskEvent(state.db, task.id, "prompt", "Requested a Claude artifact", promptData(prompt, { session: task.terminal_address }));
     json(res, 200, { ok: true });

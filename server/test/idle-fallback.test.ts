@@ -56,7 +56,9 @@ function setup(outcome: WorkerRunOutcome | null, task: Partial<Task> = {}, lastS
       return current;
     },
   } as unknown as WorkerBackend;
-  const capture = new CaptureEngine(db, backend, { broadcast() {} });
+  const capture = new CaptureEngine(db, backend, { broadcast() {} }, null, null, {
+    stoppedRetry: { maxAttempts: 0, silentStopAttempts: 0 },
+  });
   const status = (s: string, type: WorkerEvent["type"] = "status") => capture.handleEvent({ type, address: "s1", task_id: "task-1", status: s });
   return { db, capture, status, hooks, calls: () => calls, sent, set: (o: WorkerRunOutcome | null) => { current = o; } };
 }
@@ -270,11 +272,14 @@ test("nothing is created when the agent already reported, or the task is not in 
   } finally { db.close(); }
 });
 
-test("nothing is created when the last thing in the session is not the agent's", async () => {
+test("a stopped run with null lastRunOutcome surfaces an unexpected-stop item when retries are exhausted", async () => {
   const { db, status } = setup(null);
   try {
     await status("idle");
-    assert.equal(db.openQuestionItemForTerminal("s1"), null);
+    const item = db.openQuestionItemForTerminal("s1");
+    assert.ok(item);
+    assert.match(item.title, /stopped unexpectedly/i);
+    assert.match(item.body, /stopped unexpectedly without reporting/i);
   } finally { db.close(); }
 });
 
@@ -334,7 +339,10 @@ test("a failing start-failure lookup does not hide the stopped run", async () =>
       initialFailurePrompt: async () => { throw new Error("omnigent unreachable"); },
       lastRunOutcome: async () => said,
     } as unknown as WorkerBackend;
-    await new CaptureEngine(db, backend, { broadcast() {} }).handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "idle" });
+    const engine = new CaptureEngine(db, backend, { broadcast() {} }, null, null, {
+      stoppedRetry: { maxAttempts: 0, silentStopAttempts: 0 },
+    });
+    await engine.handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "idle" });
     assert.ok(db.openQuestionItemForTerminal("s1"));
   } finally { db.close(); }
 });

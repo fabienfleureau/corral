@@ -10,6 +10,9 @@ import type { JiraStage } from "./jira-status.ts";
 import type { Reviewer } from "./reviewers.ts";
 import type { ModelFacts } from "./model-catalog.ts";
 import type { ModelPrice } from "./usage.ts";
+import { DEFAULT_STOPPED_RETRY, type StoppedRetryConfig } from "./stopped-retry.ts";
+
+export type { StoppedRetryConfig };
 
 export interface JiraConfig {
   baseUrl: string;
@@ -59,6 +62,8 @@ export interface Config {
   omnigent: OmnigentConfig;
   /** Usage page: price overrides (USD per MTok), by exact model id or "prefix*". */
   usage: { prices: Record<string, ModelPrice> };
+  /** Automatic retries when a dispatched task's agent stops without reporting. */
+  stoppedRetry?: Partial<StoppedRetryConfig>;
 }
 
 function defaultConfig(): Config {
@@ -92,6 +97,7 @@ function defaultConfig(): Config {
       },
     },
     usage: { prices: {} },
+    stoppedRetry: { ...DEFAULT_STOPPED_RETRY, delaysSec: [...DEFAULT_STOPPED_RETRY.delaysSec] },
     models: {},
     reviewers: [
       { name: "cubic", command: "cubic review --base {base_branch} --json" },

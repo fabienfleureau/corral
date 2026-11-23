@@ -24,6 +24,7 @@ They are required when a change makes or revisits such a decision.
 | [0013](0013-kpi-status-artifacts.md) | Proposed | KPI status artifacts run as Claude tasks |
 | [0014](0014-antigravity-permission-bypass.md) | Proposed | Antigravity sessions run with permission bypass |
 | [0015](0015-annotated-multi-repo-plan-revisions.md) | Proposed | Annotated revisions and revision-pinned approval for multi-repo plans |
+| [0016](0016-stopped-agent-retry-policy.md) | Accepted | Bounded automatic retries for stopped dispatched agents before inbox escalation |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.
