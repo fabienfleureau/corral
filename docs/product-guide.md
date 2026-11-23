@@ -93,10 +93,12 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   snooze (1h, 4h, tomorrow) and archive sit on top. Archiving a task from the
   inbox also archives its session in Omnigent when it has one; the session leaves
   its repository project, which Corral deletes once no live session remains in
-  it (a renamed or configured project is kept). A run that stops
-  without a report —
-  a plain closing message, or a backend error — is surfaced as a question item
-  carrying that last message, instead of sitting "in progress" forever. Both
+  it (a renamed or configured project is kept). A run that stops without a
+  report — a transient error, a mid-run crash, or a plain closing message — is
+  retried automatically with backoff (default: 2 retries at 15s / 60s for errors
+  and crashes, 1 nudge at 15s for silent stops, 0 retries for fatal auth/billing
+  errors), then surfaced as a question item carrying that last message instead
+  of sitting "in progress" forever ([ADR 0016](adr/0016-stopped-agent-retry-policy.md)). Both
   reported and captured item text render as Markdown; only the raw context
   drawer stays verbatim.
   The **In progress** tab marks each task with its Omnigent run state:
@@ -210,6 +212,7 @@ the common keys; the file wins on restart.
 | `reviewers` | `cubic`, `ocr`, `ocr-claude`, `ocr-codex` | named pre-PR reviews: `{name, command}` (`{base_branch}` is substituted) or `{name, delegate: "claude" \| "codex"}`. The defaults only apply while `reviewers` is absent from your file: once saved from Settings the list is yours, so add `{"name": "ocr-codex", "delegate": "codex"}` by hand. Needs the `ocr` CLI (open-code-review ≥ 1.9, for `--format json`) on the host |
 | `models` | `{}` | overrides merged over the shipped model facts catalog |
 | `usage.prices` | `{}` | price overrides (USD/MTok) by model id or `prefix*` |
+| `stoppedRetry` | `{maxAttempts: 2, delaysSec: [15, 60], silentStopAttempts: 1}` | automatic retries/nudges when a dispatched task's session stops without reporting before escalating to the inbox |
 | `workspaceRoots` | `~/workspace` | directories scanned for git repos |
 | `worktreesDir` | `~/.herdr/worktrees` | legacy; omnigent now creates worktrees |
 

@@ -22,6 +22,7 @@ const LIFECYCLE_EVENTS = [
   "task.archived",
   "task.pr_found",
   "task.initial_retry",
+  "task.stopped_retry",
   "task.worktree_removed",
   "item.created",
   "item.replied",

@@ -154,6 +154,7 @@ Task follow-up: <review comments|merge conflicts> on your PR for "<task title>".
 | `commentsSection()` | the PR has review threads that are not answered or resolved | *"PR review comments need handling — this is the PR loop, not a question"*, the `DATA_NOT_INSTRUCTIONS` framing, then every thread as `[n] author (thread <id>): body` |
 | `conflictSection()` | the PR no longer merges cleanly into its base | *"PR merge conflicts need handling"* + the `git fetch && rebase origin/<base>` recipe |
 | `planRevisionPrompt()` — `server/multi-repo.ts` | the human submits **Request changes** on a multi-repo `spec` plan revision (`POST /api/tasks/:id/request-plan-changes`) | *"The human requested changes to plan v{version}."*, optional general note, numbered review comments (`**Section:** …`, quoted passage, reviewer note), and instruction to submit a revised `kind: "plan"` report without editing repository files |
+| `stoppedRetryPrompt()` — `server/stopped-retry.ts` | a dispatched task's agent stops (`idle`, `done`, or `error`) without reporting and still has retry budget ([ADR 0016](adr/0016-stopped-agent-retry-policy.md)) | on transient error / crash: *"Your previous turn stopped unexpectedly … (automatic retry N/M)"* asking to check workspace state and continue or report; on silent stop: *"You stopped without reporting to the Corral inbox (automatic nudge N/M)"* reminding to continue or report via `POST /api/reports` |
 
 Both messages start with the exact prefixes `PR review comments` / `PR merge
 conflicts` that `pr-loop.md` refers to.
