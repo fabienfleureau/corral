@@ -187,7 +187,7 @@ export function SidebarQuotas({
                   return (
                     <g
                       key={ring.label}
-                      className={`quota-ring quota-ring-${geom.role} quota-ring-${ring.tone}`}
+                      className={`quota-ring quota-ring-${geom.role} quota-ring-${ring.tone}${isEmpty ? " quota-ring-exhausted" : ""}`}
                       data-remaining={Math.round(ring.remainingPercent)}
                     >
                       <circle

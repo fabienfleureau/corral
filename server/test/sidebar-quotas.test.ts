@@ -38,13 +38,30 @@ test("remainingPercent clamps out-of-range and non-finite values", () => {
   assert.equal(remainingPercent(Number.NaN), 100);
 });
 
-test("quotaTone matches usage thresholds (ok < 70, warn 70..89, hot >= 90)", () => {
+test("quotaTone uses four tiers (ok < 50, caution 50..74, warn 75..89, hot >= 90)", () => {
   assert.equal(quotaTone(0), "ok");
-  assert.equal(quotaTone(69.9), "ok");
-  assert.equal(quotaTone(70), "warn");
+  assert.equal(quotaTone(49.9), "ok");
+  assert.equal(quotaTone(50), "caution");
+  assert.equal(quotaTone(74.9), "caution");
+  assert.equal(quotaTone(75), "warn");
   assert.equal(quotaTone(89.9), "warn");
   assert.equal(quotaTone(90), "hot");
   assert.equal(quotaTone(100), "hot");
+});
+
+test("rings show the two most-used windows, so a spent third window is not hidden", () => {
+  // Live OpenCode Go shape: session and weekly untouched, monthly spent.
+  const [gauge] = buildSidebarQuotaGauges([
+    quota("opencode-go", [
+      { label: "5-hour session", used_percent: 0, resets_ms: 1000 },
+      { label: "Weekly", used_percent: 0, resets_ms: 2000 },
+      { label: "Monthly", used_percent: 100, resets_ms: 3000 },
+    ]),
+  ]);
+  assert.deepEqual(gauge.rings.map((r) => r.label), ["5-hour session", "Monthly"]);
+  assert.equal(gauge.rings[1].tone, "hot");
+  assert.equal(gauge.rings[1].remainingPercent, 0);
+  assert.equal(gauge.windows.length, 3);
 });
 
 test("formatResetIn formats past, minutes, hours, and days", () => {
@@ -81,6 +98,7 @@ test("buildSidebarQuotaGauges orders providers, skips empty ones, and caps conce
   assert.equal(gauges[1].plan, "Plus");
   assert.equal(gauges[2].rings.length, 2);
   assert.equal(gauges[2].windows.length, 3);
+  assert.deepEqual(gauges[2].rings.map((r) => r.label), ["5-hour session", "Monthly"]);
   assert.equal(gauges[2].rings[0].tone, "hot");
   assert.equal(gauges[2].rings[1].tone, "ok");
 
@@ -117,6 +135,7 @@ test("SidebarQuotas renders concentric progress rings and provider marks", async
       { label: "Weekly", used_percent: 5, resets_ms: null },
     ]),
     quota("codex", [{ label: "5-hour", used_percent: 75, resets_ms: null }]),
+    quota("opencode-go", [{ label: "Monthly", used_percent: 60, resets_ms: null }]),
     quota("google", [{ label: "5-hour", used_percent: 100, resets_ms: null }]),
   ]);
   assert.match(html, /class="sidebar-quotas"/);
@@ -124,7 +143,8 @@ test("SidebarQuotas renders concentric progress rings and provider marks", async
   assert.match(html, /quota-ring-outer quota-ring-ok" data-remaining="75"/);
   assert.match(html, /quota-ring-inner quota-ring-ok" data-remaining="95"/);
   assert.match(html, /quota-ring-outer quota-ring-warn" data-remaining="25"/);
-  assert.match(html, /quota-ring-outer quota-ring-hot" data-remaining="0"/);
+  assert.match(html, /quota-ring-outer quota-ring-caution" data-remaining="40"/);
+  assert.match(html, /quota-ring-outer quota-ring-hot quota-ring-exhausted" data-remaining="0"/);
   assert.match(html, /stroke-linecap="round"/);
   assert.match(html, /quota-ring-arc quota-ring-empty/);
 });
