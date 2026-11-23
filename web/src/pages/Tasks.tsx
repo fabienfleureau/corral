@@ -701,11 +701,13 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const [prompt, setPrompt] = useState(prefill?.text ?? "");
   /** Files dropped, pasted or picked for the prompt; sent with the task. */
   const [files, setFiles] = useState<File[]>([]);
-  const [repoChoice, setRepoChoice] = useState("");
+  /** An explicit repo pick wins over the one detected from the PR/MR URL. */
+  const [manualRepo, setManualRepo] = useState<string | null>(null);
+  const [autoRepo, setAutoRepo] = useState<string | null>(null);
+  const [repoMatch, setRepoMatch] = useState<{ name: string; via: "remote" | "name" } | null>(null);
   const [target, setTarget] = useState("");
   const [agent, setAgent] = useState("");
   const [settings, setSettings] = useState<Record<string, { model: string; reasoning: string }>>({});
-  const [repoTouched, setRepoTouched] = useState(false);
   const [repoPath, setRepoPath] = useState("");
   /** null reads as "use the newest spec task's folder"; an empty string is a deliberate clear. */
   const [specFolder, setSpecFolder] = useState<string | null>(null);
@@ -748,6 +750,9 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
     setPrompt("");
     setFiles([]);
     setPrUrl("");
+    setManualRepo(null);
+    setAutoRepo(null);
+    setRepoMatch(null);
     setRepoPath("");
     setGrillFolder(null);
     setBaseBranch("");
@@ -755,7 +760,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
     setPrefilled(null);
   };
 
-  const selectedRepo = repoTouched ? repoChoice : (repos[0]?.path ?? "");
+  const selectedRepo = manualRepo ?? autoRepo ?? (repos[0]?.path ?? "");
   const chosenRepo = selectedRepo === "__custom__" ? repoPath : selectedRepo;
   const review = kind === "review";
   const spec = kind === "spec";
@@ -769,6 +774,22 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const selectedTarget = formTargets.includes(target) ? target : formTargets[0] ?? "";
   const prUrlValid = isPrUrl(prUrl);
   const hasContent = review ? prUrlValid : !!prompt.trim();
+
+  // A pasted PR/MR URL picks its repo when the registry recognizes the project.
+  // The lookup is best effort: no match keeps the default or the manual pick.
+  useEffect(() => {
+    setAutoRepo(null);
+    setRepoMatch(null);
+    const url = prUrl.trim();
+    if (!review || !isPrUrl(url)) return;
+    let cancelled = false;
+    api.matchRepoForPull(url).then((match) => {
+      if (cancelled || !match.repo_path) return;
+      setAutoRepo(match.repo_path);
+      setRepoMatch({ name: match.repo_name ?? match.repo_path, via: match.via ?? "name" });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [prUrl, review]);
 
   const selectedSettings = settings[selectedTarget] ?? lastHarnessSettings(tasks, selectedTarget);
   const setSetting = (key: "model" | "reasoning", value: string) => setSettings((prev) => ({ ...prev, [selectedTarget]: { ...selectedSettings, [key]: value } }));
@@ -829,6 +850,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
             <input ref={prUrlRef} value={prUrl} onChange={(e) => setPrUrl(e.target.value)} placeholder="https://gitlab.com/group/project/-/merge_requests/123" />
           </label>
           {prUrl.trim() && !prUrlValid ? <div className="inline-error">Paste a GitHub pull request or GitLab merge request URL.</div> : null}
+          {prUrlValid && repoMatch && !manualRepo ? <p className="inline-ok" role="status">Repo detected from URL: {repoMatch.name} ({repoMatch.via === "remote" ? "git remote" : "name"})</p> : null}
           <p className="muted form-hint">The agent reviews with the fabien-reviewer skill and posts comments as drafts. Nothing is published until you approve the list in the inbox. No branch, no code changes.</p>
         </>
       ) : null}
@@ -877,7 +899,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
       {spec || grill ? null : <div className="field-row">
         <label className="field">
           <span>Repo</span>
-          <select value={selectedRepo} onChange={(e) => { setRepoTouched(true); setRepoChoice(e.target.value); }}>
+          <select value={selectedRepo} onChange={(e) => setManualRepo(e.target.value)}>
             <option value="">{repos.length ? "choose a repo…" : "no repos yet (add in Settings)"}</option>
             {repos.map((r) => (
               <option key={r.id} value={r.path}>
