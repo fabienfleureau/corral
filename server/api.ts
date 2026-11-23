@@ -13,6 +13,7 @@ import type { Db } from "./db.ts";
 import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.ts";
 import { resumeSnoozedItems, type CaptureEngine, type Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
+import { syncJiraStage } from "./jira-status.ts";
 import { syncEpic } from "./epic.ts";
 import { EpicAgentRunner } from "./epic-agent.ts";
 import { createEpicAgentTask, createEpicRequestTask, EpicRequestError, saveEpicRequestSettings, type EpicAgentTaskInput, type EpicRequestSettings } from "./epic-request.ts";
@@ -575,7 +576,19 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     delete patch.kind; // fixed at creation: dispatch and the PR loop depend on it
     const status = patch.status;
     state.db.updateTask(task.id, patch);
-    state.hub.broadcast("task.updated", state.db.getTask(task.id));
+    const updated = state.db.getTask(task.id)!;
+    state.hub.broadcast("task.updated", updated);
+    if (
+      status === "done" && task.status !== "done" &&
+      updated.jira_key && updated.kind !== "review" && updated.kind !== "spec" &&
+      state.jira && typeof state.jira.transitions === "function"
+    ) {
+      void syncJiraStage({ db: state.db, hub: state.hub, gateway: state.jira, statuses: state.cfg.jira?.statuses }, updated, "done").catch(() => undefined);
+    }
+    if (updated.epic_id) {
+      if (status && status !== task.status) archiveEpicLaunchItems(state.db, state.hub);
+      state.hub.broadcast("epic.updated", state.db.getEpic(updated.epic_id));
+    }
     if (status === "done" || status === "archived") {
       await cleanupFinishedTask(state.db, state.backend, task.id, { hub: state.hub, reason: `status-${status}` });
     }
@@ -694,7 +707,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         jira: state.jira ?? null,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
-      if (task.epic_id) archiveEpicLaunchItems(state.db, state.hub);
+      if (task.epic_id) {
+        archiveEpicLaunchItems(state.db, state.hub);
+        state.hub.broadcast("epic.updated", state.db.getEpic(task.epic_id));
+      }
       json(res, 200, result);
     } catch (err) {
       json(res, 500, { error: String(err) });
@@ -1193,10 +1209,14 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     stackEpicTaskOnPrerequisite(state.db, state.hub, view);
     try {
       const result = await dispatchTask(
-        state.db, state.cfg, state.backend, state.db.getTask(task.id)!, task.target, { jira: state.jira ?? null },
+        state.db, state.cfg, state.backend, state.db.getTask(task.id)!, task.target, {
+          agent: task.agent ?? null,
+          jira: state.jira ?? null,
+        },
       );
       archiveEpicLaunchItems(state.db, state.hub);
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
+      state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));
       json(res, 200, result);
     } catch (err) {
       json(res, 500, { error: String(err) });
@@ -1375,8 +1395,16 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!task?.jira_key) return json(res, 404, { error: "task has no jira key" });
     try {
       const used = await state.jira.markDone(task.jira_key, (body as { transition_id?: string })?.transition_id);
+      const reached = used.to?.name ?? used.name ?? "Done";
+      state.db.updateTask(task.id, { jira_status: reached });
       state.db.recordMetric("jira.marked_done", task.id, { key: task.jira_key, transition: used.id });
       logTaskEvent(state.db, task.id, "jira", `Marked ${task.jira_key} done (${used.name ?? used.id})`, { key: task.jira_key, transition: used.id });
+      const updated = state.db.getTask(task.id);
+      state.hub.broadcast("task.updated", updated);
+      if (updated?.epic_id) {
+        archiveEpicLaunchItems(state.db, state.hub);
+        state.hub.broadcast("epic.updated", state.db.getEpic(updated.epic_id));
+      }
       json(res, 200, { ok: true, transition: used });
     } catch (err) {
       json(res, 502, { error: String(err) });
