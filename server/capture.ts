@@ -18,7 +18,7 @@ import type { WorkerBackend, WorkerElicitation, WorkerEvent, WorkerRunOutcome } 
 import { clearItemHandling, syncTaskPr } from "./pr.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
-import { planMarkdown } from "./multi-repo.ts";
+import { PlanConflictError, planMarkdown, readSpec } from "./multi-repo.ts";
 import type { Item, TaskSpec } from "./types.ts";
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
@@ -478,19 +478,59 @@ export class CaptureEngine {
   }
 
   /** Called from POST /api/reports with kind "plan": a spec task's contract and
-   *  proposed sub-tasks (already validated). Stored on the task; one open plan
-   *  item per task, replaced when the agent reports a revised plan. */
+   *  proposed sub-tasks (already validated). Appends an immutable revision row,
+   *  keeps `tasks.spec` synced to the latest revision, and creates or refreshes
+   *  the single open plan item with `handling = 0`. */
   async createPlan(taskId: string, title: string, spec: TaskSpec): Promise<Item> {
     const task = this.db.getTask(taskId);
     if (!task) throw new Error("task not found");
-    this.db.updateTask(taskId, { spec: JSON.stringify(spec) });
-    logTaskEvent(this.db, taskId, "session", `Agent proposed a plan: ${spec.subtasks.length} sub-tasks`, {
+    const prevSpec = readSpec(task);
+    if (prevSpec?.children?.length) {
+      throw new PlanConflictError("this plan was already approved", {
+        currentRevisionId: prevSpec.revision_id ?? null,
+        currentVersion: prevSpec.version ?? null,
+      });
+    }
+    const latest = this.db.getLatestPlanRevision(taskId);
+    const version = (latest?.version ?? prevSpec?.version ?? 0) + 1;
+    const revisionId = randomUUID();
+    const now = Date.now();
+    const body = planMarkdown(spec);
+    this.db.insertPlanRevision({
+      id: revisionId,
+      task_id: taskId,
+      version,
+      title,
+      contract: spec.contract,
+      subtasks: spec.subtasks,
+      markdown: body,
+      created_ms: now,
+    });
+    const storedSpec: TaskSpec = {
+      contract: spec.contract,
+      subtasks: spec.subtasks,
+      revision_id: revisionId,
+      version,
+    };
+    this.db.updateTask(taskId, { spec: JSON.stringify(storedSpec) });
+    logTaskEvent(this.db, taskId, "session", `Agent proposed plan v${version}: ${spec.subtasks.length} sub-tasks`, {
+      revision_id: revisionId,
+      version,
       repos: spec.subtasks.map((s) => s.repo),
     });
-    const body = planMarkdown(spec);
+    const updatedTask = this.db.getTask(taskId);
+    if (updatedTask) this.hub.broadcast("task.updated", updatedTask);
     const existing = this.db.listItems({ kind: "plan" }).find((i) => i.task_id === taskId && i.status === "open");
     if (existing) {
-      this.db.updateItem(existing.id, { title, summary: body, body, updated_ms: Date.now() });
+      this.db.updateItem(existing.id, {
+        title,
+        summary: body,
+        body,
+        handling: 0,
+        snooze_until_ms: null,
+        source_ref: existing.source_ref ?? task.terminal_address,
+        updated_ms: now,
+      });
       const updated = this.db.getItem(existing.id)!;
       this.hub.broadcast("item.updated", updated);
       return updated;
@@ -509,8 +549,8 @@ export class CaptureEngine {
       source_ref: task.terminal_address,
       task_id: taskId,
       structured: 1,
-      created_ms: Date.now(),
-      updated_ms: Date.now(),
+      created_ms: now,
+      updated_ms: now,
       resolved_ms: null,
       snooze_until_ms: null,
     };

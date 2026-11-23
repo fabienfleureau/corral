@@ -340,3 +340,43 @@ export type EpicDetail = {
   /** Proposed amendments waiting in the inbox. */
   amendments: { id: string; task_id: string; design_version: number; body: string }[];
 };
+
+export type PlanSubtask = {
+  repo: string;
+  title: string;
+  prompt: string;
+};
+
+export type PlanRevision = {
+  id: string;
+  task_id: string;
+  version: number;
+  title: string;
+  contract: string;
+  subtasks: PlanSubtask[];
+  markdown: string;
+  created_ms: number;
+};
+
+export type PlanReviewComment = {
+  section: string;
+  repo?: string | null;
+  quote: string;
+  body: string;
+};
+
+export type PlanReview = {
+  id: string;
+  task_id: string;
+  revision_id: string;
+  note: string;
+  comments: PlanReviewComment[];
+  created_ms: number;
+};
+
+export type PlanRevisionsResponse = {
+  current_revision_id: string | null;
+  approved_revision_id: string | null;
+  revisions: PlanRevision[];
+  reviews: PlanReview[];
+};

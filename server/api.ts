@@ -38,7 +38,7 @@ import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
 import { cachedPulls, platformRateLimits, refreshPulls } from "./pulls.ts";
 import type { Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
-import { PlanError, approvePlan, isDirectory, validateSubtasks } from "./multi-repo.ts";
+import { PlanConflictError, PlanDeliveryError, PlanError, approvePlan, isDirectory, listTaskPlanRevisions, requestPlanChanges, validatePlanReviewInput, validateSubtasks } from "./multi-repo.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type AgentQuota, type UsageRange } from "./usage.ts";
 import { GoogleQuotaCache } from "./google-quota.ts";
 import { SHIPPED_CATALOG, mergeCatalog, parseCatalog } from "./model-catalog.ts";
@@ -694,13 +694,54 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
   });
 
-  on("POST", "/api/tasks/:id/approve-plan", (_req, res, { params }) => {
+  on("GET", "/api/tasks/:id/plan-revisions", (_req, res, { params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
     try {
-      const children = approvePlan(state.db, state.hub, task);
+      json(res, 200, listTaskPlanRevisions(state.db, task));
+    } catch (err) {
+      if (err instanceof PlanError) return json(res, 400, { error: err.message });
+      json(res, 500, { error: String(err) });
+    }
+  });
+
+  on("POST", "/api/tasks/:id/request-plan-changes", async (_req, res, { params, body }) => {
+    const task = state.db.getTask(params.id);
+    if (!task) return json(res, 404, { error: "task not found" });
+    try {
+      const input = validatePlanReviewInput(body);
+      const result = await requestPlanChanges(state.db, state.hub, state.backend, task, input);
+      json(res, 200, result);
+    } catch (err) {
+      if (err instanceof PlanConflictError) {
+        return json(res, 409, {
+          error: err.message,
+          current_revision_id: err.currentRevisionId,
+          current_version: err.currentVersion,
+        });
+      }
+      if (err instanceof PlanDeliveryError) return json(res, 502, { error: err.message });
+      if (err instanceof PlanError) return json(res, 400, { error: err.message });
+      json(res, 500, { error: String(err) });
+    }
+  });
+
+  on("POST", "/api/tasks/:id/approve-plan", (_req, res, { params, body }) => {
+    const task = state.db.getTask(params.id);
+    if (!task) return json(res, 404, { error: "task not found" });
+    const rawRevisionId = (body as { revision_id?: unknown } | undefined)?.revision_id;
+    const revisionId = typeof rawRevisionId === "string" && rawRevisionId.trim() ? rawRevisionId.trim() : undefined;
+    try {
+      const children = approvePlan(state.db, state.hub, task, revisionId);
       json(res, 200, { children });
     } catch (err) {
+      if (err instanceof PlanConflictError) {
+        return json(res, 409, {
+          error: err.message,
+          current_revision_id: err.currentRevisionId,
+          current_version: err.currentVersion,
+        });
+      }
       if (err instanceof PlanError) return json(res, 400, { error: err.message });
       json(res, 500, { error: String(err) });
     }
@@ -781,6 +822,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         const item = await state.capture.createPlan(task.id, b.title, { contract: planBody.contract, subtasks });
         return json(res, 200, item);
       } catch (err) {
+        if (err instanceof PlanConflictError) {
+          return json(res, 409, {
+            error: err.message,
+            current_revision_id: err.currentRevisionId,
+            current_version: err.currentVersion,
+          });
+        }
         if (err instanceof PlanError) return json(res, 400, { error: err.message });
         throw err;
       }

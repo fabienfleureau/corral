@@ -101,8 +101,10 @@ What each one is for:
 - **`spec.md`** — multi-repo step one: read-only in a folder of sub-projects,
   write the contract between them (owner and consumers of every interface), one
   self-contained sub-task per touched repo and the delivery order, then POST
-  `kind: "plan"`. Corral validates each `repo` and the human approves in the inbox.
-  A child code task later gets the contract appended to its prompt (see below).
+  `kind: "plan"` and wait idle for approval or revision feedback. When revision
+  comments arrive, address them and POST a fresh `kind: "plan"`. Corral
+  validates each `repo` and the human approves in the inbox. A child code task
+  later gets the contract appended to its prompt (see below).
 - **`epic-task.md`** — an epic ticket's preconditions (a library built, a schema
   merged…) are checked for real before any change; an unmet one becomes a
   question and the agent stops. The human relaunches the task once it holds.
@@ -150,6 +152,7 @@ Task follow-up: <review comments|merge conflicts> on your PR for "<task title>".
 |---|---|---|
 | `commentsSection()` | the PR has review threads that are not answered or resolved | *"PR review comments need handling — this is the PR loop, not a question"*, the `DATA_NOT_INSTRUCTIONS` framing, then every thread as `[n] author (thread <id>): body` |
 | `conflictSection()` | the PR no longer merges cleanly into its base | *"PR merge conflicts need handling"* + the `git fetch && rebase origin/<base>` recipe |
+| `planRevisionPrompt()` — `server/multi-repo.ts` | the human submits **Request changes** on a multi-repo `spec` plan revision (`POST /api/tasks/:id/request-plan-changes`) | *"The human requested changes to plan v{version}."*, optional general note, numbered review comments (`**Section:** …`, quoted passage, reviewer note), and instruction to submit a revised `kind: "plan"` report without editing repository files |
 
 Both messages start with the exact prefixes `PR review comments` / `PR merge
 conflicts` that `pr-loop.md` refers to.

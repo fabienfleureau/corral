@@ -30,8 +30,42 @@ export interface PlanSubtask {
 export interface TaskSpec {
   contract: string;
   subtasks: PlanSubtask[];
+  /** Current immutable revision id in `plan_revisions` (absent on legacy rows). */
+  revision_id?: string;
+  /** Monotonic revision number for this spec task (1, 2, ...). */
+  version?: number;
   /** Set once approved: the ids of the code tasks created from `subtasks`. */
   children?: string[];
+}
+
+/** One immutable plan snapshot submitted for a multi-repo `spec` task. */
+export interface PlanRevision {
+  id: string;
+  task_id: string;
+  version: number;
+  title: string;
+  contract: string;
+  subtasks: PlanSubtask[];
+  markdown: string;
+  created_ms: number;
+}
+
+/** One inline reviewer comment anchored to a quoted passage in a plan revision. */
+export interface PlanReviewComment {
+  section: string;
+  repo?: string | null;
+  quote: string;
+  body: string;
+}
+
+/** One submitted batch of revision feedback sent back to a spec agent. */
+export interface PlanReview {
+  id: string;
+  task_id: string;
+  revision_id: string;
+  note: string;
+  comments: PlanReviewComment[];
+  created_ms: number;
 }
 
 /** Matches a GitHub pull request or GitLab merge request URL. */

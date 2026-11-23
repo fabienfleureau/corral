@@ -162,19 +162,59 @@ export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
 }
 
 export function seedMultiRepo(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
-  const contract = "`POST /v1/widgets` accepts `{size: \"s\" | \"m\" | \"l\"}` and returns it unchanged.\n\nDelivery order: `api-spec` first, then `core`.";
-  const subtasks = [
+  const v1Contract = "`POST /v1/widgets` accepts `{size: \"s\" | \"m\" | \"l\"}` and returns it unchanged.\n\n### Delivery order\n\n`api-spec` first, then `core`.";
+  const v1Subtasks = [
     { repo: "api-spec", title: "Add `size` to the Widget schema", prompt: "Add the `size` enum to `openapi.yaml` and bump the spec version." },
     { repo: "core", title: "Persist and return `size`", prompt: "Store `size` on widgets and return it from `POST /v1/widgets`." },
+  ];
+  const contract = "`POST /v1/widgets` accepts `{size: \"s\" | \"m\" | \"l\"}` with an optional `Idempotency-Key` header and returns it unchanged (`409` on key reuse with a different payload).\n\n### Delivery order\n\n`api-spec` first, then `core`.";
+  const subtasks = [
+    { repo: "api-spec", title: "Add `size` and `Idempotency-Key` to the Widget schema", prompt: "Add the `size` enum and `Idempotency-Key` header to `openapi.yaml` and bump the spec version." },
+    { repo: "core", title: "Persist and return `size` with idempotency", prompt: "Store `size` on widgets, enforce `Idempotency-Key` on `POST /v1/widgets`, and return `409` on conflicting retries." },
   ];
   const base = {
     prompt: "Add a size to widgets", repo_path: "/sample/workspace", target: "claude", target_state: "confirmed" as const, base_branch: null,
     branch: null, worktree_path: null, assignee: null, jira_key: null, jira_url: null, jira_parent_key: null, pr_url: null, pr_meta: null,
     terminal_address: null, exit_code: null, created_ms: now - 2 * 60_000, updated_ms: now - 2 * 60_000,
   };
-  db.insertTask({ ...base, id: "sample-spec", title: "Add a size to widgets", kind: "spec", status: "dispatched", model: null, reasoning: null, spec: JSON.stringify({ contract, subtasks }) });
+  const v1Id = "sample-plan-rev-1";
+  const v2Id = "sample-plan-rev-2";
+  db.insertTask({
+    ...base,
+    id: "sample-spec",
+    title: "Add a size to widgets",
+    kind: "spec",
+    status: "dispatched",
+    model: null,
+    reasoning: null,
+    spec: JSON.stringify({ contract, subtasks, revision_id: v2Id, version: 2 }),
+  });
   db.insertTask({ ...base, id: "sample-child", title: "Expose widget colors", kind: "code", status: "open", repo_path: "/sample/workspace/core", model: null, reasoning: null, parent_task_id: "sample-spec", created_ms: now - 3 * 60_000, updated_ms: now - 3 * 60_000 });
-  const body = ["## Contract", "", contract, "", "## Sub-tasks", "", ...subtasks.flatMap((s, i) => [`### ${i + 1}. ${s.title} — \`${s.repo}\``, "", s.prompt, ""])].join("\n").trimEnd();
+  const render = (c: string, subs: typeof subtasks) =>
+    ["## Contract", "", c, "", "## Sub-tasks", "", ...subs.flatMap((s, i) => [`### ${i + 1}. ${s.title} — \`${s.repo}\``, "", s.prompt, ""])].join("\n").trimEnd();
+  const v1Body = render(v1Contract, v1Subtasks);
+  const body = render(contract, subtasks);
+  db.insertPlanRevision({
+    id: v1Id, task_id: "sample-spec", version: 1, title: "Add a size to widgets",
+    contract: v1Contract, subtasks: v1Subtasks, markdown: v1Body, created_ms: now - 150_000,
+  });
+  db.insertPlanRevision({
+    id: v2Id, task_id: "sample-spec", version: 2, title: "Add a size to widgets",
+    contract, subtasks, markdown: body, created_ms: now - 90_000,
+  });
+  db.insertPlanReview({
+    id: "sample-plan-review-1",
+    task_id: "sample-spec",
+    revision_id: v1Id,
+    note: "Define retry behavior before splitting repo work.",
+    comments: [{
+      section: "Contract",
+      repo: null,
+      quote: '`POST /v1/widgets` accepts `{size: "s" | "m" | "l"}` and returns it unchanged.',
+      body: "Require an optional Idempotency-Key header and return 409 on conflicting retries.",
+    }],
+    created_ms: now - 120_000,
+  });
   db.insertItem({
     id: "sample-plan", kind: "plan", status: "open", title: "Add a size to widgets", summary: body, body, context: "", options: null,
     ready: 1, handling: 0, source_ref: null, task_id: "sample-spec", structured: 1,

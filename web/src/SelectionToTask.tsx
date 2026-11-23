@@ -1,17 +1,64 @@
 // Select text anywhere in the app — a report body in the inbox, most of the
-// time — and a "New task" action appears next to it. It opens the Tasks page
-// with the selection as the prompt, so a passage worth acting on becomes a
-// dispatch in two clicks.
+// time — and a "New task" action appears next to it. Inside an active, open
+// multi-repo plan's reading view, the pill also offers "Comment" to attach an
+// inline annotation to the current plan revision.
 
 import { useCallback, useEffect, useState } from "react";
 import { isTaskSelection, promptFromSelection, selectionTaskHash } from "./selection-task";
+import { PLAN_COMMENT_EVENT, type PlanCommentRequest } from "./plan-draft";
 
-type Anchor = { text: string; top: number; left: number };
+/**
+ * Inspect a DOM selection to determine whether it starts and ends inside an
+ * active, open plan's reading-view container (`[data-plan-commentable="true"]`).
+ * Returns deterministic section/repo metadata or null outside commentable plans.
+ */
+function planCommentFromSelection(selection: Selection, quote: string): PlanCommentRequest | null {
+  if (selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  const startEl = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+  const endEl = range.endContainer instanceof Element ? range.endContainer : range.endContainer.parentElement;
+  if (!startEl || !endEl) return null;
+  const startRoot = startEl.closest<HTMLElement>('[data-plan-commentable="true"]');
+  const endRoot = endEl.closest<HTMLElement>('[data-plan-commentable="true"]');
+  if (!startRoot || startRoot !== endRoot) return null;
+  const taskId = startRoot.dataset.planTaskId ?? "";
+  const revisionId = startRoot.dataset.planRevisionId ?? "";
+  if (!taskId || !revisionId) return null;
+
+  const sectionEl = startEl.closest<HTMLElement>("[data-plan-section]");
+  let section = sectionEl?.dataset.planSection || "Contract";
+  const repo = sectionEl?.dataset.planRepo || null;
+
+  if (section === "Contract" && sectionEl) {
+    const mdRoot = sectionEl.querySelector(".md");
+    if (mdRoot) {
+      const headings = Array.from(mdRoot.querySelectorAll("h2, h3, h4"));
+      let nearest: string | null = null;
+      for (const h of headings) {
+        const pos = h.compareDocumentPosition(range.startContainer);
+        if (h === range.startContainer || h.contains(range.startContainer) || (pos & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) {
+          const text = h.textContent?.trim();
+          if (text) nearest = text;
+        }
+      }
+      if (nearest) section = `Contract > ${nearest}`;
+    }
+  }
+
+  return { taskId, revisionId, section, repo, quote };
+}
+
+type Anchor = {
+  text: string;
+  top: number;
+  left: number;
+  planComment: PlanCommentRequest | null;
+};
 
 /** Room the pill needs above the selection before it flips below it. */
 const PILL_HEIGHT = 44;
 /** Half the pill's width, kept off the viewport edges. */
-const EDGE = 110;
+const EDGE = 140;
 
 function anchorFor(selection: Selection): Anchor | null {
   if (selection.isCollapsed || selection.rangeCount === 0) return null;
@@ -25,7 +72,8 @@ function anchorFor(selection: Selection): Anchor | null {
   if (rect.width === 0 && rect.height === 0) return null;
   const left = Math.min(Math.max(rect.left + rect.width / 2, EDGE), window.innerWidth - EDGE);
   const above = rect.top - PILL_HEIGHT;
-  return { text, left, top: above >= 8 ? above : rect.bottom + 10 };
+  const planComment = planCommentFromSelection(selection, text);
+  return { text, left, top: above >= 8 ? above : rect.bottom + 10, planComment };
 }
 
 export function SelectionToTask() {
@@ -76,7 +124,44 @@ export function SelectionToTask() {
     window.location.hash = selectionTaskHash(anchor.text);
   }, [anchor]);
 
+  const comment = useCallback(() => {
+    if (!anchor?.planComment) return;
+    const detail = anchor.planComment;
+    document.getSelection()?.removeAllRanges();
+    setAnchor(null);
+    window.dispatchEvent(new CustomEvent<PlanCommentRequest>(PLAN_COMMENT_EVENT, { detail }));
+  }, [anchor]);
+
   if (!anchor) return null;
+  if (anchor.planComment) {
+    return (
+      <div
+        className="selection-task selection-task-group"
+        role="toolbar"
+        aria-label="Selection actions"
+        style={{ top: anchor.top, left: anchor.left }}
+        onMouseDown={(event) => event.preventDefault()}
+      >
+        <button
+          type="button"
+          className="selection-task-action"
+          onClick={comment}
+          title="Add a review comment on the selected passage"
+        >
+          Comment
+        </button>
+        <span className="selection-task-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className="selection-task-action"
+          onClick={create}
+          title="Create a task with the selected text as its prompt"
+        >
+          <span aria-hidden="true">+</span> New task
+        </button>
+      </div>
+    );
+  }
   return (
     <button
       type="button"

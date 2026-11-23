@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
-import type { DailyActivity, Epic, EpicAmendment, EpicDesign, EpicLink, Item, ItemKind, ItemStatus, MetricEvent, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
+import type { DailyActivity, Epic, EpicAmendment, EpicDesign, EpicLink, Item, ItemKind, ItemStatus, MetricEvent, PlanReview, PlanReviewComment, PlanRevision, PlanSubtask, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
 import { logTaskChanges, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
@@ -163,6 +163,29 @@ CREATE TABLE IF NOT EXISTS task_attachments (
   created_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_task_attachments_task ON task_attachments(task_id, created_ms);
+
+CREATE TABLE IF NOT EXISTS plan_revisions (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  contract TEXT NOT NULL,
+  subtasks_json TEXT NOT NULL,
+  markdown TEXT NOT NULL,
+  created_ms INTEGER NOT NULL,
+  UNIQUE(task_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_plan_revisions_task ON plan_revisions(task_id, version);
+
+CREATE TABLE IF NOT EXISTS plan_reviews (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  revision_id TEXT NOT NULL,
+  note TEXT NOT NULL,
+  comments_json TEXT NOT NULL,
+  created_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plan_reviews_task ON plan_reviews(task_id, created_ms);
 `;
 
 export class Db {
@@ -663,5 +686,81 @@ export class Db {
     return this.raw
       .prepare(`SELECT * FROM metrics_events ORDER BY id DESC LIMIT ?`)
       .all(limit) as unknown as MetricEvent[];
+  }
+
+  // ---- plan revisions and reviews ----
+
+  insertPlanRevision(rev: PlanRevision): void {
+    this.raw
+      .prepare(
+        `INSERT INTO plan_revisions (id, task_id, version, title, contract, subtasks_json, markdown, created_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(rev.id, rev.task_id, rev.version, rev.title, rev.contract, JSON.stringify(rev.subtasks), rev.markdown, rev.created_ms);
+  }
+
+  listPlanRevisions(taskId: string): PlanRevision[] {
+    const rows = this.stmt(
+      `SELECT id, task_id, version, title, contract, subtasks_json, markdown, created_ms
+       FROM plan_revisions WHERE task_id = ? ORDER BY version ASC`,
+    ).all(taskId) as unknown as {
+      id: string; task_id: string; version: number; title: string; contract: string; subtasks_json: string; markdown: string; created_ms: number;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      task_id: r.task_id,
+      version: r.version,
+      title: r.title,
+      contract: r.contract,
+      subtasks: JSON.parse(r.subtasks_json) as PlanSubtask[],
+      markdown: r.markdown,
+      created_ms: r.created_ms,
+    }));
+  }
+
+  getLatestPlanRevision(taskId: string): PlanRevision | null {
+    const r = this.stmt(
+      `SELECT id, task_id, version, title, contract, subtasks_json, markdown, created_ms
+       FROM plan_revisions WHERE task_id = ? ORDER BY version DESC LIMIT 1`,
+    ).get(taskId) as unknown as {
+      id: string; task_id: string; version: number; title: string; contract: string; subtasks_json: string; markdown: string; created_ms: number;
+    } | undefined;
+    if (!r) return null;
+    return {
+      id: r.id,
+      task_id: r.task_id,
+      version: r.version,
+      title: r.title,
+      contract: r.contract,
+      subtasks: JSON.parse(r.subtasks_json) as PlanSubtask[],
+      markdown: r.markdown,
+      created_ms: r.created_ms,
+    };
+  }
+
+  insertPlanReview(review: PlanReview): void {
+    this.raw
+      .prepare(
+        `INSERT INTO plan_reviews (id, task_id, revision_id, note, comments_json, created_ms)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(review.id, review.task_id, review.revision_id, review.note, JSON.stringify(review.comments), review.created_ms);
+  }
+
+  listPlanReviews(taskId: string): PlanReview[] {
+    const rows = this.stmt(
+      `SELECT id, task_id, revision_id, note, comments_json, created_ms
+       FROM plan_reviews WHERE task_id = ? ORDER BY created_ms ASC, rowid ASC`,
+    ).all(taskId) as unknown as {
+      id: string; task_id: string; revision_id: string; note: string; comments_json: string; created_ms: number;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      task_id: r.task_id,
+      revision_id: r.revision_id,
+      note: r.note,
+      comments: JSON.parse(r.comments_json) as PlanReviewComment[],
+      created_ms: r.created_ms,
+    }));
   }
 }
