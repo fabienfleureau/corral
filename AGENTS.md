@@ -80,7 +80,10 @@ CORRAL_FIXTURE_PREPARE="$(cat select-first-paragraph.js)" \
 
 The prepare expression is evaluated in the page; an async IIFE can poll for
 fixture data that renders after mount. Capture the same route and viewport in
-the base checkout (no prepare) for the before image.
+the base checkout (no prepare) for the before image. If the view needs the
+harness list, point `CORRAL_FIXTURE_OMNIGENT_URL` at a local stub that answers
+`/v1/agents` and `/v1/hosts`; the fixture keeps GitHub and other services stubbed.
+Use the same stub for both checkouts.
 
 Replace `origin/main` with the PR base and `/tasks` with the same hash route for
 both captures. Set `CHROME` to the Chrome/Chromium executable if it is not at

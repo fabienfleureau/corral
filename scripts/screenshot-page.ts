@@ -21,7 +21,7 @@ try {
   await page.waitForEvent("Page.loadEventFired", Number(settleTimeoutMs));
   // Put the page in the state to capture before waiting for it to settle.
   if (prepareExpression.trim()) {
-    await page.send("Runtime.evaluate", { expression: prepareExpression, awaitPromise: true, returnByValue: true });
+    await page.evaluate(prepareExpression);
   }
   // Let post-mount fetches land; settleExpression decides when the page is done.
   const deadline = Date.now() + Number(settleTimeoutMs);
