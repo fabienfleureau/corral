@@ -107,10 +107,14 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   waiting on you) or **agent status unknown** when no session state is
   available. Tasks whose session went idle, finished, or failed leave **In
   progress**.
-- **PR loop** — Corral watches each task's PR/MR. Review comments and merge
-  conflicts are pushed back to the agent (`skills/pr-loop.md`). The item turns
+- **PR loop** — Corral watches each task's PR/MR. Review comments, merge
+  conflicts, and failing CI checks (bounded to 2 automatic attempts per head
+  commit) are pushed back to the agent (`skills/pr-loop.md`). The item turns
   **green** only when threads are answered or resolved, checks pass and the PR
-  is mergeable; a fresh PR is **orange** until automated reviews pass. **Force
+  is mergeable; a fresh PR is **orange** until automated reviews pass. An
+  observe-only **risk triage** badge (`routine skim` or `deep review`,
+  configurable per repo in `.corral/triage.json`, [ADR 0019](adr/0019-pr-risk-triage-observe-only.md))
+  highlights review depth without altering readiness or approvals. **Force
   refresh** re-checks one PR on demand. A merged PR completes its task and
   archives its items (see the **Archived** tab).
 - **Pull Requests page** — your own PRs/MRs, review requests, and colleagues' open

@@ -130,3 +130,27 @@ test("PR loop: thread bodies are framed as data", withDb(async (db, dir) => {
   assert.ok(message.includes(DATA_NOT_INSTRUCTIONS), "the framing reaches the agent");
   assert.ok(message.indexOf(DATA_NOT_INSTRUCTIONS) < message.indexOf(INJECTION), "framing comes before the comment bodies");
 }));
+
+test("PR loop: failing CI check names are framed as data", withDb(async (db, dir) => {
+  db.insertTask(makeTask({
+    status: "dispatched", branch: "feat-x", terminal_address: "s1", jira_url: null,
+    pr_url: "https://example.com/pr/7", prompt: "Cache the tag list.",
+  }));
+  const { backend, sent } = fakeBackend();
+  const pr: PrInfo = {
+    url: "https://example.com/pr/7", title: "feat: x", state: "OPEN", number: 7, description: "x",
+    additions: 1, deletions: 1, changed_files: 1, mergeable: "MERGEABLE", base_ref: "main",
+    review_decision: null, checks: { total: 1, failed: 1, pending: false },
+    failed_checks: [{ name: INJECTION, conclusion: "failure", url: "https://ci.example/1" }],
+    threads: [],
+  };
+  await syncTaskPr(db, { broadcast: () => undefined }, db.getTask("task-1")!, {
+    finder: () => pr, backend, cfg: cfg(dir),
+  });
+  await new Promise((r) => setTimeout(r, 15));
+  assert.equal(sent.length, 1);
+  const message = sent[0];
+  assert.match(message, /^PR failing checks/, "the CI-check prefix stays first");
+  assert.ok(message.includes(DATA_NOT_INSTRUCTIONS), "the framing reaches the agent");
+  assert.ok(message.indexOf(DATA_NOT_INSTRUCTIONS) < message.indexOf(INJECTION), "framing comes before the check names");
+}));

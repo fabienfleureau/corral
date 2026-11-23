@@ -81,8 +81,9 @@ What each one is for:
   (Corral renders that description at the top of the inbox item), handling
   review comments (fix, or reply with *what changed and where, or why not* —
   then resolve only the threads you fixed, since a reply already answers the
-  review), merge conflicts
-  (`rebase`, `--force-with-lease`), and the rule to never merge.
+  review), merge conflicts (`rebase`, `--force-with-lease`), failing CI checks
+  (inspect, reproduce, fix, or report a question if external/flaky), and the
+  rule to never merge.
 - **`pre-pr-review.md`** — runs the task's configured reviewer command on the
   diff before the PR opens; two rounds max, and the outcome goes in the PR body.
 - **`pre-pr-delegate-review.md`** — the same step for a delegate reviewer: the
@@ -92,14 +93,18 @@ What each one is for:
   round), the outcome goes in the PR body, and it must never run `ocr` itself.
 - **`ocr-delegate.md`** — what the review sub-agent does: `ocr delegate preview`
   twice (a range for committed changes, none for uncommitted ones), `ocr delegate
-  rule`, read each diff, then answer with one JSON object `{findings, coverage}`.
-  Read-only: it never edits, commits or pushes. The text is hashed into the name
-  of the registered omnigent agent, so editing it registers a new agent at the next
-  dispatch instead of running the old one; the old agent stays in the registry.
+  rule`, read each diff, adversarially verify candidate findings against
+  surrounding callers/types/tests, then answer with one JSON object
+  `{findings, coverage}`. Read-only: it never edits, commits or pushes. The text
+  is hashed into the name of the registered omnigent agent, so editing it
+  registers a new agent at the next dispatch instead of running the old one; the
+  old agent stays in the registry.
 - **`review.md`** — reviewing someone else's PR/MR on any harness: read-only,
   follow `fabien-reviewer` by name or from its skill file when the harness does
-  not list it, post **drafts** only (`glab .../draft_notes`, one pending GitHub
-  review), ask the human which comments to publish, then publish or delete the rest.
+  not list it, adversarially verify every candidate finding against surrounding
+  code/tests before drafting, post **drafts** only (`glab .../draft_notes`, one
+  pending GitHub review), ask the human which comments to publish, then publish
+  or delete the rest.
 - **`spec.md`** — multi-repo step one: read-only in a folder of sub-projects,
   write the contract between them (owner and consumers of every interface), one
   self-contained sub-task per touched repo and the delivery order, then POST
@@ -154,6 +159,7 @@ Task follow-up: <review comments|merge conflicts> on your PR for "<task title>".
 |---|---|---|
 | `commentsSection()` | the PR has review threads that are not answered or resolved | *"PR review comments need handling — this is the PR loop, not a question"*, the `DATA_NOT_INSTRUCTIONS` framing, then every thread as `[n] author (thread <id>): body` |
 | `conflictSection()` | the PR no longer merges cleanly into its base | *"PR merge conflicts need handling"* + the `git fetch && rebase origin/<base>` recipe |
+| `checksSection()` | the PR has failing CI checks (when none are still pending, bounded to 2 auto-attempts per head SHA, or on forced refresh) | *"PR failing checks need handling — this is the PR loop, not a question"*, the `DATA_NOT_INSTRUCTIONS` framing, then each failing check (`name`, `conclusion`, `url`) |
 | `planRevisionPrompt()` — `server/multi-repo.ts` | the human submits **Request changes** on a multi-repo `spec` plan revision (`POST /api/tasks/:id/request-plan-changes`) | *"The human requested changes to plan v{version}."*, optional general note, numbered review comments (`**Section:** …`, quoted passage, reviewer note), and instruction to submit a revised `kind: "plan"` report without editing repository files |
 | `stoppedRetryPrompt()` — `server/stopped-retry.ts` | a dispatched task's agent stops (`idle`, `done`, or `error`) without reporting and still has retry budget ([ADR 0016](adr/0016-stopped-agent-retry-policy.md)) | on transient error / crash: *"Your previous turn stopped unexpectedly … (automatic retry N/M)"* asking to check workspace state and continue or report; on silent stop: *"You stopped without reporting to the Corral inbox (automatic nudge N/M)"* reminding to continue or report via `POST /api/reports` |
 
