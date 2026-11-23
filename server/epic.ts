@@ -8,7 +8,7 @@ import type { Db } from "./db.ts";
 import { blockedByEdges, descriptionToText, type JiraIssue } from "./jira.ts";
 import { stripBlocks } from "./jira-blocks.ts";
 import { logTaskEvent } from "./task-events.ts";
-import type { Epic, Repo, Task } from "./types.ts";
+import type { Epic, EpicTicket, Repo, Task } from "./types.ts";
 
 /** The slice of the Jira client a sync needs (a fake in tests). */
 export interface EpicJira {
@@ -72,9 +72,11 @@ export interface EpicSyncResult {
 }
 
 /**
- * Import or resync one epic. Tickets already known as tasks are attached;
- * a task that was already dispatched keeps its prompt and title. A ticket that
- * left the epic is flagged, not deleted.
+ * Import or resync one epic. Jira child tickets are stored as reference data
+ * (`epic_tickets`) without creating Corral tasks — the epic agent creates tasks
+ * in the right repository with the right agent. Existing Corral tasks matching
+ * a child ticket are still attached and kept in sync; a task whose ticket left
+ * the epic is flagged, not deleted.
  */
 export async function syncEpic(db: Db, jira: EpicJira, key: string): Promise<EpicSyncResult> {
   const epicIssue = await jira.getIssue(key);
@@ -94,24 +96,28 @@ export async function syncEpic(db: Db, jira: EpicJira, key: string): Promise<Epi
   const repos = db.listRepos();
   const result: EpicSyncResult = { epic, created: [], updated: [], out: [] };
   const present = new Set<string>();
+  const tickets: EpicTicket[] = [];
 
   for (const issue of children) {
     const f = jira.issueToTaskFields(issue);
     f.prompt = stripBlocks(f.prompt); // the amendment block lives on the task, not in its prompt
     present.add(f.jira_key);
+    const suggestedRepo = parseRepoLine(f.prompt, repos);
+    tickets.push({
+      epic_id: epic.id,
+      jira_key: f.jira_key,
+      title: f.title,
+      description: f.prompt,
+      jira_url: f.jira_url,
+      jira_status: f.jira_status,
+      jira_parent_key: f.jira_parent_key,
+      suggested_repo_path: suggestedRepo?.path ?? "",
+      updated_ms: now,
+    });
     const existing = db.getTaskByJiraKey(f.jira_key);
     if (!existing) {
-      const repo = parseRepoLine(f.prompt, repos);
-      const task: Task = {
-        id: randomUUID(), title: f.title, prompt: f.prompt, kind: "code", repo_path: repo?.path ?? "", target: "", target_state: "suggested",
-        base_branch: null, branch: null, worktree_path: null, assignee: null, jira_key: f.jira_key, jira_url: f.jira_url,
-        jira_parent_key: f.jira_parent_key, jira_status: f.jira_status, pr_url: null, pr_meta: null, status: "open",
-        terminal_address: null, exit_code: null, created_ms: now, updated_ms: now, epic_id: epic.id,
-      };
-      db.insertTask(task);
-      db.recordMetric("task.created", task.id, { source: "epic" });
-      logTaskEvent(db, task.id, "created", `Task created from epic ${key}`, { source: "epic", epic: key, repo: task.repo_path || null });
-      result.created.push(f.jira_key);
+      // Do not create Corral tasks on epic import/sync: the epic agent creates
+      // tasks explicitly in the right repository with the right agent.
       continue;
     }
     const patch: Partial<Task> = {};
@@ -126,9 +132,8 @@ export async function syncEpic(db: Db, jira: EpicJira, key: string): Promise<Epi
     if (!started && existing.jira_url) {
       if (existing.title !== f.title) patch.title = f.title;
       if (existing.prompt !== f.prompt) patch.prompt = f.prompt;
-      if (!existing.repo_path) {
-        const repo = parseRepoLine(f.prompt, repos);
-        if (repo) patch.repo_path = repo.path;
+      if (!existing.repo_path && suggestedRepo) {
+        patch.repo_path = suggestedRepo.path;
       }
     }
     if (existing.jira_parent_key !== f.jira_parent_key) patch.jira_parent_key = f.jira_parent_key;
@@ -137,6 +142,8 @@ export async function syncEpic(db: Db, jira: EpicJira, key: string): Promise<Epi
       result.updated.push(f.jira_key);
     }
   }
+
+  db.replaceEpicTickets(epic.id, tickets);
 
   for (const task of db.listEpicTasks(epic.id)) {
     if (task.jira_key && !present.has(task.jira_key) && !task.epic_out) {

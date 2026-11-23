@@ -64,6 +64,9 @@ const kpis = new KpiMonitor(db, backend, { favorites: () => cfg.favorites ?? [],
 const epicAgents = new EpicAgentRunner(db, backend, {
   favorites: () => cfg.favorites ?? [],
   repos: () => db.listRepos(),
+  agents: () => Object.keys(cfg.agents ?? {}),
+  corralUrl: () => `http://${cfg.host}:${cfg.port}`,
+  corralToken: () => cfg.token,
   onUpdate: (epicId) => {
     const epic = db.getEpic(epicId);
     if (epic) hub.broadcast("epic.updated", epic);

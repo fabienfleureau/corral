@@ -15,7 +15,7 @@ import { resumeSnoozedItems, type CaptureEngine, type Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncEpic } from "./epic.ts";
 import { EpicAgentRunner } from "./epic-agent.ts";
-import { createEpicRequestTask, EpicRequestError, saveEpicRequestSettings, type EpicRequestSettings } from "./epic-request.ts";
+import { createEpicAgentTask, createEpicRequestTask, EpicRequestError, saveEpicRequestSettings, type EpicAgentTaskInput, type EpicRequestSettings } from "./epic-request.ts";
 import { orchestrationPrompt } from "./epic-orchestration.ts";
 import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "./epic-graph.ts";
 import { applyAmendment, impactedTaskIds, proposeAmendments, rejectAmendment, reviseDesign } from "./epic-design.ts";
@@ -1011,6 +1011,9 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   const epicAgents = state.epicAgents ??= new EpicAgentRunner(state.db, state.backend, {
     favorites: () => state.cfg.favorites ?? [],
     repos: () => state.db.listRepos(),
+    agents: () => Object.keys(state.cfg.agents ?? {}),
+    corralUrl: () => `http://${state.cfg.host}:${state.cfg.port}`,
+    corralToken: () => state.cfg.token,
     onUpdate: (epicId) => {
       const epic = state.db.getEpic(epicId);
       if (epic) state.hub.broadcast("epic.updated", epic);
@@ -1084,7 +1087,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   };
 
   const epicRequestFailure = (res: ServerResponse, err: unknown) =>
-    json(res, err instanceof EpicRequestError ? 400 : 500, { error: String(err instanceof Error ? err.message : err) });
+    json(res, err instanceof EpicRequestError ? err.status : 500, { error: String(err instanceof Error ? err.message : err) });
 
   // The selectors are saved as soon as they change, so the next request on
   // this epic starts from the same favorite and folder.
@@ -1128,6 +1131,41 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     } catch (err) { epicRequestFailure(res, err); }
   });
 
+  // Create an open task linked to the epic with an explicit repository and
+  // agent/favorite choice (used by the autonomous epic agent). Never dispatches.
+  on("POST", "/api/epics/:id/tasks", (_req, res, { params, body }) => {
+    const epic = state.db.getEpic(params.id);
+    if (!epic) return json(res, 404, { error: "epic not found" });
+    const b = (body ?? {}) as Record<string, unknown>;
+    try {
+      const input: EpicAgentTaskInput = {
+        title: typeof b.title === "string" ? b.title : undefined,
+        prompt: typeof b.prompt === "string" ? b.prompt : "",
+        repo_path: typeof b.repo_path === "string" ? b.repo_path : (typeof b.repo === "string" ? b.repo : ""),
+        favorite: typeof b.favorite === "string" ? b.favorite : (typeof b.favorite_name === "string" ? b.favorite_name : undefined),
+        target: typeof b.target === "string" ? b.target : undefined,
+        agent: typeof b.agent === "string" ? b.agent : undefined,
+        model: typeof b.model === "string" ? b.model : undefined,
+        reasoning: typeof b.reasoning === "string" ? b.reasoning : undefined,
+        kind: epicRequestKind(body),
+        jira_key: typeof b.jira_key === "string" ? b.jira_key : undefined,
+        base_branch: typeof b.base_branch === "string" ? b.base_branch : undefined,
+      };
+      const task = createEpicAgentTask(
+        state.db,
+        epic,
+        input,
+        state.cfg.favorites ?? [],
+        state.cfg.reviewers ?? [],
+        Object.keys(state.cfg.agents ?? {}),
+        state.cfg.jira?.baseUrl ?? "",
+      );
+      state.hub.broadcast("task.updated", task);
+      state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));
+      json(res, 201, task);
+    } catch (err) { epicRequestFailure(res, err); }
+  });
+
   // A ready epic task starts only when the human clicks on the Epic page.
   // Readiness is rechecked here: a stale page must not launch a blocked task.
   on("POST", "/api/epics/:id/tasks/:taskId/launch", async (_req, res, { params }) => {
@@ -1164,7 +1202,20 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!detail) return json(res, 404, { error: "epic not found" });
     const request = (body as { request?: unknown } | null)?.request;
     if (typeof request !== "string" || !request.trim() || request.length > 8000) return json(res, 400, { error: "request must be between 1 and 8000 characters" });
-    const tasks = detail.views.map((v) => ({ key: v.task.jira_key ?? v.task.id, title: v.task.title, description: v.task.prompt, repo: v.task.repo_path, state: v.state, blockers: v.blockers.filter((b) => !b.satisfied).map((b) => b.key) }));
+    const existingKeys = new Set(detail.views.map((v) => v.task.jira_key).filter(Boolean));
+    const tasks = [
+      ...detail.views.map((v) => ({ key: v.task.jira_key ?? v.task.id, title: v.task.title, description: v.task.prompt, repo: v.task.repo_path, state: v.state, blockers: v.blockers.filter((b) => !b.satisfied).map((b) => b.key) })),
+      ...state.db.listEpicTickets(params.id)
+        .filter((t) => !existingKeys.has(t.jira_key))
+        .map((t) => ({
+          key: t.jira_key,
+          title: t.title,
+          description: t.description,
+          repo: t.suggested_repo_path,
+          state: t.jira_status ?? "jira_ticket",
+          blockers: detail.links.filter((l) => l.task_key === t.jira_key).map((l) => l.blocked_by_key),
+        })),
+    ];
     try {
       const proposal = await llmComplete(state.cfg, orchestrationPrompt(DATA_NOT_INSTRUCTIONS, request.trim(), detail.epic, detail.design?.body ?? detail.epic.description, tasks), 180_000);
       json(res, 200, { proposal });

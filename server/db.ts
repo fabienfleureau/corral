@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
-import type { DailyActivity, Epic, EpicAmendment, EpicDesign, EpicLink, Item, ItemKind, ItemStatus, MetricEvent, PlanReview, PlanReviewComment, PlanRevision, PlanSubtask, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
+import type { DailyActivity, Epic, EpicAmendment, EpicDesign, EpicLink, EpicTicket, Item, ItemKind, ItemStatus, MetricEvent, PlanReview, PlanReviewComment, PlanRevision, PlanSubtask, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
 import { logTaskChanges, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
@@ -128,6 +128,18 @@ CREATE TABLE IF NOT EXISTS epic_links (
   task_key TEXT NOT NULL,
   blocked_by_key TEXT NOT NULL,
   PRIMARY KEY (epic_id, task_key, blocked_by_key)
+);
+CREATE TABLE IF NOT EXISTS epic_tickets (
+  epic_id TEXT NOT NULL,
+  jira_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  jira_url TEXT NOT NULL DEFAULT '',
+  jira_status TEXT,
+  jira_parent_key TEXT,
+  suggested_repo_path TEXT NOT NULL DEFAULT '',
+  updated_ms INTEGER NOT NULL,
+  PRIMARY KEY (epic_id, jira_key)
 );
 
 CREATE TABLE IF NOT EXISTS epic_designs (
@@ -471,6 +483,33 @@ export class Db {
     try {
       this.stmt(`DELETE FROM epic_links WHERE epic_id = ?`).run(epicId);
       for (const l of links) this.stmt(`INSERT OR IGNORE INTO epic_links (epic_id, task_key, blocked_by_key) VALUES (?, ?, ?)`).run(epicId, l.task_key, l.blocked_by_key);
+      this.raw.exec("COMMIT");
+    } catch (err) {
+      this.raw.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  listEpicTickets(epicId: string): EpicTicket[] {
+    return this.stmt(`SELECT * FROM epic_tickets WHERE epic_id = ? ORDER BY jira_key`).all(epicId) as unknown as EpicTicket[];
+  }
+
+  getEpicTicket(epicId: string, jiraKey: string): EpicTicket | null {
+    return (this.stmt(`SELECT * FROM epic_tickets WHERE epic_id = ? AND jira_key = ?`).get(epicId, jiraKey) as unknown as EpicTicket) ?? null;
+  }
+
+  replaceEpicTickets(epicId: string, tickets: EpicTicket[]): void {
+    this.raw.exec("BEGIN");
+    try {
+      this.stmt(`DELETE FROM epic_tickets WHERE epic_id = ?`).run(epicId);
+      const insert = this.stmt(`
+        INSERT OR REPLACE INTO epic_tickets
+          (epic_id, jira_key, title, description, jira_url, jira_status, jira_parent_key, suggested_repo_path, updated_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const t of tickets) {
+        insert.run(t.epic_id, t.jira_key, t.title, t.description, t.jira_url, t.jira_status, t.jira_parent_key, t.suggested_repo_path, t.updated_ms);
+      }
       this.raw.exec("COMMIT");
     } catch (err) {
       this.raw.exec("ROLLBACK");

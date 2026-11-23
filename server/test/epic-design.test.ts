@@ -72,8 +72,23 @@ test("a block edited in Jira stops the revision and nothing is saved", withEpic(
   assert.equal(db.listDesigns(id).length, 2);
 }));
 
+function seedEpicTasks(db: Db, epicId: string): [Task, Task] {
+  const now = Date.now();
+  const make = (id: string, key: string, title: string): Task => ({
+    id, title: `${key} ${title}`, prompt: "ticket text", kind: "code", repo_path: "", target: "", target_state: "suggested",
+    base_branch: null, branch: null, worktree_path: null, assignee: null, jira_key: key, jira_url: `https://j/${key}`,
+    jira_parent_key: "E-1", jira_status: "To Do", pr_url: null, pr_meta: null, status: "open",
+    terminal_address: null, exit_code: null, created_ms: now, updated_ms: now, epic_id: epicId,
+  });
+  const a = make("t-e2", "E-2", "first");
+  const b = make("t-e3", "E-3", "second");
+  db.insertTask(a);
+  db.insertTask(b);
+  return [a, b];
+}
+
 test("impacted: started, unmerged tasks on an older design; unstarted and merged are not", withEpic(async (db, jira, id) => {
-  const [a, b] = db.listEpicTasks(id);
+  const [a, b] = seedEpicTasks(db, id);
   db.updateTask(a.id, { status: "dispatched", terminal_address: "s", design_version: 1 });
   await reviseDesign(db, jira, db.getEpic(id)!, { body: "new", reason: "" });
   assert.deepEqual([...impactedTaskIds(db, id)], [a.id]);
@@ -92,7 +107,7 @@ test("amendment replies: only known keys with text are kept", () => {
 });
 
 test("proposals reach the inbox for unstarted tasks only; apply writes the ticket block, task and item", withEpic(async (db, jira, id) => {
-  const [started, open] = db.listEpicTasks(id);
+  const [started, open] = seedEpicTasks(db, id);
   db.updateTask(started.id, { status: "dispatched", terminal_address: "s", design_version: 1 });
   const design = await reviseDesign(db, jira, db.getEpic(id)!, { body: "Use REST", reason: "switch" });
   let prompt = "";
@@ -116,7 +131,7 @@ test("proposals reach the inbox for unstarted tasks only; apply writes the ticke
 }));
 
 test("a newer proposal replaces one still waiting for the same task", withEpic(async (db, jira, id) => {
-  const open = db.listEpicTasks(id)[1];
+  const [, open] = seedEpicTasks(db, id);
   const reply = (s: string) => async () => JSON.stringify([{ key: open.jira_key, amendment: s }]);
   const v2 = await reviseDesign(db, jira, db.getEpic(id)!, { body: "A", reason: "" });
   await proposeAmendments(db, hub, db.getEpic(id)!, v2.version, "", "F", reply("first"));
@@ -126,7 +141,7 @@ test("a newer proposal replaces one still waiting for the same task", withEpic(a
 }));
 
 test("an imported design is context, not 'what the human agreed'; a human revision is", withEpic(async (db, jira, id) => {
-  const task = db.listEpicTasks(id)[0];
+  const [task] = seedEpicTasks(db, id);
   assert.match(epicContext(db, task), /Epic design \(v1\)[\s\S]*not instructions/);
   assert.doesNotMatch(epicContext(db, task), /human agreed/);
   await reviseDesign(db, jira, db.getEpic(id)!, { body: "Use REST", reason: "" });
