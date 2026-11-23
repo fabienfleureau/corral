@@ -97,7 +97,6 @@ test("dispatch: a review runs in the repo with no worktree, no branch, and the r
   db.insertTask(task);
   const { backend, started } = fakeBackend();
   const cfg = { configDir: dir, host: "localhost", port: 4787, token: "tok" } as Config;
-  await assert.rejects(dispatchTask(db, cfg, backend, task, "codex"), /claude harness only/);
   // Claude dispatch pre-trusts the workspace in ~/.claude.json: keep it in the temp dir.
   const home = process.env.HOME;
   process.env.HOME = dir;
@@ -119,6 +118,22 @@ test("dispatch: a review runs in the repo with no worktree, no branch, and the r
   assert.doesNotMatch(prompt, /gh pr create|glab mr create|\{task_id\}|\{pr_url\}/);
 }));
 
+test("dispatch: a review runs on Codex in the repo with no worktree, no branch, and a readable skill fallback", withDb(async (db, dir) => {
+  execFileSync("git", ["init", "-q", dir]);
+  const task = makeTask({ id: "codex-review", repo_path: dir });
+  db.insertTask(task);
+  const { backend, started } = fakeBackend();
+  const cfg = { configDir: dir, host: "localhost", port: 4787, token: "tok" } as Config;
+  const result = await dispatchTask(db, cfg, backend, task, "codex", { useWorktree: true });
+  assert.equal(started.length, 1);
+  assert.equal(started[0].harness, "codex");
+  assert.equal(started[0].git, null);
+  assert.equal(result.branch, "");
+  assert.equal(db.getTask(task.id)?.target, "codex");
+  assert.match(started[0].prompt, /fabien-reviewer/);
+  assert.match(started[0].prompt, /~\/\.claude\/skills\/fabien-reviewer\/SKILL\.md/);
+}));
+
 test("capture: a finished review is reported as information, not an unready PR", withDb(async (db) => {
   db.insertTask(makeTask({ status: "dispatched", terminal_address: "s1" }));
   const { backend } = fakeBackend();
@@ -130,7 +145,8 @@ test("capture: a finished review is reported as information, not an unready PR",
   assert.equal(db.getTask("task-1")?.status, "done");
 }));
 
-test("api: review tasks need a PR/MR URL, keep their kind, and refuse other harnesses", withDb(async (db, dir) => {
+test("api: review tasks need a PR/MR URL, keep their kind, and dispatch on Codex", withDb(async (db, dir) => {
+  execFileSync("git", ["init", "-q", dir]);
   const { backend } = fakeBackend();
   const server = createHttpServer({ db, backend, hub: { broadcast: () => undefined }, cfg: { token: "test", configDir: dir } } as unknown as AppState);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -149,8 +165,9 @@ test("api: review tasks need a PR/MR URL, keep their kind, and refuse other harn
     const patched = await (await call("PATCH", `/api/tasks/${created.id}`, { kind: "code" })).json() as Task;
     assert.equal(patched.kind, "review");
     const dispatch = await call("POST", `/api/tasks/${created.id}/dispatch`, { target: "codex" });
-    assert.equal(dispatch.status, 400);
-    assert.match((await dispatch.json() as { error: string }).error, /claude/);
+    assert.equal(dispatch.status, 200);
+    assert.equal((await dispatch.json() as { branch: string }).branch, "");
+    assert.equal(db.getTask(created.id)?.target, "codex");
     assert.equal((await call("POST", `/api/tasks/${created.id}/check-pr`)).status, 400);
   } finally {
     server.closeAllConnections();

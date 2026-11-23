@@ -19,8 +19,11 @@ published. They never read your transcript.
 
 1. Read the PR/MR: description, diff (`glab mr diff <iid>` / `gh pr diff <n>`)
    and the existing discussion.
-2. Review it with the `fabien-reviewer` skill. Invoke it by name; follow its
-   checklist, usefulness filter and comment format.
+2. Review it with the `fabien-reviewer` skill. Invoke it by name when your
+   harness offers it. Otherwise read `~/.claude/skills/fabien-reviewer/SKILL.md`
+   (or `~/.agents/skills/fabien-reviewer/SKILL.md`) and follow its checklist,
+   usefulness filter and comment format. If neither file is installed, keep
+   the same bar: verified, actionable comments only, no formatting nits.
 3. Post each kept comment as a **draft**, visible only to the human. This is
    the human's request, so the skill's "do not post" rule does not apply to
    drafts.

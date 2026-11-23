@@ -48,8 +48,11 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   or pick them: PNG, JPEG, GIF and WebP images, PDFs, and text or code files (up
   to 10 files, 25 MB). They are stored with the task and sent to the agent with
   the first prompt, as session files omnigent hands to the harness.
-- **Review tasks** — a task of kind `review` points at someone else's PR/MR. The
-  agent drafts its review, and publishes only after you approve it in the inbox.
+- **Review tasks** — a task of kind `review` points at someone else's PR/MR and
+  runs on any configured harness, Claude or Codex included. The agent reads the
+  `fabien-reviewer` skill by name when the harness offers it, otherwise from its
+  local skill file. It drafts its review, and publishes only after you approve it
+  in the inbox.
 - **Action tasks** — the Epic page can create a task of kind `ops`: the agent works
   in the chosen folder with no worktree, branch or PR and reports back to the
   inbox. The folder may hold several repos or none, so it fits requests that need

@@ -77,7 +77,7 @@ printf '[{"provider":"antigravity","error":{"message":"Antigravity language serv
 exit 1
 SH
 chmod +x "$scratch/bin/codexbar"
-omnigent_url=http://127.0.0.1:1
+omnigent_url=${CORRAL_FIXTURE_OMNIGENT_URL:-http://127.0.0.1:1}
 printf '{"omnigent":{"baseUrl":"%s"},"workspaceRoots":[]}\n' "$omnigent_url" > "$scratch/home/.config/corral/config.json"
 node "$fixture_root/scripts/screenshot-fixture.ts" "$scratch/data/corral.db" "$scratch/home/.config/corral/config.json"
 port=$(node -e 'const s=require("node:net").createServer(); s.listen(0,"127.0.0.1",()=>{console.log(s.address().port); s.close()})')
