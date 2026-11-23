@@ -224,7 +224,10 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const visibleItems = useVisibleInboxItems(allItems);
   const snoozedItems = useVisibleInboxItems(allItems, "snoozed");
   const inProgressItems = useMemo(() => inProgressInboxItems(allItems, tasks), [allItems, tasks]);
-  const inProgressTasks = useMemo(() => inProgressInboxTasks(tasks, allItems), [tasks, allItems]);
+  const inProgressTasks = useMemo(
+    () => inProgressInboxTasks(tasks, allItems, sessions, terminals),
+    [tasks, allItems, sessions, terminals],
+  );
   const openItems = useMemo(() => openInboxItems(visibleItems), [visibleItems]);
   const items = statusFilter === "snoozed" ? snoozedItems : statusFilter === "in-progress" ? inProgressItems : openItems;
   useEffect(() => {

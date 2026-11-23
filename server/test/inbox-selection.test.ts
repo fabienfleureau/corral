@@ -60,6 +60,37 @@ test("in-progress inbox deduplicates dispatched tasks already represented by a h
   assert.deepEqual(inProgressInboxTasks(tasks, items).map((t) => t.id), ["working-alone"]);
 });
 
+test("in-progress inbox excludes dispatched tasks whose agent is stopped", async () => {
+  const { inProgressInboxTasks } = await import("../../web/src/inbox-selection.ts");
+  const tasks = [
+    { id: "running", status: "dispatched", terminal_address: "s-running" },
+    { id: "blocked", status: "dispatched", terminal_address: "s-blocked" },
+    { id: "idle", status: "dispatched", terminal_address: "s-idle" },
+    { id: "done-run", status: "dispatched", terminal_address: "s-done" },
+    { id: "error-run", status: "dispatched", terminal_address: "s-error" },
+    { id: "finished", status: "dispatched", terminal_address: "s-finished" },
+    { id: "terminal-stopped", status: "dispatched", terminal_address: "s-term-stopped" },
+    { id: "terminal-running", status: "dispatched", terminal_address: "s-term-running" },
+    { id: "unknown", status: "dispatched", terminal_address: "s-unknown" },
+  ] as Task[];
+  const sessions = [
+    session("s-running", "working"),
+    session("s-blocked", "blocked"),
+    session("s-idle", "idle"),
+    session("s-done", "done"),
+    session("s-error", "error"),
+    session("s-finished", "working", "finished"),
+  ];
+  const terminals = [
+    terminal("s-term-stopped", "idle"),
+    terminal("s-term-running", "working"),
+  ];
+  assert.deepEqual(
+    inProgressInboxTasks(tasks, [], sessions, terminals).map((t) => t.id),
+    ["running", "blocked", "terminal-running", "unknown"],
+  );
+});
+
 test("a PR item the agent is handling leaves the open inbox for in progress", async () => {
   const { openInboxItems, inProgressInboxItems, selectedInboxItem, visibleInboxItems } = await import("../../web/src/inbox-selection.ts");
   const handling = { id: "handling", kind: "pr", status: "open", handling: 1, ready: 0, task_id: "done-task", snooze_until_ms: null } as Item;
