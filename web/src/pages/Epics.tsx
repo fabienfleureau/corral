@@ -4,13 +4,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { favoritesFor, repoContext } from "../favorite-context";
-import type { Epic, EpicDetail, EpicSummary, EpicTaskState, Favorite, Repo, Task } from "../types";
+import type { Epic, EpicDetail, EpicSummary, EpicTaskState, EpicTaskView, Favorite, Repo, Task } from "../types";
 import { Spinner } from "../ui";
 import { errText } from "../util";
 
-const STATE_LABEL: Record<EpicTaskState, string> = {
+type BoardEpicTaskState = Exclude<EpicTaskState, "killed">;
+
+const STATE_LABEL: Record<BoardEpicTaskState, string> = {
   out: "left the epic",
-  killed: "killed in Jira",
   merged: "merged",
   pr_ready: "PR ready",
   pr_open: "PR open",
@@ -19,9 +20,8 @@ const STATE_LABEL: Record<EpicTaskState, string> = {
   blocked: "blocked",
 };
 
-const STATE_BADGE: Record<EpicTaskState, string> = {
+const STATE_BADGE: Record<BoardEpicTaskState, string> = {
   out: "badge",
-  killed: "badge",
   merged: "badge badge-ready",
   pr_ready: "badge badge-ready",
   pr_open: "badge badge-wait",
@@ -31,7 +31,14 @@ const STATE_BADGE: Record<EpicTaskState, string> = {
 };
 
 // Read the board left to right: what is stuck first, what shipped last.
-const GROUP_ORDER: EpicTaskState[] = ["blocked", "ready", "running", "pr_open", "pr_ready", "merged", "killed", "out"];
+// Killed Jira tickets stay terminal in the graph, but are omitted from the board.
+const GROUP_ORDER: BoardEpicTaskState[] = ["blocked", "ready", "running", "pr_open", "pr_ready", "merged", "out"];
+
+export function epicBoardGroups(views: EpicTaskView[]): { state: BoardEpicTaskState; label: string; views: EpicTaskView[] }[] {
+  return GROUP_ORDER
+    .map((state) => ({ state, label: STATE_LABEL[state], views: views.filter((view) => view.state === state) }))
+    .filter((group) => group.views.length > 0);
+}
 
 export function summaryText(s: EpicSummary): string {
   if (!s || typeof s.total !== "number") return "";
@@ -259,14 +266,12 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
             {favorites.length === 0 ? <p className="muted">Add a favorite in <a href="#/settings">Settings</a> to set the harness, agent and model on new tasks.</p> : null}
           </section>
           <div className="epic-groups">
-            {GROUP_ORDER.map((state) => {
-              const views = detail.views.filter((view) => view.state === state);
-              if (!views.length) return null;
-              return <section key={state} className="epic-group" aria-label={STATE_LABEL[state]}>
-                <h3>{STATE_LABEL[state]} <span>{views.length}</span></h3>
+            {epicBoardGroups(detail.views).map(({ state, label, views }) => (
+              <section key={state} className="epic-group" aria-label={label}>
+                <h3>{label} <span>{views.length}</span></h3>
                 <ul className="epic-tasks">
             {views.map((v) => (
-              <li key={v.task.id} className="epic-task" data-state={v.state}>
+              <li key={v.task.id} className="epic-task" data-state={state}>
                 <div className="epic-task-line">
                   <h4 className="epic-task-title">
                     {v.task.jira_url ? (
@@ -275,7 +280,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
                       <a className="card-link" href={`#/tasks?task=${encodeURIComponent(v.task.id)}`} title="Open this task">{v.task.title}</a>
                     )}
                   </h4>
-                  <span className={STATE_BADGE[v.state]}>{STATE_LABEL[v.state]}</span>
+                  <span className={STATE_BADGE[state]}>{label}</span>
                   {v.testable ? <span className="badge badge-ready">testable</span> : null}
                   {v.impacted ? <span className="badge badge-wait" title="Started on an older design and not merged yet">impacted by design change</span> : null}
                   {v.state === "ready" && !detail.epic.error ? (
@@ -311,8 +316,8 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
               </li>
             ))}
                 </ul>
-              </section>;
-            })}
+              </section>
+            ))}
           </div>
           <section aria-labelledby="epic-design-title" className="epic-design">
             <h3 id="epic-design-title">Design v{detail.design?.version ?? 1}</h3>
