@@ -14,7 +14,7 @@ The task message gives the base ref. It may be empty.
    - uncommitted: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"`
    - untracked: read the file
 4. Review every reviewable file against its rules and the code around the change. Do not stop at the first finding.
-5. Report only what you are sure of: critical, high and medium findings, and low ones only when clearly useful. Drop likely false positives.
+5. Adversarially verify every candidate finding before reporting it: try to disprove it against surrounding callers, types and tests. Report only verified critical, high and medium findings, and low ones only when clearly useful. Drop unverified suspicions and likely false positives.
 
 Your final message is one JSON object and nothing else:
 

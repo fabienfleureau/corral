@@ -17,12 +17,19 @@ import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraStage, type JiraTransitionGateway } from "./jira-status.ts";
 import { logTaskEvent, promptData } from "./task-events.ts";
 import { cleanupFinishedTask, cleanupTerminalWorktrees } from "./worktree-cleanup.ts";
+import { classifyPrTriage, formatTriageSummary, type PrTriage } from "./pr-triage.ts";
 
 export interface PrThread {
   /** Stable id (GraphQL thread id, or GitLab discussion id) for dedupe. */
   id: string;
   author: string;
   body: string;
+}
+
+export interface PrCheckFailure {
+  name: string;
+  conclusion: string;
+  url?: string | null;
 }
 
 export interface PrInfo {
@@ -34,6 +41,10 @@ export interface PrInfo {
   additions: number;
   deletions: number;
   changed_files: number;
+  /** Repo-relative paths changed by the PR, when available from the platform. */
+  changed_file_paths?: string[];
+  /** Head commit SHA, when available from the platform (scopes CI auto-fix retries). */
+  head_sha?: string | null;
   /** MERGEABLE | CONFLICTING | UNKNOWN (null when the platform says nothing) */
   mergeable: string | null;
   /** Branch the PR merges into (rebase target when conflicting). */
@@ -42,6 +53,8 @@ export interface PrInfo {
   /** Current human approvals, or null when unavailable. */
   human_approvals?: string[] | null;
   checks: { total: number; failed: number; pending: boolean };
+  /** Individual failing checks, when available from the platform. */
+  failed_checks?: PrCheckFailure[];
   /** Unresolved review threads — the "comments to manage". */
   threads: PrThread[];
   /** False when thread data could not be fetched: readiness stays pending. */
@@ -78,7 +91,7 @@ export function prReviewLabel(pr: PrInfo): "ready for review" | "ready to merge"
   return pr.human_approvals?.length ? "ready to merge" : "ready for review";
 }
 
-export function prItemBody(pr: PrInfo): string {
+export function prItemBody(pr: PrInfo, triage?: PrTriage | null): string {
   const lines: string[] = [];
   const desc = pr.description.trim();
   if (desc) lines.push(desc.slice(0, 2000), "");
@@ -91,6 +104,7 @@ export function prItemBody(pr: PrInfo): string {
     `| Human approvals | ${pr.human_approvals == null ? "unavailable" : pr.human_approvals.length ? pr.human_approvals.map((name) => name.replace(/[|\\]/g, "\\$&")).join(", ") : "none"} |`,
     `| Checks | ${pr.checks.total === 0 ? "none configured" : pr.checks.pending ? "running" : pr.checks.failed > 0 ? `${pr.checks.failed} failing` : "green"} |`,
     `| Mergeable | ${pr.mergeable ? pr.mergeable.toLowerCase() : "unknown"} |`,
+    ...(triage ? [`| Review triage | ${formatTriageSummary(triage).replace(/[|\\]/g, "\\$&")} |`] : []),
     "",
     `PR: ${pr.url}`,
   );
@@ -113,9 +127,10 @@ async function repoSlug(repoPath: string): Promise<string | null> {
   }
 }
 
-function summarizeChecks(rollup: unknown[]): PrInfo["checks"] {
+function summarizeChecks(rollup: unknown[]): { checks: PrInfo["checks"]; failedChecks: PrCheckFailure[] } {
   let failed = 0;
   let pending = 0;
+  const failedChecks: PrCheckFailure[] = [];
   for (const raw of rollup) {
     const c = raw as Record<string, unknown>;
     const state = String(c.conclusion ?? c.state ?? "").toUpperCase();
@@ -125,9 +140,12 @@ function summarizeChecks(rollup: unknown[]): PrInfo["checks"] {
       pending++;
     } else {
       failed++;
+      const name = String(c.name ?? c.context ?? "check").trim() || "check";
+      const url = typeof c.detailsUrl === "string" ? c.detailsUrl : typeof c.targetUrl === "string" ? c.targetUrl : null;
+      failedChecks.push({ name: name.slice(0, 200), conclusion: state.toLowerCase(), url });
     }
   }
-  return { total: rollup.length, failed, pending: pending > 0 };
+  return { checks: { total: rollup.length, failed, pending: pending > 0 }, failedChecks };
 }
 
 /** GitLab head pipeline status -> checks summary (no pipeline = no checks). */
@@ -143,7 +161,7 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
     "gh",
     [
       "pr", "view", branch,
-      "--json", "url,title,state,number,body,additions,deletions,changedFiles,mergeable,baseRefName,reviewDecision,statusCheckRollup",
+      "--json", "url,title,state,number,body,additions,deletions,changedFiles,files,headRefOid,mergeable,baseRefName,reviewDecision,statusCheckRollup",
     ],
     repoPath,
   );
@@ -205,6 +223,10 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
       /* GraphQL unavailable: readiness stays pending (threads_known=false) */
     }
   }
+  const { checks, failedChecks } = summarizeChecks((d.statusCheckRollup as unknown[]) ?? []);
+  const changedFilePaths = Array.isArray(d.files)
+    ? (d.files as { path?: unknown }[]).map((f) => (typeof f?.path === "string" ? f.path : "")).filter(Boolean)
+    : undefined;
   return {
     url: String(d.url),
     title: String(d.title),
@@ -214,11 +236,14 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
     additions: Number(d.additions ?? 0),
     deletions: Number(d.deletions ?? 0),
     changed_files: Number(d.changedFiles ?? 0),
+    ...(changedFilePaths ? { changed_file_paths: changedFilePaths } : {}),
+    head_sha: typeof d.headRefOid === "string" && d.headRefOid ? d.headRefOid : null,
     mergeable: d.mergeable ? String(d.mergeable).toUpperCase() : null,
     base_ref: d.baseRefName ? String(d.baseRefName) : null,
     review_decision: d.reviewDecision ? String(d.reviewDecision).toUpperCase() : null,
     human_approvals: humanApprovals,
-    checks: summarizeChecks((d.statusCheckRollup as unknown[]) ?? []),
+    checks,
+    ...(failedChecks.length > 0 ? { failed_checks: failedChecks } : {}),
     threads,
     threads_known: threadsKnown,
   };
@@ -257,9 +282,9 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
   // stay fast and don't burn GitLab rate limits on non-open MRs.
   const [full, approvals, changes, discussions] = state === "OPEN"
     ? await Promise.all([
-        api("").then((s) => JSON.parse(s) as { description?: string; has_conflicts?: boolean; head_pipeline?: { status?: string } | null }).catch(() => null),
+        api("").then((s) => JSON.parse(s) as { description?: string; has_conflicts?: boolean; sha?: string; head_pipeline?: { status?: string; sha?: string; web_url?: string } | null }).catch(() => null),
         api("/approvals").then((s) => JSON.parse(s) as { approved_by?: { user?: { username?: string; bot?: boolean } }[] }).catch(() => null),
-        api("/changes").then((s) => JSON.parse(s) as { changes?: { diff?: string }[] }).catch(() => null),
+        api("/changes").then((s) => JSON.parse(s) as { changes?: { diff?: string; new_path?: string; old_path?: string }[] }).catch(() => null),
         api("/discussions?per_page=100")
           .then((s) => JSON.parse(s) as {
             id?: string;
@@ -272,7 +297,10 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
   let additions = 0;
   let deletions = 0;
   const diff = changes?.changes ?? [];
+  const changedFilePaths: string[] = [];
   for (const c of diff) {
+    const filePath = c.new_path || c.old_path;
+    if (filePath) changedFilePaths.push(filePath);
     for (const line of (c.diff ?? "").split("\n")) {
       if (line.startsWith("+") && !line.startsWith("+++")) additions++;
       else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
@@ -295,6 +323,10 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
     : full
       ? gitlabPipelineChecks(full.head_pipeline?.status)
       : { total: 1, failed: 0, pending: true };
+  const headSha = full?.head_pipeline?.sha ?? full?.sha ?? (typeof mr.sha === "string" ? mr.sha : null);
+  const failedChecks: PrCheckFailure[] = checks.failed > 0
+    ? [{ name: "GitLab pipeline", conclusion: String(pipelineStatus ?? "failed").toLowerCase(), url: full?.head_pipeline?.web_url ?? null }]
+    : [];
   return {
     url: String(mr.web_url ?? ""),
     title: String(mr.title ?? ""),
@@ -304,11 +336,14 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
     additions,
     deletions,
     changed_files: diff.length,
+    ...(changedFilePaths.length > 0 ? { changed_file_paths: changedFilePaths } : {}),
+    head_sha: headSha,
     mergeable: (full?.has_conflicts ?? mr.has_conflicts) === true ? "CONFLICTING" : (full?.has_conflicts ?? mr.has_conflicts) === false ? "MERGEABLE" : null,
     base_ref: mr.target_branch ? String(mr.target_branch) : null,
     review_decision: null,
     human_approvals: approvals?.approved_by ? approvals.approved_by.flatMap(({ user }) => user?.username && !user.bot && !/^gitlab[ _-]*duo$/i.test(user.username) ? [user.username] : []) : null,
     checks,
+    ...(failedChecks.length > 0 ? { failed_checks: failedChecks } : {}),
     threads,
     threads_known: state !== "OPEN" || discussions !== null,
   };
@@ -382,10 +417,41 @@ function conflictSection(pr: PrInfo, task: Task): string {
   ].join("\n");
 }
 
-/** What to push to the agent: review comments, merge conflicts, or both. */
+/** Max automatic CI-failure hand-offs for the same head commit SHA before
+ *  stopping to avoid infinite token burn on flaky or external CI failures. */
+export const MAX_CI_FIX_ATTEMPTS = 2;
+
+function checksSignature(pr: PrInfo): string {
+  const sha = pr.head_sha ?? "";
+  const items = pr.failed_checks?.length
+    ? pr.failed_checks.map((c) => `${c.name}:${c.conclusion}`).sort().join(",")
+    : `failed:${pr.checks.failed}`;
+  return `${sha}|${items}`;
+}
+
+function checksSection(pr: PrInfo): string {
+  const list = pr.failed_checks?.length
+    ? pr.failed_checks.map((c, i) => `[${i + 1}] ${c.name} (${c.conclusion})${c.url ? ` — ${c.url}` : ""}`)
+    : [`[1] ${pr.checks.failed} failing CI check${pr.checks.failed === 1 ? "" : "s"}`];
+  return [
+    "PR failing checks need handling — this is the PR loop, not a question:",
+    "inspect the failing check(s) (e.g. `gh pr checks` / `gh run view --log-failed` or `glab ci trace`),",
+    "reproduce locally, fix the root cause, run your tests, commit and push.",
+    "Do not ask for permission. Do not merge the PR.",
+    "Only if the failure is external/flaky infrastructure you cannot fix or needs a decision, report a question.",
+    "",
+    // Check names, URLs and CI logs come from external runs/third-party apps.
+    DATA_NOT_INSTRUCTIONS,
+    "",
+    ...list,
+  ].join("\n");
+}
+
+/** What to push to the agent: review comments, merge conflicts, failing checks, or any combination. */
 export interface PrWork {
   comments: boolean;
   conflict: boolean;
+  checks?: boolean;
 }
 
 /** Work handed to the agent by a sync (reported by a forced refresh). */
@@ -398,6 +464,7 @@ function workMessage(pr: PrInfo, task: Task, work: PrWork): string {
   const sections: string[] = [];
   if (work.conflict) sections.push(conflictSection(pr, task));
   if (work.comments) sections.push(commentsSection(pr));
+  if (work.checks) sections.push(checksSection(pr));
   return [sections.join("\n\n"), "", `PR: ${pr.url}`].join("\n");
 }
 
@@ -414,7 +481,11 @@ async function respawnForWork(
   // Keep the task's harness: dispatch accepts registry harnesses that are
   // not in cfg.agents, so checking that map would silently fall back.
   const target = task.target || "claude";
-  const what = [work.conflict ? "merge conflicts" : "", work.comments ? "review comments" : ""]
+  const what = [
+    work.conflict ? "merge conflicts" : "",
+    work.comments ? "review comments" : "",
+    work.checks ? "failing checks" : "",
+  ]
     .filter(Boolean)
     .join(" and ");
   const prompt = [
@@ -426,10 +497,11 @@ async function respawnForWork(
     "---",
     questionConvention(cfg, task),
   ].join("\n");
+  const suffix = work.comments ? "review" : work.conflict ? "rebase" : "ci";
   const session = await backend.start({
     taskId: task.id,
     project: task.repo_path ? db.getRepoByPath(task.repo_path)?.name ?? task.repo_path : null,
-    name: `corral-${slugify(task.title, 20)}-${work.comments ? "review" : "rebase"}`,
+    name: `corral-${slugify(task.title, 20)}-${suffix}`,
     repoPath: task.worktree_path ?? task.repo_path,
     git: task.branch
       ? { branch: task.branch, base: null, existingWorktree: Boolean(task.worktree_path) }
@@ -499,6 +571,7 @@ export interface PrSnapshot {
   reasons: string[];
   review_decision: string | null;
   base_ref: string | null;
+  triage?: PrTriage;
   checked_ms: number;
 }
 
@@ -507,6 +580,10 @@ interface PrMeta {
   pushed?: string;
   /** Set once conflicts were pushed; cleared when the PR merges cleanly again. */
   conflict?: boolean;
+  /** Failing-check signature last pushed to the agent; cleared when checks pass. */
+  checks_pushed?: string;
+  /** Count of automatic CI-failure hand-offs for the current head commit SHA. */
+  checks_attempts?: { sha: string; count: number } | null;
   /** Last observed state; see PrSnapshot. */
   pr?: PrSnapshot;
 }
@@ -522,10 +599,12 @@ function readMeta(raw: string | null): PrMeta {
 function patchMeta(db: Db, taskId: string, patch: PrMeta, touch = true): void {
   const meta = { ...readMeta(db.getTask(taskId)?.pr_meta ?? null), ...patch };
   if (meta.conflict === false) delete meta.conflict;
+  if (meta.checks_pushed === "") delete meta.checks_pushed;
+  if (meta.checks_attempts === null) delete meta.checks_attempts;
   db.updateTask(taskId, { pr_meta: JSON.stringify(meta) }, touch);
 }
 
-function snapshotPr(pr: PrInfo, ready: boolean, reasons: string[], checkedMs: number): PrSnapshot {
+function snapshotPr(pr: PrInfo, ready: boolean, reasons: string[], triage: PrTriage, checkedMs: number): PrSnapshot {
   return {
     url: pr.url,
     state: pr.state,
@@ -536,6 +615,7 @@ function snapshotPr(pr: PrInfo, ready: boolean, reasons: string[], checkedMs: nu
     reasons,
     review_decision: pr.review_decision,
     base_ref: pr.base_ref,
+    triage,
     checked_ms: checkedMs,
   };
 }
@@ -625,12 +705,15 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   }
   const doneStatus: Item["status"] = "resolved";
 
-  // The loop: comments and merge conflicts go back to the agent —
-  // automatically, once per comment set / conflict episode, in one message.
+  // The loop: comments, merge conflicts, and failing CI checks go back to the
+  // agent — automatically, once per comment set / conflict episode / check
+  // failure signature (bounded per head SHA), in one message.
   const meta = readMeta(task.pr_meta);
+  const triage = classifyPrTriage(pr, { repoPath: task.repo_path });
+  const triageJson = JSON.stringify(triage);
   // Persist what the gate saw, without bumping updated_ms: this is evidence
   // for the activity digest, not task activity.
-  const snapshot = snapshotPr(pr, ready, reasons, Date.now());
+  const snapshot = snapshotPr(pr, ready, reasons, triage, Date.now());
   if (JSON.stringify(meta.pr) !== JSON.stringify(snapshot)) patchMeta(db, task.id, { pr: snapshot }, false);
   const conflicting = !shouldResolve && pr.mergeable === "CONFLICTING";
   // End the episode only on confirmed mergeability or closure: GitHub reports
@@ -638,25 +721,42 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   if (meta.conflict && (shouldResolve || pr.mergeable === "MERGEABLE")) {
     patchMeta(db, task.id, { conflict: false });
   }
+  if ((meta.checks_pushed || meta.checks_attempts) && (shouldResolve || (pr.checks.failed === 0 && !pr.checks.pending))) {
+    patchMeta(db, task.id, { checks_pushed: "", checks_attempts: null });
+  }
   if (!shouldResolve && agentTask && opts.backend && opts.cfg && !delivering.has(task.id)) {
     const sig = threadSignature(pr);
+    const checkSig = checksSignature(pr);
+    const shaKey = pr.head_sha ?? "";
+    const prevAttempts = meta.checks_attempts?.sha === shaKey ? meta.checks_attempts.count : 0;
+    const checksFailing = pr.checks.failed > 0 && (opts.force === true || !pr.checks.pending);
+    const canAutoRetryChecks = meta.checks_pushed !== checkSig && prevAttempts < MAX_CI_FIX_ATTEMPTS;
     const work: PrWork = {
       // A forced refresh re-hands work the loop already pushed: the human asked
       // because the last hand-off did not land (failed run, unresolved thread).
       comments: pr.threads.length > 0 && (opts.force === true || meta.pushed !== sig),
       conflict: conflicting && (opts.force === true || !meta.conflict),
+      checks: checksFailing && (opts.force === true || canAutoRetryChecks),
     };
-    if (work.comments || work.conflict) {
+    if (work.comments || work.conflict || work.checks) {
       delivering.add(task.id);
       const delivery = deliverWork(db, opts.cfg, opts.backend, task, pr, work)
         .then((address) => {
-          opts.onDelivered?.({ address, comments: work.comments, conflict: work.conflict });
+          opts.onDelivered?.({
+            address,
+            comments: work.comments,
+            conflict: work.conflict,
+            ...(work.checks ? { checks: true } : {}),
+          });
           if (!address) return; // not delivered: retry on the next sync
           // The agent owns the item now: it shows under "In progress".
           setItemHandling(db, hub, task.id, true, { unsnooze: opts.force === true });
           patchMeta(db, task.id, {
             ...(work.comments ? { pushed: sig } : {}),
             ...(work.conflict ? { conflict: true } : {}),
+            ...(work.checks
+              ? { checks_pushed: checkSig, checks_attempts: { sha: shaKey, count: prevAttempts + 1 } }
+              : {}),
           });
           // The work handed to the agent is a prompt like any other: the
           // history shows what was sent and to which session.
@@ -676,6 +776,15 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
               pr: pr.url,
             }));
           }
+          if (work.checks) {
+            logTaskEvent(db, task.id, "prompt", `Failing CI checks sent to the agent (${pr.checks.failed})`, promptData(workMessage(pr, task, { comments: false, conflict: false, checks: true }), {
+              source: "pr-checks",
+              failed: pr.checks.failed,
+              checks: (pr.failed_checks ?? []).map((c) => c.name),
+              session: address,
+              pr: pr.url,
+            }));
+          }
           if (work.comments) {
             db.recordMetric("pr.comments_pushed", task.id, {
               threads: pr.threads.length,
@@ -684,6 +793,9 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
           }
           if (work.conflict) {
             db.recordMetric("pr.conflicts_pushed", task.id, { base: pr.base_ref, to: address ?? "none" });
+          }
+          if (work.checks) {
+            db.recordMetric("pr.checks_pushed", task.id, { failed: pr.checks.failed, to: address ?? "none" });
           }
         })
         .catch(() => undefined)
@@ -709,11 +821,12 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
       status: shouldResolve ? doneStatus : "open",
       title,
       summary: ready && !shouldResolve ? readyStatus : reasons.join(", ") || "ready",
-      body: prItemBody(pr),
+      body: prItemBody(pr, triage),
       context: "",
       options: null,
       ready: shouldResolve ? 1 : ready ? 1 : 0,
       handling: 0,
+      triage: triageJson,
       source_ref: task.terminal_address,
       task_id: task.id,
       structured: 1,
@@ -723,9 +836,9 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
       snooze_until_ms: null,
     };
     db.insertItem(item);
-    db.recordMetric("item.created", item.id, { kind: "pr", capture: "pr-sync", task_id: task.id, ready: item.ready });
+    db.recordMetric("item.created", item.id, { kind: "pr", capture: "pr-sync", task_id: task.id, ready: item.ready, triage: triage.tier });
     if (ready && !shouldResolve) {
-      logTaskEvent(db, task.id, "pr", `PR ${readyStatus}`, { pr: pr.url, checks: pr.checks, threads: pr.threads.length });
+      logTaskEvent(db, task.id, "pr", `PR ${readyStatus}`, { pr: pr.url, checks: pr.checks, threads: pr.threads.length, triage });
     }
     hub.broadcast("item.created", item);
     if (merged) await resolveMergedTask(db, hub, task, opts.backend);
@@ -737,8 +850,9 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   // Follow respawns so inbox replies reach the current session.
   const address = db.getTask(task.id)?.terminal_address ?? null;
   if (address && existing.source_ref !== address) patch.source_ref = address;
-  const body = prItemBody(pr);
+  const body = prItemBody(pr, triage);
   if (existing.body !== body) patch.body = body;
+  if (existing.triage !== triageJson) patch.triage = triageJson;
   const summary = ready && !shouldResolve ? readyStatus : reasons.join(", ") || "ready";
   if (existing.summary !== summary) patch.summary = summary;
   const readyFlag = shouldResolve ? 1 : ready ? 1 : 0;

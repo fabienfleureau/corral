@@ -173,7 +173,7 @@ export type DispatchResult = {
 };
 
 /** Work a PR check handed to the agent (a forced refresh reports it). */
-export type PrDelivery = { address: string; comments: boolean; conflict: boolean };
+export type PrDelivery = { address: string | null; comments: boolean; conflict: boolean; checks?: boolean };
 
 export type CheckPrResult = {
   pr: unknown;

@@ -36,6 +36,46 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "in-progress", label: "In progress" },
 ];
 
+type PrTriageView = {
+  tier: "routine" | "deep";
+  depth: "quick" | "standard" | "deep";
+  mode: "observe";
+  reasons: string[];
+  source: "policy" | "default";
+};
+
+function parseItemTriage(raw: string | null | undefined): PrTriageView | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<PrTriageView>;
+    if ((v.tier !== "routine" && v.tier !== "deep") || !Array.isArray(v.reasons)) return null;
+    return {
+      tier: v.tier,
+      depth: v.depth === "quick" || v.depth === "standard" || v.depth === "deep" ? v.depth : v.tier === "deep" ? "deep" : "standard",
+      mode: "observe",
+      reasons: v.reasons.filter((r): r is string => typeof r === "string"),
+      source: v.source === "policy" ? "policy" : "default",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function PrTriageBadge({ raw, detailed = false }: { raw: string | null | undefined; detailed?: boolean }) {
+  const triage = parseItemTriage(raw);
+  if (!triage) return null;
+  const label = triage.tier === "deep" ? "deep review" : "routine skim";
+  const reason = triage.reasons.join("; ");
+  const tooltip = reason
+    ? `Observe-only triage (${triage.depth} depth): ${reason}`
+    : `Observe-only triage (${triage.depth} depth)`;
+  return (
+    <span className={`badge badge-triage-${triage.tier}`} title={tooltip}>
+      {detailed && reason ? `${label} — ${reason}` : label}
+    </span>
+  );
+}
+
 function AgentRunBadge({ status }: { status: AgentRunStatus }) {
   const label = status === "running" ? "agent running" : status === "stopped" ? "agent stopped" : "agent status unknown";
   const title = status === "running"
@@ -68,7 +108,11 @@ function ForcePrRefresh({ task, onChecked }: { task: Task; onChecked: () => void
         // The PR loop could not reach an agent: retryable, so say what failed.
         setError("Could not hand the work to an agent. Check the session, then retry.");
       } else {
-        const what = [delivered.comments ? "review comments" : "", delivered.conflict ? "merge conflicts" : ""]
+        const what = [
+          delivered.comments ? "review comments" : "",
+          delivered.conflict ? "merge conflicts" : "",
+          delivered.checks ? "failing checks" : "",
+        ]
           .filter(Boolean)
           .join(" and ");
         setNote(`Sent ${what} to the agent.`);
@@ -87,7 +131,7 @@ function ForcePrRefresh({ task, onChecked }: { task: Task; onChecked: () => void
         className="btn"
         onClick={() => void run()}
         disabled={busy}
-        title="Check this PR/MR now and hand unaddressed review comments or merge conflicts to the agent"
+        title="Check this PR/MR now and hand unaddressed review comments, merge conflicts, or failing checks to the agent"
       >
         {busy ? <Spinner /> : null}
         {busy ? "Refreshing…" : "Force refresh"}
@@ -478,13 +522,16 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                       <span>·</span>
                       <span>{item.structured ? "structured" : "auto-captured"}</span>
                       {item.kind === "pr" && item.status === "open" ? (
-                        item.handling === 1 ? (
-                          <span className="badge badge-mine">agent working</span>
-                        ) : item.ready === 1 ? (
-                          <span className={`badge ${item.summary === "ready to merge" ? "badge-ready" : "badge-mine"}`}>{item.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
-                        ) : (
-                          <span className="badge badge-wait">needs work</span>
-                        )
+                        <>
+                          {item.handling === 1 ? (
+                            <span className="badge badge-mine">agent working</span>
+                          ) : item.ready === 1 ? (
+                            <span className={`badge ${item.summary === "ready to merge" ? "badge-ready" : "badge-mine"}`}>{item.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
+                          ) : (
+                            <span className="badge badge-wait">needs work</span>
+                          )}
+                          {item.ready === 1 && item.handling !== 1 ? <PrTriageBadge raw={item.triage} /> : null}
+                        </>
                       ) : item.kind === "plan" && item.status === "open" && item.handling === 1 ? (
                         <span className="badge badge-mine">agent revising</span>
                       ) : null}
@@ -584,13 +631,16 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   {selected.structured ? "structured report" : "auto-captured"}
                 </span>
                 {selected.kind === "pr" && selected.status === "open" ? (
-                  selected.handling === 1 ? (
-                    <span className="badge badge-mine">agent working — {selected.summary || "PR loop"}</span>
-                  ) : selected.ready === 1 ? (
-                    <span className={`badge ${selected.summary === "ready to merge" ? "badge-ready" : "badge-mine"}`}>{selected.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
-                  ) : (
-                    <span className="badge badge-wait">needs work — {selected.summary || "see body"}</span>
-                  )
+                  <>
+                    {selected.handling === 1 ? (
+                      <span className="badge badge-mine">agent working — {selected.summary || "PR loop"}</span>
+                    ) : selected.ready === 1 ? (
+                      <span className={`badge ${selected.summary === "ready to merge" ? "badge-ready" : "badge-mine"}`}>{selected.summary === "ready to merge" ? "ready to merge" : "ready for review"}</span>
+                    ) : (
+                      <span className="badge badge-wait">needs work — {selected.summary || "see body"}</span>
+                    )}
+                    <PrTriageBadge raw={selected.triage} detailed />
+                  </>
                 ) : null}
                 <span className={`chip chip-static status-${selectedInProgress ? "dispatched" : selected.status}`}>
                   {selectedInProgress ? "in progress" : selected.status === "resolved" ? "acknowledged" : selected.status}

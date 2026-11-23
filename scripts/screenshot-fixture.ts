@@ -1,6 +1,7 @@
 import { Db } from "../server/db.ts";
 import type { Favorite } from "../server/favorites.ts";
 import { prItemBody, type PrInfo } from "../server/pr.ts";
+import { classifyPrTriage } from "../server/pr-triage.ts";
 import type { Pull } from "../server/pulls.ts";
 import type { Item, Task } from "../server/types.ts";
 import type { TaskEvent } from "../server/task-events.ts";
@@ -361,6 +362,21 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
     threads: [],
     ...overrides,
   });
+  const readyPr = pr({ changed_file_paths: ["server/search.ts", "server/test/search.test.ts", "web/src/pages/Search.tsx", "web/src/styles.css", "docs/search.md", "server/api.ts"] });
+  const readyTriage = classifyPrTriage(readyPr);
+  const workPr = pr({
+    url: "https://gitlab.com/example/platform/-/merge_requests/29",
+    title: "fix(auth): refresh expired session tokens",
+    number: 29,
+    description: "## Why\n\nLong-lived tabs lost their session after the access token expired.\n\n## What\n\nRefresh the token before the request and retry once on 401.",
+    additions: 64,
+    deletions: 12,
+    changed_files: 3,
+    changed_file_paths: ["server/auth/session.ts", "server/test/auth.test.ts", "web/src/api.ts"],
+    checks: { total: 3, failed: 1, pending: false },
+    threads: [{ id: "note-1", author: "reviewer", body: "Please cover the concurrent refresh case." }],
+  });
+  const workTriage = classifyPrTriage(workPr);
   const items: Item[] = [
     {
       id: "sample-pr-ready",
@@ -368,10 +384,11 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
       status: "open",
       title: "PR ready for review: feat(search): rank results by recency",
       summary: "ready for review",
-      body: prItemBody(pr({})),
+      body: prItemBody(readyPr, readyTriage),
       context: "",
       options: null,
       ready: 1,
+      triage: JSON.stringify(readyTriage),
       source_ref: null,
       task_id: null,
       structured: 1,
@@ -386,20 +403,11 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
       status: "open",
       title: "PR needs work: fix(auth): refresh expired session tokens",
       summary: "1 unresolved review comment, 1 failing check",
-      body: prItemBody(pr({
-        url: "https://gitlab.com/example/platform/-/merge_requests/29",
-        title: "fix(auth): refresh expired session tokens",
-        number: 29,
-        description: "## Why\n\nLong-lived tabs lost their session after the access token expired.\n\n## What\n\nRefresh the token before the request and retry once on 401.",
-        additions: 64,
-        deletions: 12,
-        changed_files: 3,
-        checks: { total: 3, failed: 1, pending: false },
-        threads: [{ id: "note-1", author: "reviewer", body: "Please cover the concurrent refresh case." }],
-      })),
+      body: prItemBody(workPr, workTriage),
       context: "",
       options: null,
       ready: 0,
+      triage: JSON.stringify(workTriage),
       source_ref: null,
       task_id: "sample-pr-task",
       structured: 1,

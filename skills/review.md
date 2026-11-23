@@ -24,7 +24,12 @@ published. They never read your transcript.
    (or `~/.agents/skills/fabien-reviewer/SKILL.md`) and follow its checklist,
    usefulness filter and comment format. If neither file is installed, keep
    the same bar: verified, actionable comments only, no formatting nits.
-3. Post each kept comment as a **draft**, visible only to the human. This is
+3. **Adversarially verify every candidate finding** before drafting it: try to
+   disprove each finding against surrounding code, callers, types and tests.
+   Drop any comment you cannot prove from the diff or codebase, drop style or
+   formatting nits, and tag every kept finding with a severity (`critical`,
+   `high`, `medium` or `low`).
+4. Post each kept comment as a **draft**, visible only to the human. This is
    the human's request, so the skill's "do not post" rule does not apply to
    drafts.
    - GitLab: `glab api -X POST projects/:id/merge_requests/<iid>/draft_notes`
@@ -35,7 +40,7 @@ published. They never read your transcript.
    - GitHub: one pending review. `gh api -X POST repos/<o>/<r>/pulls/<n>/reviews`
      with `commit_id` and `comments[]` (`path`, `line`, `side`, `body`). Omit
      `event` so the review stays pending.
-4. Ask the human which comments to publish. Number them; for each give
+5. Ask the human which comments to publish. Number them; for each give
    `file:line`, the severity prefix and the full text. Add the architecture
    verdict at the end.
 
@@ -48,7 +53,7 @@ curl -s -X POST "{corral_url}/api/reports" \
 
    Then wait for the answer. The human may also edit the drafts in the
    GitLab/GitHub UI before answering.
-5. Apply the answer:
+6. Apply the answer:
    - Delete every draft the human did not keep: GitLab `DELETE
      .../draft_notes/<id>`; GitHub: delete the pending review and recreate it
      with the kept comments only. A stray draft would be published the next
@@ -57,7 +62,7 @@ curl -s -X POST "{corral_url}/api/reports" \
    - Publish the rest: GitLab `POST .../draft_notes/bulk_publish`; GitHub
      `POST .../reviews/<id>/events` with `event=COMMENT`.
    - `none`: delete all drafts, publish nothing.
-6. Report the result:
+7. Report the result:
 
 ```sh
 curl -s -X POST "{corral_url}/api/reports" \
