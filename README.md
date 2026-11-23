@@ -3,10 +3,10 @@
 **Delegate the work. Keep the decisions.**
 
 Corral gives developers using coding agents one inbox for questions, approvals,
-and pull requests. Send a task to Claude Code, Codex, or OpenCode; come back when
-there is something to decide or review.
+and pull requests. Send a task to Claude Code, Codex, OpenCode, or Antigravity;
+come back when there is something to decide or review.
 
-![Corral demo: the inbox, task history, a plan, PRs, a new task and the pull request list](docs/demo.gif)
+![Corral demo: the inbox, task history, a multi-repo plan diff, PRs, a new task, epics, pull requests, and KPI monitoring](docs/demo.gif)
 
 ## From a task to a reviewed change
 
@@ -14,31 +14,42 @@ Running several agents creates work of its own: following sessions, answering
 questions, tracking tickets, and checking whether a PR is ready. Corral brings
 those handoffs together so you can follow the work across repositories.
 
-1. **Capture the work.** Create a task or import a Jira ticket. Choose its repo
-   and coding harness; model and agent settings are optional.
+1. **Capture the work.** Create a code, review, multi-repo spec, or interview
+   ("Grill me") task, or import a Jira ticket. Pick a repository (or folder),
+   harness, or saved favorite; model, reasoning, and pre-PR review settings are
+   optional.
 2. **Dispatch.** The agent works in an isolated git worktree managed by
-   omnigent. Questions and permission requests arrive in your inbox.
+   omnigent. Questions, interview rounds, and permission requests arrive in your
+   inbox; stopped runs retry automatically before escalating.
 3. **Review the result.** Corral checks PR threads, checks, and mergeability.
    Review comments and conflicts go back to the agent; you review and merge.
-4. **Close the loop.** A merged PR completes the task and archives its inbox
-   items. Task history keeps the prompts, questions, and milestones accessible.
+4. **Close the loop.** A merged PR completes the task, archives its inbox items,
+   and releases its worktree and local branch. Task history keeps every prompt,
+   question, and milestone accessible.
 
-For larger changes, Jira epics organize dependencies and versioned designs.
-Tasks become available as their blockers clear and wait for you to launch them.
-GitHub and GitLab PRs also have a shared listing, including review requests.
-See the [product guide](docs/product-guide.md) for the full workflow.
+Beyond single tasks, **Jira epics** organize tickets, dependencies, versioned
+designs, and an optional autonomous implementation agent that proposes and
+creates tasks as blockers clear. **KPI monitoring** runs scheduled analyses with
+durable research memory, goals, and private Claude status artifacts. GitHub and
+GitLab PRs share one listing, including review requests. See the
+[product guide](docs/product-guide.md) for the full workflow.
 
 ## Built around human review
 
-- **An inbox for decisions:** structured questions, plan approvals, snoozing,
-  and links to the underlying agent sessions.
+- **An inbox for decisions:** structured questions, interview rounds, annotated
+  multi-repo plan revisions with diff view, snoozing, and links to the
+  underlying agent sessions.
 - **A visible readiness gate:** a fresh PR stays orange until automated reviews
   pass. Green requires answered or resolved threads, passing checks, and a
   mergeable branch. Human approval remains a separate step.
-- **Work across repositories:** per-task worktrees, multi-repo specification
-  tasks, and Jira epic dependencies keep related changes traceable.
-- **Local context:** SQLite stores work and history; usage views read local
-  session data. Agent backends and connected platforms still make network calls.
+- **Work across repositories:** per-task worktrees (cleaned up when tasks
+  finish), multi-repo specification tasks, Jira epic dependencies, and an MCP
+  endpoint (`POST /api/mcp`) for external or voice agents to create tasks and
+  check what waits without dispatching or merging.
+- **Local context and quotas:** SQLite stores work and history; sidebar rings
+  and usage views track Claude Code, Codex, OpenCode Go, and Google
+  (Antigravity) quotas and spend from local data. Agent backends and connected
+  platforms still make network calls.
 
 Corral owns work coordination. **omnigent owns agent execution**, sessions,
 worktrees, and model routing. Corral links out to inspect those sessions rather

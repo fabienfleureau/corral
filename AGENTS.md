@@ -104,8 +104,9 @@ never commit screenshots or generated fixture data.
 ### README demo GIF
 
 `docs/demo.gif` is the one committed capture. `scripts/record-demo.ts` records
-it from the same fixture: a scripted tour (inbox, task history, plan, PRs, new
-task, pull requests) with a drawn pointer and captions, encoded by `ffmpeg`.
+it from the same fixture: a scripted tour (inbox, task history, plan diff, PRs,
+new task, epics, pull requests, KPI) with a drawn pointer and captions, encoded
+by `ffmpeg`.
 A `.gif` output switches the capture script to that tour:
 
 ```sh
