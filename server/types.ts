@@ -235,6 +235,8 @@ export interface Item {
   /** Captured from a backend elicitation: JSON {id, kind}. Replies answer it
    *  through resolveElicitation instead of a new conversation message. */
   elicitation?: string | null;
+  /** Observe-only PR risk triage JSON ({tier, depth, mode, reasons, source}). */
+  triage?: string | null;
   created_ms: number;
   updated_ms: number;
   resolved_ms: number | null;
