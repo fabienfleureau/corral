@@ -313,6 +313,8 @@ export const api = {
 
   // ---- repos ----
   listRepos: (): Promise<Repo[]> => get<Repo[]>("/api/repos"),
+  matchRepoForPull: (url: string): Promise<{ repo_path: string | null; repo_name: string | null; via: "remote" | "name" | null }> =>
+    get(`/api/repos/match${query({ url })}`),
   addRepo: (input: { path: string; name?: string; jira_prefix?: string }): Promise<Repo> =>
     post<Repo>("/api/repos", input),
   patchRepo: (id: string, input: { name?: string; jira_prefix?: string | null; context?: Repo["context"] }): Promise<Repo> =>

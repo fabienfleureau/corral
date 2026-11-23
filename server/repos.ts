@@ -37,6 +37,20 @@ export function gitToplevel(path: string): string {
   }).trim();
 }
 
+/** All configured remote URLs of a repo, or none when the path is not a repo. */
+export function gitRemoteUrls(path: string): string[] {
+  try {
+    const out = execFileSync("git", ["-C", path, "config", "--get-regexp", "^remote\\..*\\.url$"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    });
+    return out.split("\n").map((line) => line.trim().split(/\s+/, 2)[1]).filter((url): url is string => !!url);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Scan workspace roots (depth ≤ 2 below each root) for git repos.
  * Returns the repos added by this scan.

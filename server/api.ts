@@ -33,7 +33,8 @@ import { dailySummaryPrompt } from "./daily-summary.ts";
 import { checkAttachments, MAX_TASK_BODY_BYTES } from "./attachments.ts";
 import { MarkdownFileError, readMarkdownFile } from "./markdown-file.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
-import { addRepo, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
+import { addRepo, gitRemoteUrls, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
+import { matchRepoForPull } from "./repo-match.ts";
 import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
 import { cachedPulls, platformRateLimits, refreshPulls } from "./pulls.ts";
 import type { Item, Repo, Task } from "./types.ts";
@@ -935,6 +936,14 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   // ---- repos ----
   on("GET", "/api/repos", (_req, res) => json(res, 200, state.db.listRepos()));
+
+  // Best-effort repo suggestion for a pasted PR/MR URL. No match is a normal
+  // answer: the form keeps the repo the human picked, or the default one.
+  on("GET", "/api/repos/match", (_req, res, { url }) => {
+    const candidates = state.db.listRepos().map((repo) => ({ ...repo, remotes: gitRemoteUrls(repo.path) }));
+    const match = matchRepoForPull(url.searchParams.get("url") ?? "", candidates);
+    json(res, 200, { repo_path: match?.path ?? null, repo_name: match?.name ?? null, via: match?.via ?? null });
+  });
 
   on("POST", "/api/repos", (req, res, { body }) => {
     const b = body as { path?: string; name?: string; jira_prefix?: string };
