@@ -485,6 +485,41 @@ export function seedScreenshotUsage(home: string): void {
     }
   }
   writeFileSync(join(dir, "usage.jsonl"), lines.join("\n") + "\n");
+
+  // Synthetic Claude quota snapshot (ccstatusline cache) for sidebar + Usage rings.
+  const ccDir = join(home, ".cache", "ccstatusline");
+  mkdirSync(ccDir, { recursive: true });
+  writeFileSync(
+    join(ccDir, "usage.json"),
+    JSON.stringify({
+      sessionUsage: 24,
+      sessionResetAt: new Date(now + 2 * 3_600_000 + 15 * 60_000).toISOString(),
+      weeklyUsage: 8,
+      weeklyResetAt: new Date(now + 4 * 86_400_000).toISOString(),
+    }) + "\n",
+  );
+
+  // Synthetic Codex session log with rate limits for sidebar + Usage rings.
+  const codexDir = join(home, ".codex", "sessions", "2026", "11", "23");
+  mkdirSync(codexDir, { recursive: true });
+  writeFileSync(
+    join(codexDir, "rollout-fixture.jsonl"),
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: new Date(now - 5 * 60_000).toISOString(),
+      payload: {
+        type: "token_count",
+        rate_limits: {
+          plan_type: "Plus",
+          primary: {
+            used_percent: 42,
+            window_minutes: 300,
+            resets_at: Math.floor((now + 3 * 3_600_000) / 1000),
+          },
+        },
+      },
+    }) + "\n",
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
