@@ -2,11 +2,15 @@
 // with an accessible hover/focus tooltip and click-through to #/usage.
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import type { AgentQuota } from "./types";
 import { timeAgo } from "./util";
 import { buildSidebarQuotaGauges, formatResetIn, quotaAriaLabel } from "./sidebar-quotas";
 import type { SidebarQuotaGauge } from "./sidebar-quotas";
+
+const RING_GEOMETRY = [
+  { role: "outer", r: 17.5, strokeWidth: 2.8 },
+  { role: "inner", r: 12.8, strokeWidth: 2.3 },
+] as const;
 
 function ProviderMark({ agent }: { agent: AgentQuota["agent"] }) {
   if (agent === "claude") {
@@ -169,17 +173,47 @@ export function SidebarQuotas({
             onBlur={scheduleClose}
           >
             <span className="sidebar-quota-rings">
-              {gauge.rings.map((ring, idx) => (
-                <progress
-                  key={ring.label}
-                  className={`quota-ring quota-ring-${idx === 0 ? "outer" : "inner"} quota-ring-${ring.tone}`}
-                  value={Math.round(ring.remainingPercent)}
-                  max={100}
-                  aria-hidden="true"
-                  tabIndex={-1}
-                  style={{ "--value": ring.remainingPercent } as CSSProperties}
-                />
-              ))}
+              <svg
+                className="quota-rings-svg"
+                viewBox="0 0 40 40"
+                aria-hidden="true"
+                focusable="false"
+              >
+                {gauge.rings.map((ring, idx) => {
+                  const geom = RING_GEOMETRY[idx] ?? RING_GEOMETRY[1];
+                  const circumference = 2 * Math.PI * geom.r;
+                  const dashOffset = circumference * (1 - ring.remainingPercent / 100);
+                  const isEmpty = ring.remainingPercent <= 0;
+                  return (
+                    <g
+                      key={ring.label}
+                      className={`quota-ring quota-ring-${geom.role} quota-ring-${ring.tone}`}
+                      data-remaining={Math.round(ring.remainingPercent)}
+                    >
+                      <circle
+                        className="quota-ring-track"
+                        cx={20}
+                        cy={20}
+                        r={geom.r}
+                        fill="none"
+                        strokeWidth={geom.strokeWidth}
+                      />
+                      <circle
+                        className={`quota-ring-arc ${isEmpty ? "quota-ring-empty" : ""}`}
+                        cx={20}
+                        cy={20}
+                        r={geom.r}
+                        fill="none"
+                        strokeWidth={geom.strokeWidth}
+                        strokeLinecap="round"
+                        strokeDasharray={circumference}
+                        strokeDashoffset={dashOffset}
+                        transform="rotate(-90 20 20)"
+                      />
+                    </g>
+                  );
+                })}
+              </svg>
               <span className="sidebar-quota-icon" aria-hidden="true">
                 <ProviderMark agent={gauge.agent} />
               </span>
