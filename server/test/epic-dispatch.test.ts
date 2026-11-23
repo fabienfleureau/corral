@@ -12,7 +12,7 @@ import type { Config } from "../config.ts";
 import type { WorkerBackend, WorkerStart, WorkerSession } from "../worker.ts";
 import type { Task } from "../types.ts";
 
-function run(over: Partial<Task>, check: (prompt: string) => void): () => Promise<void> {
+function run(over: Partial<Task>, check: (started: WorkerStart) => void): () => Promise<void> {
   return async () => {
     const dir = mkdtempSync(join(tmpdir(), "corral-epic-d-"));
     const db = new Db(join(dir, "t.db"));
@@ -36,7 +36,7 @@ function run(over: Partial<Task>, check: (prompt: string) => void): () => Promis
     db.insertTask(task);
     try {
       await dispatchTask(db, { configDir: dir, host: "localhost", port: 4787, token: "tok" } as Config, backend, task, "codex", { useWorktree: false });
-      check(started[0].prompt);
+      check(started[0]);
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -44,12 +44,28 @@ function run(over: Partial<Task>, check: (prompt: string) => void): () => Promis
   };
 }
 
-test("epic task: the precondition check follows the ticket text and comes before the conventions", run({ epic_id: "e1" }, (prompt) => {
+test("epic task: the precondition check follows the ticket text and comes before the conventions", run({ epic_id: "e1" }, ({ prompt, env }) => {
   assert.match(prompt, /Preconditions of this epic task/);
+  assert.doesNotMatch(prompt, /## Epic request/);
   assert.ok(prompt.indexOf("lib X 2.0 is published") < prompt.indexOf("Preconditions of this epic task"));
   assert.ok(prompt.indexOf("Preconditions of this epic task") < prompt.indexOf("\n---\n"));
+  assert.equal(env?.CORRAL_EPIC_ID, "e1");
 }));
 
-test("a task outside an epic gets no precondition check", run({}, (prompt) => {
+test("epic request task: gets intent + Corral API instructions instead of ticket preconditions", run({
+  epic_id: "e1", jira_key: null, jira_url: null, kind: "ops", prompt: "Create a task for caching",
+}, ({ prompt, env }) => {
+  assert.match(prompt, /## Epic request/);
   assert.doesNotMatch(prompt, /Preconditions of this epic task/);
+  assert.ok(prompt.includes("http://localhost:4787/api/epics/e1/tasks"));
+  assert.ok(prompt.includes("http://localhost:4787/api/tasks"));
+  assert.ok(prompt.includes("Authorization: Bearer tok"));
+  assert.doesNotMatch(prompt, /\{(epic_id|corral_url|corral_token|task_id)\}/);
+  assert.equal(env?.CORRAL_EPIC_ID, "e1");
+}));
+
+test("a task outside an epic gets no precondition check or epic request block", run({}, ({ prompt, env }) => {
+  assert.doesNotMatch(prompt, /Preconditions of this epic task/);
+  assert.doesNotMatch(prompt, /## Epic request/);
+  assert.equal(env?.CORRAL_EPIC_ID, undefined);
 }));

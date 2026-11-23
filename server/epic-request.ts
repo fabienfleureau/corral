@@ -84,7 +84,7 @@ export function createEpicRequestTask(
 ): Task {
   const request = input.request.trim();
   if (!request || request.length > 8000) throw new EpicRequestError("request must be between 1 and 8000 characters");
-  const kind = input.kind ?? "code";
+  const kind = input.kind ?? "ops";
   if (kind !== "code" && kind !== "ops") throw new EpicRequestError("kind must be code or ops");
   const { favorite, repoPath } = resolveEpicRequestSettings(input, favorites, db.listRepos());
   const reviewer = favorite?.review ? reviewers.find((r) => r.name === favorite.review) : undefined;

@@ -59,12 +59,9 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [busy, setBusy] = useState(false);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [request, setRequest] = useState("");
-  const [kind, setKind] = useState<"code" | "ops">("code");
   const [favorite, setFavorite] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [createdTask, setCreatedTask] = useState<Task | null>(null);
-  const [proposal, setProposal] = useState("");
-  const [planning, setPlanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -89,17 +86,14 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     if (!detail) return;
     setFavorite(detail.epic.favorite_name ?? "");
     setRepoPath(detail.epic.repo_path ?? "");
-    setKind("code");
     setRequest("");
     setCreatedTask(null);
-    setProposal("");
   }, [detail?.epic.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shownFavorites = favoritesFor(favorites, repoContext(repos, repoPath));
 
   const saveSettings = (nextFavorite: string, nextRepoPath: string) => {
     setCreatedTask(null);
-    setProposal("");
     if (!detail) return;
     void run(() => api.patchEpicSettings(detail.epic.id, { favorite_name: nextFavorite, repo_path: nextRepoPath }));
   };
@@ -123,7 +117,6 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     setRepoPath(path);
     if (!detail || (path === (detail.epic.repo_path ?? "") && favorite === (detail.epic.favorite_name ?? ""))) return;
     setCreatedTask(null);
-    setProposal("");
     void api.patchEpicSettings(detail.epic.id, { favorite_name: favorite, repo_path: path })
       .then((d) => { setDetail(d); refresh(); })
       .catch((e) => setError(errText(e)));
@@ -142,21 +135,6 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
       setBusy(false);
     }
   }, [refresh]);
-
-  // Read-only planning: the assistant sees the epic context but cannot change
-  // tasks, PRs or Jira. A separate button keeps that promise deterministic.
-  const plan = (form: HTMLFormElement) => {
-    const field = form.elements.namedItem("request");
-    if (!(field instanceof HTMLTextAreaElement) || !field.reportValidity()) return;
-    const text = request.trim();
-    if (!text || !detail) return;
-    setPlanning(true);
-    void run(async () => {
-      const result = await api.orchestrateEpic(detail.epic.id, text);
-      setCreatedTask(null);
-      setProposal(result.proposal);
-    }).finally(() => setPlanning(false));
-  };
 
   // Launching is explicit: a task whose blockers cleared stays on this page
   // until the human starts it. Without a harness or repo, send them to its form.
@@ -213,8 +191,8 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
           <section className="epic-request" aria-labelledby="epic-request-title">
             <h3 id="epic-request-title">Ask about this epic</h3>
             <p className="muted" id="epic-request-help">
-              One request, two actions. <strong>Propose a plan</strong> only reads the epic: no task, no PR, no Jira change.
-              <strong> Create task</strong> tracks the work for later dispatch and can lead to code, PRs and design changes.
+              Ask a question, request a change to the epic or its design, act on an existing task, or create epic or classic Corral tasks.
+              Corral creates a task that determines your intent and can interact with this epic and your tasks.
             </p>
             <form aria-labelledby="epic-request-title" onSubmit={(e) => {
               e.preventDefault();
@@ -224,22 +202,23 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
               const allowed = favoritesFor(favorites, repoContext(repos, path));
               const chosenFavorite = favorite && allowed.some((f) => f.name === favorite) ? favorite : "";
               void run(async () => {
-                const task = await api.createEpicRequest(detail.epic.id, { request: text, favorite_name: chosenFavorite, repo_path: path, kind });
+                const task = await api.createEpicRequest(detail.epic.id, { request: text, favorite_name: chosenFavorite, repo_path: path });
                 setRequest("");
-                setProposal("");
                 setCreatedTask(task);
               });
             }}>
               <label htmlFor="epic-request-text">What needs to happen?</label>
-              <textarea id="epic-request-text" name="request" value={request} onChange={(e) => setRequest(e.target.value)} rows={3} maxLength={8000} aria-describedby="epic-request-help" required />
-              <fieldset className="epic-request-kind" aria-describedby="epic-request-kind-help">
-                <legend>Task type</legend>
-                <input type="radio" id="epic-request-kind-code" name="kind" value="code" checked={kind === "code"} onChange={() => setKind("code")} disabled={busy} />
-                <label htmlFor="epic-request-kind-code">Code change — opens a PR from a git repo</label>
-                <input type="radio" id="epic-request-kind-ops" name="kind" value="ops" checked={kind === "ops"} onChange={() => setKind("ops")} disabled={busy} />
-                <label htmlFor="epic-request-kind-ops">Action in folder — no PR</label>
-                <small id="epic-request-kind-help" className="muted epic-request-help">An action uses the working directory as context and reports back. The folder does not need to be a git repository.</small>
-              </fieldset>
+              <textarea
+                id="epic-request-text"
+                name="request"
+                value={request}
+                onChange={(e) => setRequest(e.target.value)}
+                rows={3}
+                maxLength={8000}
+                placeholder="Ask a question, change the epic or design, act on a task, or create new tasks…"
+                aria-describedby="epic-request-help"
+                required
+              />
               <div className="epic-request-choices">
                 <div className="field">
                   <label htmlFor="epic-request-favorite">Favorite</label>
@@ -261,6 +240,8 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
                     aria-describedby="epic-request-repo-help"
                     disabled={busy}
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
                     spellCheck={false}
                   />
                   <datalist id="epic-request-repos">
@@ -270,13 +251,9 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
                 </div>
               </div>
               <div className="epic-request-actions">
-                <button className="btn" type="button" disabled={busy} onClick={(e) => plan(e.currentTarget.form!)}>
-                  {planning ? <Spinner /> : null}Propose a plan (no changes)
-                </button>
-                <button className="btn btn-primary" type="submit" disabled={busy}>{busy && !planning ? <Spinner /> : null}Create task</button>
+                <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? <Spinner /> : null}Create task</button>
               </div>
             </form>
-            {proposal ? <div className="epic-proposal" role="status"><h4>Proposal</h4><p>{proposal}</p><p className="muted">No task, PR or Jira change was made.</p></div> : null}
             {createdTask ? <p className="epic-request-created" role="status">Task created: <a href={`#/tasks?task=${encodeURIComponent(createdTask.id)}`}>{createdTask.title}</a></p> : null}
             {favorites.length === 0 ? <p className="muted">Add a favorite in <a href="#/settings">Settings</a> to set the harness, agent and model on new tasks.</p> : null}
           </section>
