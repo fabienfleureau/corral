@@ -3574,17 +3574,9 @@ select:focus {
 .epic-request form { display: grid; gap: .5rem; max-inline-size: 48rem; }
 .epic-request textarea { font: inherit; }
 .epic-request-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-.epic-request-kind { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 1rem; row-gap: .35rem; }
-.epic-request-kind legend { padding: 0; margin-bottom: .35rem; }
-.epic-request-kind input[type="radio"] { width: auto; margin: 0; }
-.epic-request-kind label { display: inline-flex; align-items: center; gap: .35rem; }
-.epic-request-kind .epic-request-help { flex-basis: 100%; }
 .epic-request-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; margin-block: .5rem; }
 .epic-request-created { margin-block: .5rem 0; }
 .epic-request-help { display: block; margin-top: .25rem; }
-.epic-proposal { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .75rem; }
-.epic-proposal h4 { margin: 0; }
-.epic-proposal p { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Autonomous epic agent */
 .epic-agent-section { margin-block: 1.25rem 1.5rem; }

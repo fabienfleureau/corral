@@ -38,7 +38,8 @@ Review this PR/MR: <pr url>      # only for a review task
 ## Multi-repo contract ...         # only for a task created from a plan (parent_task_id)
 ## Epic design (vN) ...           # only for a task of an epic: the current design
 ## Amendment to this task ...      # only when the human applied an amendment to it
-## Preconditions of this epic task  # only for a task of an epic (epic_id), from skills/epic-task.md
+## Preconditions of this epic task  # only for a Jira ticket / code task of an epic (epic_id), from skills/epic-task.md
+## Epic request ...                 # only for an ops request task created from the Epic page (epic_id, no jira_key), from skills/epic-request.md
 ---
 <conventions below>
 ```
@@ -50,7 +51,8 @@ Review this PR/MR: <pr url>      # only for a review task
 | `skills/grill.md` | grill and grill-docs tasks | `{grill_mode}`, `{grill_docs_output}` | invoke the interview skill, report complete rounds to the inbox, and follow the worktree or in-place docs output |
 | `skills/ops.md` | ops tasks (an Epic page request without a PR), replacing the PR convention | `{corral_url}`, `{corral_token}`, `{task_id}` | do the work in the folder, no branch or PR, report what was done |
 | `skills/spec.md` | **replaces** `question-report.md` and `pr-loop.md` when `task.kind === "spec"` (multi-repo step one) — a spec reads the sub-projects, reports a `plan` and never commits | `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Write the contract between the sub-projects and report it as a plan. Do not change code."* |
-| `skills/epic-task.md` | a `code` task of an epic (`epic_id`), in the task text before the conventions: check the ticket's Preconditions, report a question and stop if one is unmet | — | one-line fallback: *"Before changing anything, check the ticket's Preconditions section. If one is not met, report a question and stop."* |
+| `skills/epic-task.md` | a `code` or Jira-backed task of an epic (`epic_id`), in the task text before the conventions: check the ticket's Preconditions, report a question and stop if one is unmet | — | one-line fallback: *"Before changing anything, check the ticket's Preconditions section. If one is not met, report a question and stop."* |
+| `skills/epic-request.md` | an `ops` request task created from the Epic page (`epic_id` set, no `jira_key`), in the task text before the conventions: determine user intent (question, epic change, action on an existing task, or creating epic/classic tasks) and interact with Corral via its HTTP API | `{epic_id}`, `{corral_url}`, `{corral_token}`, `{task_id}` | two-line fallback pointing to `{epic_id}` and `{corral_url}` |
 | `skills/pr-loop.md` | same tasks, right after `question-report.md` | — | dropped (empty string is filtered out) |
 | `skills/pre-pr-review.md` | non-review task dispatched **with a reviewer** (`review` in the dispatch options) | `{review_command}` | dropped |
 | `skills/pre-pr-delegate-review.md` | **replaces** `pre-pr-review.md` when the reviewer is a delegate (`delegate` instead of `command`) | `{review_agent}`, `{base_branch}` | one-line fallback: send the changes to the `{review_agent}` sub-agent with `sys_session_send`, fix or decline each finding |
@@ -115,6 +117,11 @@ What each one is for:
 - **`epic-task.md`** — an epic ticket's preconditions (a library built, a schema
   merged…) are checked for real before any change; an unmet one becomes a
   question and the agent stops. The human relaunches the task once it holds.
+- **`epic-request.md`** — a generic request task created from the Epic page:
+  determine the user's intent (question/plan, epic or design change, action on an
+  existing epic or classic task, or creating new epic/classic Corral tasks) and
+  use the authenticated Corral HTTP API rather than guessing or editing code
+  unsolicited.
 - **`clarify.md`** — ticket → subtasks breakdown, outside Corral.
 
 ### Where the text is read from
@@ -197,6 +204,7 @@ substituted — see `llmComplete()` in `server/llm.ts`).
 | `{corral_url}` | `http://<config host>:<config port>` | every convention |
 | `{corral_token}` | the server access token | every convention |
 | `{task_id}` | the task's id, for `POST /api/reports` | every convention |
+| `{epic_id}` | the epic's id, for `/api/epics/{epic_id}` endpoints | `skills/epic-request.md` |
 | `{pr_url}` | the task's PR/MR URL (empty for a code task without one) | every convention |
 | `{review_command}` | the reviewer command, `{base_branch}` already resolved | `skills/pre-pr-review.md` |
 | `{review_agent}` | the delegate reviewer's sub-agent name (`ocr_claude` or `ocr_codex`) | `skills/pre-pr-delegate-review.md` |

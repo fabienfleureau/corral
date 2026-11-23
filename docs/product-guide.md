@@ -74,10 +74,8 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   A task whose prerequisites are ready waits on the Epics page: nothing is added to the
   inbox and nothing runs until you click **Launch** there. In the same repo it stacks on
   its prerequisite's branch only when launched. Decision: [ADR 0002](adr/0002-epic-tasks-start-from-epic-page.md).
-  The request field has two actions: **Propose a plan** reads the epic without creating
-  a task, a PR or a Jira change; **Create task** tracks the work for later dispatch on the Tasks page, outside the Jira board.
-  Its prompt starts with the epic's Jira ticket, summary and link, so the task keeps
-  that context when you edit or dispatch it later.
+  The **Ask about this epic** input takes any free-form request — a question, a change to the epic or its design, an action on an existing task, or creating epic or classic Corral tasks — and creates an open `ops` task tracked on the Tasks page, outside the Jira board.
+  Its prompt starts with the epic's Jira ticket, summary and link, and at dispatch it receives `skills/epic-request.md` so the agent can determine your intent and interact with the epic and Corral tasks through the Corral API.
   A Jira ticket marked **Killed** is cancelled, not merged: a resync hides it from the Epics page, removes it from the summary and no longer lets it block other tickets. A task whose prerequisite was killed keeps a note on the epic.
   Each epic also has an optional **Autonomous implementation agent** (configured with a working directory, favorite, optional hourly/daily cadence, and persistent context — mirroring KPI monitoring). When run, it discovers implementation steps autonomously, operates through real Corral tasks like a human (creating tasks in the right repository and agent, launching/dispatching unblocked tasks, updating task and Jira statuses, instructing running tasks and refreshing PRs), runs E2E tests when possible, reports problems, missing specs/information and clarification requests on the Epic page, and keeps durable memory in `.corral/epic-<key>-memory.md`. Use the **One-time instruction** form on the Epic page to answer clarifications or steer a single run without saving the message into persistent settings; the agent addresses it and folds durable answers into its memory.
   A ticket's `Préconditions` are checked by the agent before it starts. The epic's

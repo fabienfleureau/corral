@@ -1101,9 +1101,9 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     return out;
   };
 
-  const epicRequestKind = (body: unknown): "code" | "ops" => {
+  const epicRequestKind = (body: unknown, defaultKind: "code" | "ops" = "code"): "code" | "ops" => {
     const kind = (body as { kind?: unknown } | null)?.kind;
-    if (kind === undefined || kind === null || kind === "") return "code";
+    if (kind === undefined || kind === null || kind === "") return defaultKind;
     if (kind !== "code" && kind !== "ops") throw new EpicRequestError("kind must be code or ops");
     return kind;
   };
@@ -1145,7 +1145,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         request: b.request,
         favorite_name: input.favorite_name ?? epic.favorite_name ?? "",
         repo_path: input.repo_path ?? epic.repo_path ?? "",
-        kind: epicRequestKind(body),
+        kind: epicRequestKind(body, "ops"),
       }, state.cfg.favorites ?? [], state.cfg.reviewers ?? [], state.cfg.jira?.baseUrl ?? "");
       state.hub.broadcast("task.updated", task);
       state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));

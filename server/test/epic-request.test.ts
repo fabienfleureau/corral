@@ -72,7 +72,7 @@ test("epic request: settings persist and a request becomes a linked task", () =>
   ].join("\n"));
   assert.equal(task.title, "Split the widget work");
   assert.equal(task.repo_path, work.path);
-  assert.equal(task.kind, "code");
+  assert.equal(task.kind, "ops");
   assert.equal(task.target, "claude");
   assert.equal(task.agent, "worker");
   assert.equal(task.model, "opus");
@@ -139,9 +139,18 @@ test("epic request: an action task takes a plain folder and expects no PR", () =
   assert.equal(created.body.target, "claude", "the saved favorite still supplies the settings");
   assert.equal(created.body.review, reviewSummary(reviewers[0]));
 
+  const code = await send("POST", "/api/epics/e/requests", {
+    request: "Implement widget size validation",
+    repo_path: work.path,
+    favorite_name: "Work",
+    kind: "code",
+  });
+  assert.equal(code.status, 200, JSON.stringify(code.body));
+  assert.equal(code.body.kind, "code");
+
   const bad = await send("POST", "/api/epics/e/requests", { request: "do it", kind: "spec" });
   assert.equal(bad.status, 400);
-  assert.equal(db.listTasks().length, 1, "a refused kind leaves no task behind");
+  assert.equal(db.listTasks().length, 2, "a refused kind leaves no task behind");
 }));
 
 test("epic request: the brief keeps the ticket key and summary when Jira has no URL", () => {
