@@ -128,6 +128,19 @@ export interface EpicLink {
   blocked_by_key: string;
 }
 
+/** A Jira child ticket of an epic, synced as reference data without creating a Corral task. */
+export interface EpicTicket {
+  epic_id: string;
+  jira_key: string;
+  title: string;
+  description: string;
+  jira_url: string;
+  jira_status: string | null;
+  jira_parent_key: string | null;
+  suggested_repo_path: string;
+  updated_ms: number;
+}
+
 export interface Task {
   id: string;
   title: string;

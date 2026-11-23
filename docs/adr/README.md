@@ -26,6 +26,7 @@ They are required when a change makes or revisits such a decision.
 | [0015](0015-annotated-multi-repo-plan-revisions.md) | Proposed | Annotated revisions and revision-pinned approval for multi-repo plans |
 | [0016](0016-stopped-agent-retry-policy.md) | Accepted | Bounded automatic retries for stopped dispatched agents before inbox escalation |
 | [0017](0017-epic-autonomous-agent.md) | Proposed | Opted-in autonomous epic implementation agent modeled after KPI cycles |
+| [0018](0018-epic-agent-creates-tasks.md) | Proposed | Epic import stores Jira child tickets without creating tasks; the epic agent creates tasks in the right repo and agent |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.

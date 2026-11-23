@@ -75,7 +75,7 @@ test("jira done statuses", () => {
   assert.equal(isJiraKilled("Kill"), false);
 });
 
-test("sync: imports children as tasks with links, repo and no duplicates on resync", withDb(async (db) => {
+test("sync: imports epic, Jira tickets and links without creating Corral tasks", withDb(async (db) => {
   const dir = mkdtempSync(join(tmpdir(), "corral-epic-repo-"));
   db.insertRepo(repo("engine", dir));
   const jira = fakeJira(issue("E-1", "Big change", "Design v1"), [
@@ -83,24 +83,38 @@ test("sync: imports children as tasks with links, repo and no duplicates on resy
     issue("E-3", "second", "Repo: engine", [blockedBy("E-2")]),
   ]);
   const first = await syncEpic(db, jira, "E-1");
-  assert.deepEqual(first.created, ["E-2", "E-3"]);
+  assert.deepEqual(first.created, []);
   assert.equal(first.epic.description, "Design v1");
-  const tasks = db.listEpicTasks(first.epic.id);
-  assert.equal(tasks.length, 2);
-  assert.equal(tasks[0].repo_path, dir);
+  assert.equal(db.listTasks().length, 0, "importing an epic must not create Corral tasks");
+  assert.equal(db.listEpicTasks(first.epic.id).length, 0);
+  const tickets = db.listEpicTickets(first.epic.id);
+  assert.equal(tickets.length, 2);
+  assert.equal(tickets[0].jira_key, "E-2");
+  assert.equal(tickets[0].suggested_repo_path, dir);
   assert.deepEqual(db.listEpicLinks(first.epic.id).map((l) => [l.task_key, l.blocked_by_key]), [["E-3", "E-2"]]);
   const again = await syncEpic(db, jira, "E-1");
   assert.deepEqual(again.created, []);
-  assert.equal(db.listEpicTasks(first.epic.id).length, 2);
+  assert.equal(db.listTasks().length, 0);
+  assert.equal(db.listEpicTickets(first.epic.id).length, 2);
   assert.equal(db.listEpics().length, 1);
   rmSync(dir, { recursive: true, force: true });
 }));
 
-test("sync: Jira edits reach an unstarted task, never a dispatched one", withDb(async (db) => {
+function existingTask(id: string, jiraKey: string, over: Partial<Task> = {}): Task {
+  const now = Date.now();
+  return {
+    id, title: `${jiraKey} old`, prompt: "old", kind: "code", repo_path: "/r", target: "claude", target_state: "suggested",
+    base_branch: null, branch: null, worktree_path: null, assignee: null, jira_key: jiraKey,
+    jira_url: `https://j/browse/${jiraKey}`, jira_parent_key: "E-1", jira_status: "To Do", pr_url: null, pr_meta: null,
+    status: "open", terminal_address: null, exit_code: null, created_ms: now, updated_ms: now, ...over,
+  };
+}
+
+test("sync: Jira edits reach an existing unstarted task, never a dispatched one", withDb(async (db) => {
   const jira = fakeJira(issue("E-1", "Epic"), [issue("E-2", "first", "old"), issue("E-3", "second", "old")]);
   const { epic } = await syncEpic(db, jira, "E-1");
-  const started = db.getTaskByJiraKey("E-3")!;
-  db.updateTask(started.id, { status: "dispatched", terminal_address: "s1" });
+  db.insertTask(existingTask("t-2", "E-2", { epic_id: epic.id }));
+  db.insertTask(existingTask("t-3", "E-3", { epic_id: epic.id, status: "dispatched", terminal_address: "s1" }));
   jira.children = [issue("E-2", "first", "new", [], "In Progress"), issue("E-3", "second", "new")];
   const r = await syncEpic(db, jira, "E-1");
   assert.equal(db.getTaskByJiraKey("E-2")!.prompt, "new");
@@ -124,9 +138,11 @@ test("sync: an existing task is attached to the epic instead of duplicated", wit
   assert.equal(db.listTasks().length, 1);
 }));
 
-test("sync: a ticket marked Killed is detected on the next refresh", withDb(async (db) => {
+test("sync: a ticket marked Killed is detected on the next refresh for existing tasks", withDb(async (db) => {
   const jira = fakeJira(issue("E-1", "Epic"), [issue("E-2", "a"), issue("E-3", "b")]);
   const { epic } = await syncEpic(db, jira, "E-1");
+  db.insertTask(existingTask("t-2", "E-2", { epic_id: epic.id }));
+  db.insertTask(existingTask("t-3", "E-3", { epic_id: epic.id }));
   jira.children = [issue("E-2", "a", "", [], "Killed"), issue("E-3", "b", "", [blockedBy("E-2")])];
   await syncEpic(db, jira, "E-1");
   assert.equal(db.getTaskByJiraKey("E-2")!.jira_status, "Killed");
@@ -135,9 +151,11 @@ test("sync: a ticket marked Killed is detected on the next refresh", withDb(asyn
   assert.equal(views.find((v) => v.task.jira_key === "E-3")!.state, "ready");
 }));
 
-test("sync: a ticket that left the epic is flagged, and back again is restored; a cycle is reported", withDb(async (db) => {
+test("sync: an existing task whose ticket left the epic is flagged, and back again is restored; a cycle is reported", withDb(async (db) => {
   const jira = fakeJira(issue("E-1", "Epic"), [issue("E-2", "a"), issue("E-3", "b")]);
   const { epic } = await syncEpic(db, jira, "E-1");
+  db.insertTask(existingTask("t-2", "E-2", { epic_id: epic.id }));
+  db.insertTask(existingTask("t-3", "E-3", { epic_id: epic.id }));
   jira.children = [issue("E-2", "a")];
   const r = await syncEpic(db, jira, "E-1");
   assert.deepEqual(r.out, ["E-3"]);

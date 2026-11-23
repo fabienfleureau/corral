@@ -243,10 +243,14 @@ Without one it asks for both to be null.
 ## Epic autonomous implementation
 
 `epicAgentPrompt()` in `server/epic-agent.ts` wraps the epic's Jira title,
-design, tickets, blockers, repository list, previous report and workspace memory
-file (`.corral/epic-<jira-key>-memory.md`) with `DATA_NOT_INSTRUCTIONS`, and
-carries the operator's `context` (answers and constraints). It instructs the
-agent to autonomously discover implementation steps, implement unblocked work,
+design, synced Jira child tickets (`jiraTickets`), existing Corral epic tasks,
+previous report and workspace memory file (`.corral/epic-<jira-key>-memory.md`)
+with `DATA_NOT_INSTRUCTIONS`, and supplies the registered repositories,
+configured favorites/harnesses, operator `context` (answers and constraints),
+and the `POST /api/epics/:id/tasks` endpoint with bearer auth so the agent can
+create open Corral tasks in the right repository with the right agent without
+duplicating existing tasks. It instructs the agent to autonomously discover
+implementation steps, implement unblocked work or create scoped Corral tasks,
 report any problems, missing specifications/information and clarification
 requests without guessing, run E2E tests whenever possible (recording commands
 and gaps), update the durable workspace memory file, and end with one structured
