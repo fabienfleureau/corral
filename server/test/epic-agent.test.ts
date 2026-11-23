@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -99,6 +100,12 @@ test("epicAgentPrompt frames Jira epic data as untrusted and carries autonomy, t
   assert.ok(prompt.indexOf(DATA_NOT_INSTRUCTIONS) < prompt.indexOf(injection));
   assert.match(prompt, /autonomously discover/i);
   assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/epics\/epic-1\/tasks"/);
+  assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/epics\/epic-1\/tasks\/<taskId>\/launch"/);
+  assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/tasks\/<taskId>\/dispatch"/);
+  assert.match(prompt, /PATCH "http:\/\/127\.0\.0\.1:4787\/api\/tasks\/<taskId>"/);
+  assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/tasks\/<taskId>\/instruct"/);
+  assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/tasks\/<taskId>\/check-pr"/);
+  assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/epics\/epic-1\/sync"/);
   assert.match(prompt, /Authorization: Bearer tok-123/);
   assert.match(prompt, /"favorites"/);
   assert.match(prompt, /"jiraTickets"/);
@@ -397,6 +404,145 @@ test("HTTP API exposes epic agent configuration, launch, and detail embedding", 
       const res = await fetch(`${base}/api/epics/epic-1/tasks`, { method: "POST", headers, body: JSON.stringify(invalid) });
       assert.equal(res.status, 400, JSON.stringify(invalid));
     }
+  } finally {
+    server.close();
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("epic agent task lifecycle: create, launch with saved agent, move task & Jira status, unblock dependents, and dispatch non-Jira tasks", async () => {
+  const db = new Db(":memory:");
+  const dir = mkdtempSync(join(tmpdir(), "corral-epic-lifecycle-"));
+  const repoDir = join(dir, "repo");
+  mkdirSync(repoDir, { recursive: true });
+  execFileSync("git", ["init", "-q", repoDir]);
+  execFileSync("git", ["-C", repoDir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-q", "-m", "init"]);
+
+  const repo: Repo = { id: "r1", name: "app", path: repoDir, jira_prefix: "EX", context: null, source: "manual", created_ms: 0 };
+  const cfg = {
+    host: "127.0.0.1", port: 0, token: "test-token", configDir: dir, dataDir: dir,
+    favorites, reviewers: [], agents: { claude: ["claude"], codex: ["codex"] },
+  } as unknown as Config;
+  const launches: WorkerStart[] = [];
+  const backend = {
+    name: "fake",
+    start: async (input: WorkerStart) => {
+      launches.push(input);
+      return { address: `sess-${launches.length}`, task_id: input.taskId, name: input.name, harness: input.harness, status: "working", state: "live", cwd: input.repoPath } as WorkerSession;
+    },
+    get: async () => null,
+    list: async () => [],
+    read: async () => "",
+    send: async () => undefined,
+    resolveElicitation: async () => undefined,
+    kill: async () => undefined,
+    history: async () => "",
+    tree: async () => [],
+    onEvent: () => ({ stop: () => undefined }),
+  } as unknown as WorkerBackend;
+
+  const jiraTransitions: { key: string; to: string }[] = [];
+  const jira = {
+    configured: true,
+    transitions: async () => [
+      { id: "t-ip", name: "Start", to: { name: "In Progress" } },
+      { id: "t-done", name: "Complete", to: { name: "Done" } },
+    ],
+    transition: async (key: string, id: string) => {
+      jiraTransitions.push({ key, to: id === "t-ip" ? "In Progress" : "Done" });
+    },
+    markDone: async (key: string) => {
+      jiraTransitions.push({ key, to: "Done" });
+      return { id: "t-done", name: "Complete", to: { name: "Done" } };
+    },
+  } as unknown as AppState["jira"];
+
+  const broadcasts: string[] = [];
+  db.insertRepo(repo);
+  seedEpic(db);
+  db.replaceEpicTickets("epic-1", [
+    { epic_id: "epic-1", jira_key: "EX-101", title: "EX-101 Storage", description: "Add column", jira_url: "https://jira.example/browse/EX-101", jira_status: "To Do", jira_parent_key: "EX-100", suggested_repo_path: repoDir, updated_ms: start },
+    { epic_id: "epic-1", jira_key: "EX-102", title: "EX-102 API", description: "Expose field", jira_url: "https://jira.example/browse/EX-102", jira_status: "To Do", jira_parent_key: "EX-100", suggested_repo_path: repoDir, updated_ms: start },
+  ]);
+  db.replaceEpicLinks("epic-1", [{ task_key: "EX-102", blocked_by_key: "EX-101" }]);
+
+  const state = {
+    db, cfg, backend, jira,
+    capture: {} as AppState["capture"],
+    hub: { clients: new Set(), broadcast: (event: string) => { broadcasts.push(event); } },
+  } as unknown as AppState;
+  const server = createHttpServer(state);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const headers = { Authorization: "Bearer test-token", "Content-Type": "application/json" };
+
+  try {
+    // 1. Epic agent creates real Corral tasks for EX-101 and EX-102.
+    const t1 = await fetch(`${base}/api/epics/epic-1/tasks`, {
+      method: "POST", headers,
+      body: JSON.stringify({ title: "Storage", prompt: "Add column", repo_path: "app", favorite: "Careful", jira_key: "EX-101" }),
+    }).then((r) => r.json()) as { id: string };
+    const t2 = await fetch(`${base}/api/epics/epic-1/tasks`, {
+      method: "POST", headers,
+      body: JSON.stringify({ title: "API", prompt: "Expose field", repo_path: "app", favorite: "Careful", jira_key: "EX-102" }),
+    }).then((r) => r.json()) as { id: string };
+
+    // 2. EX-102 is blocked, so launching it returns 409; EX-101 is ready and launches with its saved agent.
+    const blockedLaunch = await fetch(`${base}/api/epics/epic-1/tasks/${t2.id}/launch`, { method: "POST", headers });
+    assert.equal(blockedLaunch.status, 409);
+
+    const launch1 = await fetch(`${base}/api/epics/epic-1/tasks/${t1.id}/launch`, { method: "POST", headers });
+    assert.equal(launch1.status, 200);
+    assert.equal(launches.length, 1);
+    assert.equal(launches[0].agent, "builder", "launch forwards the task's saved favorite agent");
+    assert.equal(launches[0].harness, "claude");
+    assert.equal(launches[0].model, "opus");
+    assert.equal(launches[0].reasoning, "high");
+    assert.equal(db.getTask(t1.id)!.status, "dispatched");
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(jiraTransitions, [{ key: "EX-101", to: "In Progress" }]);
+    assert.equal(db.getTask(t1.id)!.jira_status, "In Progress");
+
+    // 3. Marking EX-101 done via PATCH moves Corral status, advances Jira to Done, and unblocks EX-102.
+    const done1 = await fetch(`${base}/api/tasks/${t1.id}`, {
+      method: "PATCH", headers, body: JSON.stringify({ status: "done" }),
+    });
+    assert.equal(done1.status, 200);
+    assert.equal(db.getTask(t1.id)!.status, "done");
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(jiraTransitions, [
+      { key: "EX-101", to: "In Progress" },
+      { key: "EX-101", to: "Done" },
+    ]);
+    assert.equal(db.getTask(t1.id)!.jira_status, "Done");
+
+    const detailAfterDone = await fetch(`${base}/api/epics/epic-1`, { headers }).then((r) => r.json()) as {
+      views: { task: { id: string }; state: string }[];
+    };
+    assert.equal(detailAfterDone.views.find((v) => v.task.id === t1.id)?.state, "merged");
+    assert.equal(detailAfterDone.views.find((v) => v.task.id === t2.id)?.state, "ready");
+
+    // 4. Marking EX-102 done via POST /api/jira/tasks/:id/done updates cached jira_status and epic board.
+    const jiraDone2 = await fetch(`${base}/api/jira/tasks/${t2.id}/done`, { method: "POST", headers, body: "{}" });
+    assert.equal(jiraDone2.status, 200);
+    assert.equal(db.getTask(t2.id)!.jira_status, "Done");
+    const detailAfterJiraDone = await fetch(`${base}/api/epics/epic-1`, { headers }).then((r) => r.json()) as {
+      views: { task: { id: string }; state: string }[];
+    };
+    assert.equal(detailAfterJiraDone.views.find((v) => v.task.id === t2.id)?.state, "merged");
+
+    // 5. Non-Jira epic task is created and dispatched via POST /api/tasks/:id/dispatch.
+    const extra = await fetch(`${base}/api/epics/epic-1/tasks`, {
+      method: "POST", headers,
+      body: JSON.stringify({ title: "Discovered helper", prompt: "Add shared helper", repo_path: repoDir, target: "codex", agent: "frontend" }),
+    }).then((r) => r.json()) as { id: string };
+    const dispatchExtra = await fetch(`${base}/api/tasks/${extra.id}/dispatch`, { method: "POST", headers, body: "{}" });
+    assert.equal(dispatchExtra.status, 200);
+    assert.equal(db.getTask(extra.id)!.status, "dispatched");
+    assert.equal(launches[1].harness, "codex");
+    assert.equal(launches[1].agent, "frontend");
+    assert.ok(broadcasts.includes("epic.updated"));
   } finally {
     server.close();
     db.close();

@@ -28,6 +28,7 @@ They are required when a change makes or revisits such a decision.
 | [0017](0017-epic-autonomous-agent.md) | Proposed | Opted-in autonomous epic implementation agent modeled after KPI cycles |
 | [0018](0018-epic-agent-creates-tasks.md) | Proposed | Epic import stores Jira child tickets without creating tasks; the epic agent creates tasks in the right repo and agent |
 | [0019](0019-pr-risk-triage-observe-only.md) | Proposed | Observe-only risk triage for PR inbox items |
+| [0020](0020-epic-agent-operates-corral-tasks.md) | Proposed | Opted-in epic agent operates through real Corral tasks (create, launch/dispatch, instruct, PR check, status/Jira sync) like a human |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.

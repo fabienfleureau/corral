@@ -254,7 +254,8 @@ Without one it asks for both to be null.
 ## Epic autonomous implementation
 
 `epicAgentPrompt()` in `server/epic-agent.ts` wraps the epic's Jira title,
-design, synced Jira child tickets (`jiraTickets`), existing Corral epic tasks,
+design, synced Jira child tickets (`jiraTickets`), existing Corral epic tasks
+(including Corral `status`, Epic board `state` and `jiraStatus`),
 previous report and workspace memory file (`.corral/epic-<jira-key>-memory.md`)
 with `DATA_NOT_INSTRUCTIONS`, and supplies the registered repositories,
 configured favorites/harnesses, persistent operator `context` (standing
@@ -262,11 +263,17 @@ constraints and conventions saved across cycles), any one-time operator
 instruction for that cycle (not saved in settings; the agent is asked to address
 it directly and fold durable decisions or updated context into the workspace
 memory file),
-and the `POST /api/epics/:id/tasks` endpoint with bearer auth so the agent can
-create open Corral tasks in the right repository with the right agent without
-duplicating existing tasks. It instructs the agent to autonomously discover
-implementation steps, implement unblocked work or create scoped Corral tasks,
-report any problems, missing specifications/information and clarification
-requests without guessing, run E2E tests whenever possible (recording commands
-and gaps), update the durable workspace memory file, and end with one structured
-JSON report rendered on the Epic page.
+and the authenticated Corral task lifecycle endpoints (`POST /api/epics/:id/tasks`,
+`POST /api/epics/:id/tasks/:taskId/launch`, `POST /api/tasks/:id/dispatch`,
+`PATCH /api/tasks/:id`, `POST /api/tasks/:id/instruct`,
+`POST /api/tasks/:id/check-pr`, and `POST /api/epics/:id/sync`). It instructs
+the agent to autonomously discover implementation steps and drive unblocked epic
+work through real Corral tasks like a human — creating tasks in the right
+repository with the right agent without duplicating existing tasks, launching or
+dispatching ready tasks so Corral and Jira statuses move forward, instructing
+running tasks, refreshing PRs, and updating task statuses instead of silently
+implementing epic tasks outside Corral. It also instructs the agent to report
+any problems, missing specifications/information and clarification requests
+without guessing, run E2E tests whenever possible (recording commands and gaps),
+update the durable workspace memory file, and end with one structured JSON
+report rendered on the Epic page.
