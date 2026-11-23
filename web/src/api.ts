@@ -1,3 +1,4 @@
+import type { EpicAgentSettings, EpicAgentView } from "../../shared/epic-agent";
 import type { KpiArtifactRequest } from "../../shared/kpi-artifact";
 import type { KpiId, KpiSettings, KpiView } from "../../shared/kpis";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
@@ -236,6 +237,9 @@ export const api = {
   createEpicRequest: (id: string, input: { request: string; favorite_name: string; repo_path: string; kind?: "code" | "ops" }): Promise<Task> =>
     post(`/api/epics/${id}/requests`, input),
   getEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await get(`/api/epics/${id}`), "GET", `/api/epics/${id}`),
+  getEpicAgent: (id: string): Promise<EpicAgentView> => get(`/api/epics/${id}/agent`),
+  configureEpicAgent: (id: string, settings: EpicAgentSettings): Promise<EpicAgentView> => put(`/api/epics/${id}/agent`, settings),
+  runEpicAgent: (id: string): Promise<EpicAgentView> => post(`/api/epics/${id}/agent/run`),
   importEpic: async (key: string): Promise<EpicDetail> => checkEpicDetail(await post("/api/epics", { key }), "POST", "/api/epics"),
   syncEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await post(`/api/epics/${id}/sync`), "POST", `/api/epics/${id}/sync`),
   launchEpicTask: (epicId: string, taskId: string): Promise<DispatchResult> =>

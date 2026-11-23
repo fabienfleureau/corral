@@ -79,6 +79,7 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   Its prompt starts with the epic's Jira ticket, summary and link, so the task keeps
   that context when you edit or dispatch it later.
   A Jira ticket marked **Killed** is cancelled, not merged: a resync hides it from the Epics page, removes it from the summary and no longer lets it block other tickets. A task whose prerequisite was killed keeps a note on the epic.
+  Each epic also has an optional **Autonomous implementation agent** (configured with a working directory, favorite, optional hourly/daily cadence, and answers/guidance — mirroring KPI monitoring). When run, it discovers implementation steps autonomously, implements unblocked work, runs E2E tests when possible, reports problems, missing specs/information and clarification requests on the Epic page, and keeps durable memory in `.corral/epic-<key>-memory.md`.
   A ticket's `Préconditions` are checked by the agent before it starts. The epic's
   **design** is versioned: publishing a revision writes the current version into the
   Jira epic, marks started tasks **impacted**, and an assistant proposes an

@@ -42,6 +42,7 @@ test("prompts doc: the inline prompt builders are documented", () => {
     ["dailySummaryPrompt", "server/daily-summary.ts"],
     ["ImprovementAnalysis", "server/improvement.ts"],
     ["SkillsAnalysis", "server/skills-analysis.ts"],
+    ["epicAgentPrompt", "server/epic-agent.ts"],
   ];
   for (const [name, file] of builders) {
     assert.ok(readFileSync(join(root, file), "utf8").includes(name), `${file} no longer contains ${name} — update docs/prompts.md`);

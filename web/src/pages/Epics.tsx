@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { EpicAgentPanel } from "../EpicAgentPanel";
 import { favoritesFor, repoContext } from "../favorite-context";
 import type { Epic, EpicDetail, EpicSummary, EpicTaskState, EpicTaskView, Favorite, Repo, Task } from "../types";
 import { Spinner } from "../ui";
@@ -77,8 +78,10 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
     let cancelled = false;
-    api.getEpic(selectedId).then((d) => { if (!cancelled) setDetail(d); }).catch((e) => { if (!cancelled) setError(errText(e)); });
-    return () => { cancelled = true; };
+    const load = () => api.getEpic(selectedId).then((d) => { if (!cancelled) setDetail(d); }).catch((e) => { if (!cancelled) setError(errText(e)); });
+    void load();
+    const timer = window.setInterval(() => void load(), 10_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [selectedId, eventVersion]);
 
   // A different epic brings its own saved favorite and working directory.
@@ -194,6 +197,18 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
           <label className="epic-summary" htmlFor="epic-progress">{summaryText(detail.summary)}</label>
           <progress id="epic-progress" className="epic-progress" value={detail.summary.merged} max={Math.max(detail.summary.total, 1)} />
           {detail.epic.error ? <p className="inline-error" role="alert">{detail.epic.error}. Nothing in the cycle can be launched.</p> : null}
+          {detail.agent ? (
+            <EpicAgentPanel
+              epicKey={detail.epic.jira_key}
+              view={detail.agent}
+              repos={repos}
+              favorites={favorites}
+              onUpdate={(agent) => {
+                setDetail((previous) => (previous && previous.epic.id === agent.epicId ? { ...previous, agent } : previous));
+                refresh();
+              }}
+            />
+          ) : null}
           <p className="muted">Ready tasks wait here until you launch them. Nothing is added to the inbox on its own.</p>
           <section className="epic-request" aria-labelledby="epic-request-title">
             <h3 id="epic-request-title">Ask about this epic</h3>

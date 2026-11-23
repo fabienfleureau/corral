@@ -159,6 +159,50 @@ export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
   };
   db.insertItem(amendmentItem);
   db.insertAmendment({ id: "sample-amendment", epic_id: "sample-epic", task_id: "sample-epic-EX-104", design_version: 2, body: amendmentItem.body, status: "proposed", item_id: amendmentItem.id, created_ms: now });
+  const agentSettings = {
+    repoPath: "/sample/example-project",
+    favorite: "Careful review",
+    intervalHours: 24,
+    context: "Use millimetres everywhere; keep legacy size labels read-only during migration.",
+  };
+  const agentReport = {
+    summary: "Implemented the widget storage layer and verified the API + storage flow end-to-end.\n\n- **2 of 4** discovered steps are complete\n- Waiting on a clarification before updating the console form",
+    steps: [
+      { title: "Add numeric size field to widget API", status: "done", details: "Merged on `feat/widget-size-api` with schema validation.", ticketKey: "EX-101" },
+      { title: "Persist widget sizes in SQLite and update read endpoints", status: "done", details: "Implemented migration and unit tests on `feat/widget-size-store`.", ticketKey: "EX-102" },
+      { title: "Render size input and millimetre formatting in the console", status: "blocked", details: "Blocked on clarification about decimal precision in the UI.", ticketKey: "EX-103" },
+      { title: "Update API documentation and migration examples", status: "pending", details: "Queued once console formatting is settled.", ticketKey: "EX-104" },
+    ],
+    actionsTaken: [
+      "Added `size_mm` column migration and storage tests in `example-project`.",
+      "Updated `POST /v1/widgets` and `GET /v1/widgets` serializers to return `size_mm`.",
+    ],
+    problems: [
+      "`side-project` console build failed on an unrelated Node 20 lockfile check; needs lockfile refresh before UI PR.",
+    ],
+    specGaps: [
+      "Design v2 specifies millimetres but does not define minimum/maximum allowed values or rounding rules.",
+    ],
+    clarifications: [
+      "Should the console accept decimal millimetres (e.g. `12.5 mm`) or whole integers only?",
+    ],
+    e2e: {
+      status: "passed",
+      summary: "Verified widget creation, persistence and retrieval with `size_mm` against a local fixture server.",
+      commands: ["npm test -- server/test/widgets-e2e.test.ts"],
+      gaps: ["Console UI E2E not yet run because `EX-103` is waiting on decimal-precision clarification."],
+    },
+    nextSteps: [
+      "Implement `EX-103` console input once decimal precision is confirmed.",
+      "Run full browser E2E across API and console.",
+    ],
+    memory: "API and storage use integer/float `size_mm`.\n\n- Console repo lives at `/sample/side-project`\n- Run `npm test -- server/test/widgets-e2e.test.ts` for API E2E",
+  };
+  db.raw.prepare(`INSERT OR REPLACE INTO epic_agents
+    (epic_id, settings, run_state, report, report_ms, finished_ms)
+    VALUES (?, ?, 'complete', ?, ?, ?)`).run(
+    "sample-epic", JSON.stringify(agentSettings), JSON.stringify(agentReport), now, now,
+  );
 }
 
 export function seedMultiRepo(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
