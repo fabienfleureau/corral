@@ -117,14 +117,16 @@ test("SidebarQuotas renders concentric progress rings and provider marks", async
       { label: "Weekly", used_percent: 5, resets_ms: null },
     ]),
     quota("codex", [{ label: "5-hour", used_percent: 75, resets_ms: null }]),
+    quota("google", [{ label: "5-hour", used_percent: 100, resets_ms: null }]),
   ]);
   assert.match(html, /class="sidebar-quotas"/);
-  assert.match(html, /quota-ring-outer quota-ring-ok/);
-  assert.match(html, /quota-ring-inner quota-ring-ok/);
-  assert.match(html, /quota-ring-outer quota-ring-warn/);
-  assert.match(html, /value="75"/);
-  assert.match(html, /value="95"/);
-  assert.match(html, /value="25"/);
+  assert.match(html, /class="quota-rings-svg"/);
+  assert.match(html, /quota-ring-outer quota-ring-ok" data-remaining="75"/);
+  assert.match(html, /quota-ring-inner quota-ring-ok" data-remaining="95"/);
+  assert.match(html, /quota-ring-outer quota-ring-warn" data-remaining="25"/);
+  assert.match(html, /quota-ring-outer quota-ring-hot" data-remaining="0"/);
+  assert.match(html, /stroke-linecap="round"/);
+  assert.match(html, /quota-ring-arc quota-ring-empty/);
 });
 
 test("GET /api/usage/quota scans Codex session logs on first call", async () => {

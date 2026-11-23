@@ -310,20 +310,14 @@ button {
 
 /* Sidebar quota rings sit above the live status footer. When present, they
    claim the vertical spacer so the footer stays pinned directly beneath them. */
-@property --value {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 0;
-}
-
 .sidebar-quotas {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   margin-top: auto;
-  padding: 12px 4px 8px;
+  padding: 12px 0 8px;
   border-top: 1px solid var(--border);
 }
 
@@ -357,94 +351,79 @@ button {
 }
 
 .sidebar-quota-stale {
-  opacity: 0.65;
+  opacity: 0.6;
 }
 
 .sidebar-quota-rings {
   position: relative;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
 }
 
-progress.quota-ring {
+.quota-rings-svg {
   grid-area: 1 / 1;
-  appearance: none;
-  -webkit-appearance: none;
-  --size: 36px;
-  --thickness: 3px;
-  --track-color: var(--chip-bg);
-  --fill-color: var(--sig-green);
-  width: var(--size);
-  height: var(--size);
-  border-radius: 50%;
-  background: conic-gradient(
-    var(--fill-color) calc(var(--value) * 1%),
-    var(--track-color) 0
-  );
-  background-clip: border-area;
-  border: var(--thickness) solid transparent;
-  background-origin: border-box;
+  width: 38px;
+  height: 38px;
+  display: block;
+  overflow: visible;
   pointer-events: none;
-  transition: --value 0s ease-in-out;
+}
+
+.quota-ring {
+  --ring-color: var(--sig-green);
+}
+
+.quota-ring-warn {
+  --ring-color: var(--sig-orange);
+}
+
+.quota-ring-hot {
+  --ring-color: var(--sig-red);
+}
+
+.quota-ring-track {
+  stroke: color-mix(in srgb, var(--ring-color) 16%, var(--chip-bg));
+}
+
+.quota-ring-hot .quota-ring-track {
+  stroke: color-mix(in srgb, var(--ring-color) 24%, var(--chip-bg));
+}
+
+.quota-ring-arc {
+  stroke: var(--ring-color);
+  transition: stroke-dashoffset 0s cubic-bezier(0.23, 1, 0.32, 1), opacity 150ms ease;
+}
+
+.quota-ring-inner .quota-ring-arc {
+  opacity: 0.72;
+}
+
+.quota-ring-inner .quota-ring-track {
+  stroke: color-mix(in srgb, var(--ring-color) 12%, var(--chip-bg));
+}
+
+.quota-ring-arc.quota-ring-empty {
+  opacity: 0;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  progress.quota-ring {
-    transition-duration: 0.35s;
-  }
-}
-
-@supports not (background-clip: border-area) {
-  progress.quota-ring {
-    border: 0;
-    mask-image: radial-gradient(
-      transparent calc(50% - var(--thickness)),
-      black calc(50% - var(--thickness) + 0.5px)
-    );
+  .quota-ring-arc {
+    transition-duration: 0.35s, 150ms;
   }
 }
 
 @media (forced-colors: active) {
-  progress.quota-ring {
+  .quota-rings-svg {
     forced-color-adjust: none;
-    --fill-color: CanvasText;
-    --track-color: Canvas;
   }
-}
-
-progress.quota-ring::-webkit-progress-bar {
-  display: none;
-  background: none;
-}
-
-progress.quota-ring::-webkit-progress-value {
-  display: none;
-  background: none;
-}
-
-progress.quota-ring::-moz-progress-bar {
-  display: none;
-  background: none;
-}
-
-progress.quota-ring::slider-fill {
-  display: none;
-  background: none;
-}
-
-progress.quota-ring-inner {
-  --size: 27px;
-  --thickness: 3px;
-}
-
-progress.quota-ring-warn {
-  --fill-color: var(--sig-orange);
-}
-
-progress.quota-ring-hot {
-  --fill-color: var(--sig-red);
+  .quota-ring {
+    --ring-color: CanvasText;
+  }
+  .quota-ring-track {
+    stroke: GrayText;
+  }
 }
 
 .sidebar-quota-icon {
@@ -452,14 +431,14 @@ progress.quota-ring-hot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   pointer-events: none;
 }
 
 .sidebar-quota-mark {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   display: block;
 }
 
@@ -562,6 +541,7 @@ progress.quota-ring-hot {
 
 .sidebar-quota-tooltip-fill {
   height: 100%;
+  border-radius: 999px;
   background: var(--sig-green);
 }
 
