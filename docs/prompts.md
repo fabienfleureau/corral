@@ -95,9 +95,10 @@ What each one is for:
   Read-only: it never edits, commits or pushes. The text is hashed into the name
   of the registered omnigent agent, so editing it registers a new agent at the next
   dispatch instead of running the old one; the old agent stays in the registry.
-- **`review.md`** — reviewing someone else's PR/MR: read-only, post **drafts**
-  only (`glab .../draft_notes`, one pending GitHub review), ask the human which
-  comments to publish, then publish or delete the rest.
+- **`review.md`** — reviewing someone else's PR/MR on any harness: read-only,
+  follow `fabien-reviewer` by name or from its skill file when the harness does
+  not list it, post **drafts** only (`glab .../draft_notes`, one pending GitHub
+  review), ask the human which comments to publish, then publish or delete the rest.
 - **`spec.md`** — multi-repo step one: read-only in a folder of sub-projects,
   write the contract between them (owner and consumers of every interface), one
   self-contained sub-task per touched repo and the delivery order, then POST

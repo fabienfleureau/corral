@@ -14,7 +14,7 @@ import { usePeakNow } from "../use-peak-now";
 import type { HarnessModels, ModelFactsReport, ModelSelection } from "../model-indicators";
 import { favoritesFor, repoContext } from "../favorite-context";
 import { reviewerBlocked, reviewerOptionLabel } from "../reviewers";
-import { errText, formatTs, isPrUrl, prLabel, REVIEW_HARNESS, timeAgo } from "../util";
+import { errText, formatTs, isPrUrl, prLabel, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 import { batchImportItems } from "../jira-import";
 import type { ImportSettings } from "../jira-import";
@@ -316,7 +316,7 @@ function TaskRow({
   // Reviews, specs and interviews have no editable worktree or base branch.
   // A docs interview may still get a worktree at dispatch when its folder is a git repo.
   const inPlace = review || spec || task.kind === "grill" || task.kind === "grill-docs";
-  const rowTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
+  const rowTargets = targets;
   const selectedTarget = rowTargets.includes(target) ? target : rowTargets[0] ?? "";
 
   const dispatch = async () => {
@@ -492,7 +492,7 @@ function TaskRow({
             <label className="field-inline">
               <span>Harness</span>
               <select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setAgent(""); setModel(e.target.value === task.target ? task.model ?? "" : ""); setReasoning(e.target.value === task.target ? task.reasoning ?? "" : ""); }}>
-                {rowTargets.length === 0 ? <option value="">{review ? "Claude harness unavailable" : "No configured harnesses"}</option> : null}
+                {rowTargets.length === 0 ? <option value="">No configured harnesses</option> : null}
                 {rowTargets.map((t) => (
                   <option key={t} value={t}>
                     {harnessLabel(t, quotas)}
@@ -770,7 +770,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const formContext = repoContext(repos, workingPath);
   const shownFavorites = favoritesFor(favorites, formContext);
   const folderPath = specFolder ?? lastSpecFolder(tasks);
-  const formTargets = review ? targets.filter((t) => t === REVIEW_HARNESS) : targets;
+  const formTargets = targets;
   const selectedTarget = formTargets.includes(target) ? target : formTargets[0] ?? "";
   const prUrlValid = isPrUrl(prUrl);
   const hasContent = review ? prUrlValid : !!prompt.trim();
@@ -851,7 +851,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           </label>
           {prUrl.trim() && !prUrlValid ? <div className="inline-error">Paste a GitHub pull request or GitLab merge request URL.</div> : null}
           {prUrlValid && repoMatch && !manualRepo ? <p className="inline-ok" role="status">Repo detected from URL: {repoMatch.name} ({repoMatch.via === "remote" ? "git remote" : "name"})</p> : null}
-          <p className="muted form-hint">The agent reviews with the fabien-reviewer skill and posts comments as drafts. Nothing is published until you approve the list in the inbox. No branch, no code changes.</p>
+          <p className="muted form-hint">The agent reviews with the fabien-reviewer skill on any configured harness and posts comments as drafts. Nothing is published until you approve the list in the inbox. No branch, no code changes.</p>
         </>
       ) : null}
       {grill ? (
@@ -933,7 +933,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
       ))}</div></div> : null}
       <div className="field-row">
         <label className="field"><span>Harness</span><select value={selectedTarget} onChange={(e) => { setTarget(e.target.value); setAgent(""); }}>
-          {formTargets.length === 0 ? <option value="">{review ? "Claude harness unavailable" : "No configured harnesses"}</option> : null}
+          {formTargets.length === 0 ? <option value="">No configured harnesses</option> : null}
           {formTargets.map((t) => <option key={t} value={t}>{harnessLabel(t, quotas)}</option>)}
         </select></label>
         <label className="field"><span>Agent</span><select value={agent} onChange={(e) => setAgent(e.target.value)}>

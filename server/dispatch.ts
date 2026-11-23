@@ -280,10 +280,7 @@ export async function dispatchTask(
   const docsInRepo = grillDocs && isGit();
 
   const review = task.kind === "review";
-  if (review) {
-    if (target !== "claude") throw new Error("review tasks run on the claude harness only");
-    if (!task.pr_url) throw new Error("review task has no PR/MR URL");
-  }
+  if (review && !task.pr_url) throw new Error("review task has no PR/MR URL");
   // A review reads the MR head without checking it out: no worktree, no branch.
   // A spec, analysis or ops task uses a folder as context and never creates one.
   const noBranch = review || spec || analysis || ops || grill || (grillDocs && !docsInRepo);

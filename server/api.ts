@@ -668,7 +668,6 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     };
     const target = b.target ?? task.target;
     if (!target) return json(res, 400, { error: "target required (claude|codex|opencode)" });
-    if (task.kind === "review" && target !== "claude") return json(res, 400, { error: "review tasks run on the claude harness only" });
     if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — assign one before dispatching" });
     const agent = b.agent === undefined ? task.agent ?? null : b.agent;
     // A delegate reviewer needs the claude harness and no explicit agent: say so
