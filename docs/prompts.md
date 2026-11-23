@@ -12,6 +12,7 @@ Prompt families:
 | **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts` | the `assistant` command | when the human clicks Summarize, or a digest runs |
 | **KPI analysis** | `kpiPrompt()` in `server/kpi.ts` | the Omnigent agent from the selected favorite | every manual or scheduled KPI cycle |
 | **KPI status artifacts** | `kpiArtifactPrompt()` in `server/kpi-artifact.ts` | a Claude `ops` task from a configured favorite | when the human builds an artifact from the KPI page |
+| **Epic autonomous agent** | `epicAgentPrompt()` in `server/epic-agent.ts` | the Omnigent agent from the epic's selected favorite | every manual or scheduled epic implementation cycle |
 | **Agent control tools** | `server/agent-control.ts` | a voice or chat agent using the MCP endpoint | at MCP `initialize` and `tools/list` |
 
 ### Untrusted text: data, not instructions
@@ -238,3 +239,15 @@ It always carries the last 20 sourced measurements. With a goal, the prompt
 adds the target, deadline and Corral's computed gap and progress, and asks for a `trajectory` verdict
 (on track or not, with confidence) and a `goalReview` of the goal itself.
 Without one it asks for both to be null.
+
+## Epic autonomous implementation
+
+`epicAgentPrompt()` in `server/epic-agent.ts` wraps the epic's Jira title,
+design, tickets, blockers, repository list, previous report and workspace memory
+file (`.corral/epic-<jira-key>-memory.md`) with `DATA_NOT_INSTRUCTIONS`, and
+carries the operator's `context` (answers and constraints). It instructs the
+agent to autonomously discover implementation steps, implement unblocked work,
+report any problems, missing specifications/information and clarification
+requests without guessing, run E2E tests whenever possible (recording commands
+and gaps), update the durable workspace memory file, and end with one structured
+JSON report rendered on the Epic page.

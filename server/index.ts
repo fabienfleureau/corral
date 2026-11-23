@@ -13,6 +13,7 @@ import { SessionFacts } from "./session-facts.ts";
 import type { ServerResponse } from "node:http";
 import { DEFAULT_PRICES, UsageScanner, defaultSources } from "./usage.ts";
 import { KpiMonitor } from "./kpi.ts";
+import { EpicAgentRunner } from "./epic-agent.ts";
 import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
@@ -60,10 +61,21 @@ const skills = new SkillsAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt, 
 const engineeringSkills = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt), { agent: analysisAgent, mode: "engineering-skills" });
 const sessionFacts = new SessionFacts(backend);
 const kpis = new KpiMonitor(db, backend, { favorites: () => cfg.favorites ?? [], repos: () => db.listRepos() });
-const state: AppState = { kpis, db, cfg, backend, capture, jira, hub, usage, improvement, skills, engineeringSkills, sessionFacts };
+const epicAgents = new EpicAgentRunner(db, backend, {
+  favorites: () => cfg.favorites ?? [],
+  repos: () => db.listRepos(),
+  onUpdate: (epicId) => {
+    const epic = db.getEpic(epicId);
+    if (epic) hub.broadcast("epic.updated", epic);
+  },
+});
+const state: AppState = { kpis, epicAgents, db, cfg, backend, capture, jira, hub, usage, improvement, skills, engineeringSkills, sessionFacts };
 const tickKpis = () => void kpis.tick().catch((err) => console.error("corral: KPI poll failed", err));
 setTimeout(tickKpis, 5_000);
 setInterval(tickKpis, 30_000);
+const tickEpicAgents = () => void epicAgents.tick().catch((err) => console.error("corral: epic agent poll failed", err));
+setTimeout(tickEpicAgents, 7_000);
+setInterval(tickEpicAgents, 30_000);
 setTimeout(() => void improvement.runIfDue().catch(() => undefined), 10_000);
 setInterval(() => void improvement.runIfDue().catch(() => undefined), 60_000);
 setTimeout(() => void skills.runIfDue().catch(() => undefined), 20_000);

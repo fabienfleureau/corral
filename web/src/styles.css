@@ -3544,6 +3544,22 @@ select:focus {
 .epic-proposal h4 { margin: 0; }
 .epic-proposal p { white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* Autonomous epic agent */
+.epic-agent-section { margin-block: 1.25rem 1.5rem; }
+.epic-agent-head { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; flex-wrap: wrap; margin-block-end: .75rem; }
+.epic-agent-head h3 { margin: 0; }
+.epic-agent-main { display: flex; flex-direction: column; gap: 12px; }
+.epic-agent-overview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.epic-agent-overview-head .panel-title { margin: 0; }
+.epic-agent-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.epic-agent-steps { margin: 0; padding-inline-start: 1.25rem; display: flex; flex-direction: column; gap: 10px; }
+.epic-agent-step { min-inline-size: 0; }
+.epic-agent-step-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-block-end: 2px; }
+.epic-agent-findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
+.epic-agent-commands { margin: 6px 0 0; padding-inline-start: 1.1rem; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.epic-agent-commands code { overflow-wrap: anywhere; }
+.epic-agent-e2e-gaps { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+
 /* KPI monitoring */
 .kpi-page { overflow-wrap: anywhere; }
 .kpi-tabs {

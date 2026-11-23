@@ -150,6 +150,18 @@ CREATE TABLE IF NOT EXISTS epic_amendments (
   created_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_epic_amendments_epic ON epic_amendments(epic_id, status);
+CREATE TABLE IF NOT EXISTS epic_agents (
+  epic_id TEXT PRIMARY KEY,
+  settings TEXT NOT NULL,
+  run_name TEXT,
+  run_state TEXT,
+  address TEXT,
+  started_ms INTEGER,
+  finished_ms INTEGER,
+  error TEXT,
+  report TEXT,
+  report_ms INTEGER
+);
 
 -- Files dropped on a task's prompt. The bytes wait here until dispatch hands
 -- them to the worker backend (see attachments.ts).

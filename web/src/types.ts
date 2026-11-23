@@ -297,6 +297,8 @@ export type PlatformRateLimit = {
 export interface PrAdditionsGroup { key: string; additions: number; available: number; total: number }
 
 
+import type { EpicAgentRunState, EpicAgentView } from "../../shared/epic-agent.ts";
+
 export type EpicTaskState = "out" | "killed" | "merged" | "pr_ready" | "pr_open" | "running" | "ready" | "blocked";
 
 export type EpicSummary = { total: number; merged: number; testable: number; ready: number; blocked: number };
@@ -310,6 +312,8 @@ export type Epic = {
   /** Favorite and working directory saved for requests on this epic. */
   favorite_name?: string | null;
   repo_path?: string | null;
+  /** Autonomous epic agent run state when configured. */
+  agent_state?: EpicAgentRunState | null;
   synced_ms: number;
   created_ms: number;
 };
@@ -339,6 +343,8 @@ export type EpicDetail = {
   design_versions: number;
   /** Proposed amendments waiting in the inbox. */
   amendments: { id: string; task_id: string; design_version: number; body: string }[];
+  /** Autonomous epic implementation agent state and latest report. */
+  agent?: EpicAgentView | null;
 };
 
 export type PlanSubtask = {

@@ -1,0 +1,9 @@
+# Autonomous epic implementation agent
+
+Status: Proposed
+
+The Epic page now supports an opted-in, per-epic autonomous Omnigent agent modeled after KPI monitoring ([ADR 0005](0005-kpi-scheduling-and-memory.md), [ADR 0007](0007-kpi-favorite-and-working-directory.md), [ADR 0008](0008-kpi-memory-file.md)). Each epic can configure a working directory, a favorite (supplying harness, agent, model and reasoning), an optional automatic cadence (Off, Hourly, Daily), and operator answers/guidance, and launch cycles manually with **Run now**.
+
+Each cycle starts a fresh Omnigent session through `WorkerBackend` in the chosen working directory (`git: null`), carrying the epic's Jira context, design, tickets and blockers framed as untrusted data (`DATA_NOT_INSTRUCTIONS`), the previous report, and a durable workspace note at `.corral/epic-<jira-key>-memory.md`. The agent autonomously discovers implementation steps, implements unblocked work, runs E2E tests when possible, and returns a structured JSON report covering discovered steps, actions taken, problems/blockers, missing specs/information, clarification requests, E2E verification, next steps and durable memory. Corral stores the settings, cycle state and latest validated report in SQLite (`epic_agents`).
+
+The alternative was auto-launching individual Jira board tasks on sync, which would violate [ADR 0002](0002-epic-tasks-start-from-epic-page.md) and assume every epic is already broken down into complete, self-contained tickets. A dedicated opted-in epic agent preserves manual board launches for individual tickets while supporting autonomous step discovery, implementation, E2E verification and explicit gap/clarification reporting across an epic. The trade-off is that the autonomous agent works directly in the configured folder rather than an isolated worktree per ticket, and relies on operator opt-in and answers in the Epic page to resolve ambiguities.

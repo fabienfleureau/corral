@@ -14,6 +14,7 @@ import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.
 import { resumeSnoozedItems, type CaptureEngine, type Hub } from "./capture.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncEpic } from "./epic.ts";
+import { EpicAgentRunner } from "./epic-agent.ts";
 import { createEpicRequestTask, EpicRequestError, saveEpicRequestSettings, type EpicRequestSettings } from "./epic-request.ts";
 import { orchestrationPrompt } from "./epic-orchestration.ts";
 import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "./epic-graph.ts";
@@ -73,6 +74,7 @@ export interface AppState {
   skills?: SkillsAnalysis;
   engineeringSkills?: ImprovementAnalysis;
   kpis?: KpiMonitor;
+  epicAgents?: EpicAgentRunner;
   usage?: UsageScanner;
   /** Cached OpenCode Go quota snapshot (external HTTPS call, polled by the UI). */
   goQuota?: GoQuotaCache;
@@ -1006,6 +1008,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
   });
 
+  const epicAgents = state.epicAgents ??= new EpicAgentRunner(state.db, state.backend, {
+    favorites: () => state.cfg.favorites ?? [],
+    repos: () => state.db.listRepos(),
+    onUpdate: (epicId) => {
+      const epic = state.db.getEpic(epicId);
+      if (epic) state.hub.broadcast("epic.updated", epic);
+    },
+  });
+
   // ---- epics ----
   const epicDetail = (id: string) => {
     const epic = state.db.getEpic(id);
@@ -1018,6 +1029,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       epic, tasks, links, views, summary: epicSummary(views),
       design: state.db.latestDesign(id), design_versions: state.db.listDesigns(id).length,
       amendments: state.db.listAmendments(id, "proposed"),
+      agent: epicAgents.view(id),
     };
   };
 
@@ -1026,6 +1038,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     json(res, 200, state.db.listEpics().map((epic) => ({
       ...epic,
       summary: epicSummary(epicViews(state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), items)),
+      agent_state: epicAgents.view(epic.id)?.runState ?? null,
     })));
   });
 
@@ -1033,6 +1046,24 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const detail = epicDetail(params.id);
     if (!detail) return json(res, 404, { error: "epic not found" });
     json(res, 200, detail);
+  });
+
+  on("GET", "/api/epics/:id/agent", (_req, res, { params }) => {
+    const view = epicAgents.view(params.id);
+    if (!view) return json(res, 404, { error: "epic not found" });
+    json(res, 200, view);
+  });
+
+  on("PUT", "/api/epics/:id/agent", (_req, res, { params, body }) => {
+    if (!state.db.getEpic(params.id)) return json(res, 404, { error: "epic not found" });
+    try { json(res, 200, epicAgents.configure(params.id, body)); }
+    catch (err) { json(res, 400, { error: (err as Error).message }); }
+  });
+
+  on("POST", "/api/epics/:id/agent/run", (_req, res, { params }) => {
+    if (!state.db.getEpic(params.id)) return json(res, 404, { error: "epic not found" });
+    try { json(res, 202, epicAgents.runNow(params.id)); }
+    catch (err) { json(res, 409, { error: (err as Error).message }); }
   });
 
   const epicRequestSettings = (body: unknown): EpicRequestSettings => {
