@@ -26,6 +26,10 @@
   --sig-orange: #8f5f00;
   --sig-red: #c13030;
   --sig-blue: #2f5fb8;
+  /* Quota tiers: green → yellow → orange → red. --sig-orange reads as amber, too close to yellow. */
+  --tier-yellow: #a07d00;
+  --tier-orange: #c4520a;
+  --tier-yellow-ink: #7a5f00;
   --brand-tile: linear-gradient(160deg, #4a63d6, #3549b4);
   --brand-ink: #ffffff;
   --brand-latch: #ffc857;
@@ -61,6 +65,9 @@
     --sig-orange: #e5a634;
     --sig-red: #ff7b72;
     --sig-blue: #79b8ff;
+    --tier-yellow: #e3c341;
+    --tier-orange: #f0883e;
+    --tier-yellow-ink: #e3c341;
     --brand-tile: linear-gradient(160deg, #3c4f79, #26334f);
     --brand-ink: #f2f6fc;
     --brand-latch: #ffc857;
@@ -93,6 +100,9 @@
   --sig-orange: #e5a634;
   --sig-red: #ff7b72;
   --sig-blue: #79b8ff;
+  --tier-yellow: #e3c341;
+  --tier-orange: #f0883e;
+  --tier-yellow-ink: #e3c341;
   --brand-tile: linear-gradient(160deg, #3c4f79, #26334f);
   --brand-ink: #f2f6fc;
   --brand-latch: #ffc857;
@@ -375,8 +385,12 @@ button {
   --ring-color: var(--sig-green);
 }
 
+.quota-ring-caution {
+  --ring-color: var(--tier-yellow);
+}
+
 .quota-ring-warn {
-  --ring-color: var(--sig-orange);
+  --ring-color: var(--tier-orange);
 }
 
 .quota-ring-hot {
@@ -406,6 +420,13 @@ button {
 
 .quota-ring-arc.quota-ring-empty {
   opacity: 0;
+}
+
+/* A spent window has no arc left: a full-color dashed track keeps it visibly
+   red, and the dashes tell it apart from a full ring without color. */
+.quota-ring-exhausted .quota-ring-track {
+  stroke: var(--ring-color);
+  stroke-dasharray: 2.4 2.4;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -524,8 +545,13 @@ button {
   color: var(--sig-green);
 }
 
+.sidebar-quota-pct-caution {
+  /* Text needs 4.5:1; the graphic yellow is too light on the light theme. */
+  color: var(--tier-yellow-ink);
+}
+
 .sidebar-quota-pct-warn {
-  color: var(--sig-orange);
+  color: var(--tier-orange);
 }
 
 .sidebar-quota-pct-hot {
@@ -545,8 +571,12 @@ button {
   background: var(--sig-green);
 }
 
+.sidebar-quota-fill-caution {
+  background: var(--tier-yellow);
+}
+
 .sidebar-quota-fill-warn {
-  background: var(--sig-orange);
+  background: var(--tier-orange);
 }
 
 .sidebar-quota-fill-hot {
@@ -2814,8 +2844,11 @@ select:focus {
   height: 100%;
   background: var(--accent);
 }
-.usage-bar-warm {
-  background: var(--warn-ink);
+.usage-bar-caution {
+  background: var(--tier-yellow);
+}
+.usage-bar-warn {
+  background: var(--tier-orange);
 }
 .usage-bar-hot {
   background: var(--danger-ink);

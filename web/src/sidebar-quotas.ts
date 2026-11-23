@@ -16,7 +16,7 @@ export const QUOTA_AGENT_LABELS: Record<AgentQuota["agent"], string> = {
   google: "Google",
 };
 
-export type QuotaRingTone = "ok" | "warn" | "hot";
+export type QuotaRingTone = "ok" | "caution" | "warn" | "hot";
 
 export type SidebarQuotaRing = {
   label: string;
@@ -31,7 +31,8 @@ export type SidebarQuotaGauge = {
   label: string;
   plan: string | null;
   stale: boolean;
-  /** Up to 2 rings rendered concentrically: [outer] or [outer, inner]. */
+  /** Up to 2 rings rendered concentrically: [outer] or [outer, inner]. The two
+   *  most-used windows, so a spent third window (OpenCode Go monthly) still shows. */
   rings: SidebarQuotaRing[];
   /** Every window returned by the provider, for tooltip details. */
   windows: SidebarQuotaRing[];
@@ -51,7 +52,8 @@ export function remainingPercent(usedPercent: number): number {
 export function quotaTone(usedPercent: number): QuotaRingTone {
   const used = clampPercent(usedPercent);
   if (used >= 90) return "hot";
-  if (used >= 70) return "warn";
+  if (used >= 75) return "warn";
+  if (used >= 50) return "caution";
   return "ok";
 }
 
@@ -63,6 +65,18 @@ export function formatResetIn(ms: number | null, now = Date.now()): string {
   if (hours >= 48) return `resets in ${Math.round(hours / 24)}d`;
   if (hours >= 1) return `resets in ${hours}h ${Math.floor((diff % 3_600_000) / 60_000)}m`;
   return `resets in ${Math.ceil(diff / 60_000)}m`;
+}
+
+/** The `count` most-used windows, kept in provider order. Ties keep the earlier window. */
+function mostUsed(windows: SidebarQuotaRing[], count: number): SidebarQuotaRing[] {
+  const keep = new Set(
+    windows
+      .map((w, i) => ({ w, i }))
+      .sort((a, b) => b.w.usedPercent - a.w.usedPercent || a.i - b.i)
+      .slice(0, count)
+      .map(({ w }) => w),
+  );
+  return windows.filter((w) => keep.has(w));
 }
 
 /** Convert raw quota snapshots into sidebar gauges, keeping only providers with data. */
@@ -88,7 +102,7 @@ export function buildSidebarQuotaGauges(quotas: AgentQuota[] | null | undefined)
       label: QUOTA_AGENT_LABELS[agent],
       plan: q.plan,
       stale: q.stale,
-      rings: windows.slice(0, 2),
+      rings: mostUsed(windows, 2),
       windows,
       asOfMs: q.as_of_ms,
       note: q.note,

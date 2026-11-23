@@ -7,6 +7,7 @@ import { api } from "../api";
 import type { AgentQuota, PlatformRateLimit, RateLimitWindow, UsageAgent, UsageRange, UsageReport, UsageTotals } from "../types";
 import { errText, formatTs, timeAgo } from "../util";
 import { Spinner } from "../ui";
+import { quotaTone } from "../sidebar-quotas";
 
 const RANGES: { key: UsageRange; label: string }[] = [
   { key: "24h", label: "24 hours" },
@@ -75,7 +76,7 @@ function QuotaCard({ q, loading = false, error }: { q: AgentQuota; loading?: boo
       {!loading && q.windows.length === 0 ? <div className="muted">{q.note ?? error ?? "No quota data."}</div> : null}
       {!loading && q.windows.map((w) => {
         const pct = Math.max(0, Math.min(100, w.used_percent));
-        const tone = pct >= 90 ? "usage-bar-hot" : pct >= 70 ? "usage-bar-warm" : "";
+        const tone = usageBarTone(pct);
         return (
           <div key={w.label} className="usage-quota-row">
             <div className="usage-quota-label">
@@ -101,9 +102,15 @@ function QuotaCard({ q, loading = false, error }: { q: AgentQuota; loading?: boo
   );
 }
 
+/** Same four tiers as the sidebar rings; below 50% the bar keeps its default color. */
+function usageBarTone(usedPercent: number): string {
+  const tone = quotaTone(usedPercent);
+  return tone === "ok" ? "" : `usage-bar-${tone}`;
+}
+
 function QuotaBar({ label, detail, usedPercent }: { label: string; detail: string; usedPercent: number }) {
   const pct = Math.max(0, Math.min(100, usedPercent));
-  const tone = pct >= 90 ? "usage-bar-hot" : pct >= 70 ? "usage-bar-warm" : "";
+  const tone = usageBarTone(pct);
   return (
     <div className="usage-quota-row">
       <div className="usage-quota-label">
