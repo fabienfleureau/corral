@@ -102,10 +102,11 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   of sitting "in progress" forever ([ADR 0016](adr/0016-stopped-agent-retry-policy.md)). Both
   reported and captured item text render as Markdown; only the raw context
   drawer stays verbatim.
-  The **In progress** tab marks each task with its Omnigent run state:
-  **agent running** (working or waiting on you), **agent stopped** (the session
-  went idle, finished or failed), or **agent status unknown** when no session
-  state is available.
+  The **In progress** tab lists only dispatched tasks whose Omnigent session is
+  not stopped, marking each with its run state: **agent running** (working or
+  waiting on you) or **agent status unknown** when no session state is
+  available. Tasks whose session went idle, finished, or failed leave **In
+  progress**.
 - **PR loop** — Corral watches each task's PR/MR. Review comments and merge
   conflicts are pushed back to the agent (`skills/pr-loop.md`). The item turns
   **green** only when threads are answered or resolved, checks pass and the PR

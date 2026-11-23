@@ -33,9 +33,15 @@ export function inProgressInboxItems(items: Item[], _tasks: Task[] = []): Item[]
   return items.filter((item) => item.status !== "archived" && isHandlingItem(item));
 }
 
-/** Dispatched tasks not already represented by an actively handled item, so a
- *  running session appears once under In progress instead of twice. */
-export function inProgressInboxTasks(tasks: Task[], items: Item[] = []): Task[] {
+/** Dispatched tasks whose agent is not stopped and that are not already
+ *  represented by an actively handled item, so In progress only shows active
+ *  work and each running session appears once. */
+export function inProgressInboxTasks(
+  tasks: Task[],
+  items: Item[] = [],
+  sessions: SessionInfo[] = [],
+  terminals: TrackedTerminal[] = [],
+): Task[] {
   const handledTasks = new Set<string>();
   const handledSessions = new Set<string>();
   for (const item of items) {
@@ -47,7 +53,8 @@ export function inProgressInboxTasks(tasks: Task[], items: Item[] = []): Task[] 
     (task) =>
       task.status === "dispatched" &&
       !handledTasks.has(task.id) &&
-      (!task.terminal_address || !handledSessions.has(task.terminal_address)),
+      (!task.terminal_address || !handledSessions.has(task.terminal_address)) &&
+      agentRunStatus(task, sessions, terminals) !== "stopped",
   );
 }
 
