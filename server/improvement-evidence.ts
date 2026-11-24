@@ -420,6 +420,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       "Production outcomes are not recorded: a merged PR only proves delivery to the base branch.",
       "Review thread bodies are not persisted; only the unresolved count and ids are available.",
       "PR snapshots (checks, mergeability, thread counts) exist only for syncs that ran after they were added.",
+      "item.ready_for_review is now recorded once per head commit and review label; older counts include repeats caused by agent reports and transient gate states.",
       "Merge time and readiness at merge (merged_ms, merge_readiness) exist only for merges seen after they were added; older merges are not backfilled. merge_readiness is the last open snapshot, which can predate the merge by up to one sync interval.",
       "Events and items are capped as listed in limits/truncated; counts come from aggregate queries, not the sampled event list.",
       usage
