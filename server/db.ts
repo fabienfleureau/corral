@@ -301,6 +301,7 @@ export class Db {
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
     if (!taskNames.has("merged_ms")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN merged_ms INTEGER`);
     if (!taskNames.has("merge_readiness")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN merge_readiness TEXT`);
+    if (!taskNames.has("outcome")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN outcome TEXT`);
     const epicCols = this.raw.prepare("PRAGMA table_info(epics)").all() as { name: string }[];
     if (!epicCols.some((c) => c.name === "design_block_hash")) this.raw.exec(`ALTER TABLE epics ADD COLUMN design_block_hash TEXT`);
     if (!epicCols.some((c) => c.name === "favorite_name")) this.raw.exec(`ALTER TABLE epics ADD COLUMN favorite_name TEXT`);
@@ -375,6 +376,11 @@ export class Db {
     // every state change is logged wherever it comes from (an API edit, a
     // dispatch, the Jira sync, the PR loop) without each caller remembering to.
     const before = this.getTask(id);
+    // A reopened task has not ended yet: its outcome goes with the done status.
+    if ((patch.status === "open" || patch.status === "dispatched") && !("outcome" in patch) && before?.outcome) {
+      patch = { ...patch, outcome: null };
+      keys.push("outcome");
+    }
     const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
     const values = keys.map((k) => patch[k] as never);
     // Internal bookkeeping (a PR snapshot) must not make a stale task look

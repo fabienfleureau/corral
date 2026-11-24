@@ -6,6 +6,9 @@ import type { TaskEvent } from "./task-events.ts";
 export type AgentTarget = "claude" | "codex" | "opencode" | string;
 
 export type TaskStatus = "open" | "dispatched" | "done" | "archived";
+/** merged/closed: the task's PR settled it. reported: the agent reported done
+ *  and the task had no PR (ADR 0022). */
+export type TaskOutcome = "merged" | "closed" | "reported";
 export type TargetState = "suggested" | "confirmed";
 /** code: the agent changes code and opens a PR. review: the agent reviews an
  *  existing PR/MR (pr_url) and posts comments only after the human approves.
@@ -174,6 +177,9 @@ export interface Task {
   /** JSON {@link MergeReadiness}: the readiness gate's last state seen before
    *  the merge. Null when no open snapshot preceded the merge. */
   merge_readiness?: string | null;
+  /** How the task ended: its PR merged or closed unmerged, or the agent
+   *  reported done with no PR. Null while open, or when done another way. */
+  outcome?: TaskOutcome | null;
   /** Handoff document from the last completed run — injected into follow-up sessions. */
   handoff?: string | null;
   /** The spec task that created this one (multi-repo): its contract is injected at dispatch. */

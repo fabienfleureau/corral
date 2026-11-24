@@ -43,6 +43,8 @@ export function seedScreenshotData(db: Db): void {
     jira_url: row.jira_url ?? null, jira_parent_key: null, pr_url: row.pr_url ?? null, pr_meta: null, terminal_address: null,
     exit_code: null, created_ms: now - index * 60000, updated_ms: now - index * 60000,
   }));
+  // How the done task ended: the task row shows it next to the status.
+  db.updateTask("sample-done", { outcome: "merged" }, false);
   seedMultiRepo(db, now);
   db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
   db.insertRepo({ id: "sample-home", name: "side-project", path: "/sample/side-project", jira_prefix: null, context: "personal", source: "manual", created_ms: now });

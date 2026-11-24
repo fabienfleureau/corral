@@ -21,6 +21,18 @@ import type { ImportSettings } from "../jira-import";
 import { taskFocusFromHash, taskPrefillFromHash } from "../selection-task";
 import type { TaskPrefill } from "../selection-task";
 
+const OUTCOME_LABEL: Record<NonNullable<Task["outcome"]>, string> = {
+  merged: "PR merged",
+  closed: "PR closed",
+  reported: "reported",
+};
+
+const OUTCOME_TITLE: Record<NonNullable<Task["outcome"]>, string> = {
+  merged: "The task's PR merged",
+  closed: "The task's PR was closed without merging",
+  reported: "The agent reported done; the task had no PR",
+};
+
 export function TasksPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -408,6 +420,7 @@ function TaskRow({
         </div>
         <div className="task-sub">
           <span className={`badge status-${task.status}`} title={task.worktree_path ? `Worktree: ${task.worktree_path}` : undefined}>{task.status}</span>
+          {task.outcome ? <span className={`badge outcome-${task.outcome}`} title={OUTCOME_TITLE[task.outcome]}>{OUTCOME_LABEL[task.outcome]}</span> : null}
           {review ? <span className="badge badge-review" title="Reviews the linked PR/MR; comments are published after your approval">review</span> : null}
           {task.kind === "grill" || task.kind === "grill-docs" ? <span className="badge badge-review">{task.kind === "grill" ? "grill" : "grill with docs"}</span> : null}
           {spec ? <span className="badge badge-review" title="Writes the contract between the sub-projects in repo_path; approving its plan in the inbox creates one task per sub-project">multi-repo spec</span> : null}
