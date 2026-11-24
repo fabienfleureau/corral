@@ -81,6 +81,10 @@ export interface EvidenceTask {
   created_ms: number;
   updated_ms: number;
   dispatches: { count: number; at_ms: number[]; gaps_ms: number[] };
+  /** A done task in the same repo this one probably repeats (near-identical label). */
+  repeat_of: string | null;
+  /** A task archived or failed shortly before with the same label: this one restarts it. */
+  retry_of: string | null;
   items_in_window: { total: number; open: number; question_open: number; pr_open: number; resolved: number; archived: number };
   pr: PrSnapshot | null;
   /** When the PR merged (null when not merged or merged before this was recorded). */
@@ -103,6 +107,8 @@ export interface EvidenceItem {
   resolved_ms: number | null;
   waited_ms: number | null;
   first_reply_ms: number | null;
+  /** Lifetime snoozes, not limited to the evidence window. */
+  snooze_count: number;
   events: Record<string, { count: number; first_ms: number; last_ms: number }>;
   flags: string[];
 }
@@ -131,6 +137,10 @@ export interface ImprovementEvidence {
     done_without_pr: string[];
     review_tasks_with_pr_url: string[];
     repeated_dispatches: { task_id: string; count: number; gaps_ms: number[] }[];
+    /** Tasks created for work already done in the same repo: the same symptom came back. */
+    probable_repeats: { task_id: string; repeat_of: string }[];
+    /** Tasks recreated after the same work was archived or failed within 24 h (wrong repo, other harness). */
+    retries: { task_id: string; retry_of: string }[];
     orphan_items: { item_id: string; task_id: string }[];
     malformed_task_ids: { item_id: string; task_id: string }[];
     resolved_without_timestamp: { item_id: string; resolved_event_ms: number }[];
@@ -140,6 +150,8 @@ export interface ImprovementEvidence {
     open_pr_items: { item_id: string; task_id: string | null; age_ms: number }[];
     /** "Publish N review comments?" questions closed with no reply: the drafts were never approved. */
     unpublished_reviews: { count: number; items: { item_id: string; task_id: string | null; status: string }[] };
+    /** Items snoozed 2+ times: the human keeps putting them off. */
+    repeatedly_snoozed_items: { count: number; items: { item_id: string; kind: string; status: string; snoozes: number; age_ms: number }[] };
     items_outside_task_window: number;
   };
   usage: UsageEvidence | null;
@@ -156,6 +168,8 @@ export interface ImprovementEvidenceOptions {
 }
 
 const EVENT_DATA_CHARS = 400;
+/** Same threshold as the inbox badge (web/src/inbox-selection.ts). */
+const REPEAT_SNOOZES = 2;
 
 /** Event payloads are the useful part (dispatch model/address, done reason),
  *  but some carry long text. Keep small payloads intact and clip the rest. */
@@ -305,6 +319,8 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     if (task.kind === "review" && task.pr_url) flags.push("review_task_stores_reviewed_pr");
     if ((dispatchAgg?.count ?? 0) > 1) flags.push("dispatched_multiple_times");
     if (task.pr_url && !readPrSnapshot(task.pr_meta)) flags.push("no_pr_snapshot");
+    if (task.repeat_of) flags.push("probable_repeat");
+    if (task.retry_of) flags.push("retry");
     const mergeReadiness = task.merged_ms != null ? readMergeReadiness(task.merge_readiness) : null;
     if (mergeReadiness && !mergeReadiness.ready) flags.push("merged_before_ready");
     const usage = usageByTask.get(task.id);
@@ -334,6 +350,8 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
         at_ms: dispatchAt.length ? dispatchAt : dispatchAgg ? [dispatchAgg.first_ms, dispatchAgg.last_ms].filter((v, i, a) => a.indexOf(v) === i) : [],
         gaps_ms: gaps,
       },
+      repeat_of: task.repeat_of ?? null,
+      retry_of: task.retry_of ?? null,
       items_in_window: {
         total: taskItems.length,
         open: taskItems.filter((i) => i.status === "open").length,
@@ -380,6 +398,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     if ((agg?.get("item.resolved")?.count ?? 0) > 1) flags.push("multiple_resolution_events");
     if (item.status === "archived" && item.resolved_ms === null) flags.push("archived_without_resolution");
     if (item.status !== "open" && isPublishQuestion(item) && !agg?.get("item.replied")) flags.push("review_publish_unanswered");
+    if ((item.snooze_count ?? 0) >= REPEAT_SNOOZES) flags.push("snoozed_repeatedly");
     const resolvedAt = item.resolved_ms ?? (item.status === "resolved" || item.status === "archived" ? agg?.get("item.resolved")?.last_ms ?? null : null);
     return {
       id: item.id,
@@ -395,6 +414,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       resolved_ms: item.resolved_ms,
       waited_ms: resolvedAt !== null ? resolvedAt - item.created_ms : null,
       first_reply_ms: agg?.get("item.replied")?.first_ms ?? null,
+      snooze_count: item.snooze_count ?? 0,
       events,
       flags,
     };
@@ -413,6 +433,9 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
   const unpublishedReviews = evidenceItems
     .filter((i) => i.flags.includes("review_publish_unanswered"))
     .map((i) => ({ item_id: i.id, task_id: i.task_id, status: i.status }));
+  const repeatedlySnoozed = evidenceItems
+    .filter((i) => i.flags.includes("snoozed_repeatedly"))
+    .map((i) => ({ item_id: i.id, kind: i.kind, status: i.status, snoozes: i.snooze_count, age_ms: now - i.created_ms }));
   const mergedTasks = evidenceTasks.filter((t) => t.merged_ms !== null);
   const notReadyMerges = mergedTasks.filter((t) => t.merge_readiness && !t.merge_readiness.ready);
 
@@ -430,6 +453,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       "Production outcomes are not recorded: a merged PR only proves delivery to the base branch.",
       "Review thread bodies are not persisted; only the unresolved count and ids are available.",
       "PR snapshots (checks, mergeability, thread counts) exist only for syncs that ran after they were added.",
+      "item.ready_for_review is now recorded once per head commit and review label; older counts include repeats caused by agent reports and transient gate states.",
       "Merge time and readiness at merge (merged_ms, merge_readiness) exist only for merges seen after they were added; older merges are not backfilled. merge_readiness is the last open snapshot, which can predate the merge by up to one sync interval.",
       "Events and items are capped as listed in limits/truncated; counts come from aggregate queries, not the sampled event list.",
       usage
@@ -452,6 +476,12 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       done_without_pr: evidenceTasks.filter((t) => t.flags.includes("done_without_pr")).map((t) => t.id),
       review_tasks_with_pr_url: evidenceTasks.filter((t) => t.flags.includes("review_task_stores_reviewed_pr")).map((t) => t.id),
       repeated_dispatches: repeated,
+      probable_repeats: evidenceTasks
+        .filter((t) => t.repeat_of)
+        .map((t) => ({ task_id: t.id, repeat_of: t.repeat_of ?? "" })),
+      retries: evidenceTasks
+        .filter((t) => t.retry_of)
+        .map((t) => ({ task_id: t.id, retry_of: t.retry_of ?? "" })),
       orphan_items: evidenceItems
         .filter((i) => i.flags.includes("orphan_task"))
         .map((i) => ({ item_id: i.id, task_id: i.task_id ?? "" })),
@@ -468,6 +498,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
         .filter((i) => i.kind === "pr" && i.status === "open")
         .map((i) => ({ item_id: i.id, task_id: i.task_id, age_ms: now - i.created_ms })),
       unpublished_reviews: { count: unpublishedReviews.length, items: unpublishedReviews },
+      repeatedly_snoozed_items: { count: repeatedlySnoozed.length, items: repeatedlySnoozed },
       items_outside_task_window: evidenceItems.filter((i) => i.flags.includes("outside_task_window")).length,
     },
     usage,

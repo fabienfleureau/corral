@@ -33,6 +33,10 @@ export type Task = {
   epic_id?: string | null;
   /** Review tasks: whether the drafted comments were posted; null while unknown. */
   review_outcome?: "published" | "skipped" | null;
+  /** A done task in the same repo this one probably repeats. */
+  repeat_of?: string | null;
+  /** An archived or failed task with the same label that this one retries. */
+  retry_of?: string | null;
   /** 1 once the ticket left its epic in Jira. */
   epic_out?: number;
   /** Resolved review command, frozen at dispatch; null when none. */
@@ -64,6 +68,7 @@ export type Item = {
   updated_ms: number;
   resolved_ms: number | null;
   snooze_until_ms: number | null;
+  snooze_count?: number; // times the human snoozed it; 2+ is flagged and sorted first
 };
 
 export type SessionInfo = {
@@ -239,7 +244,7 @@ export type ModelAvailability = {
 
 // ---- usage page (GET /api/usage) ----
 
-export type UsageAgent = "claude" | "codex" | "opencode-go";
+export type UsageAgent = "claude" | "codex" | "opencode-go" | "antigravity";
 export type UsageRange = "24h" | "7d" | "30d" | "all";
 
 export type UsageTotals = {
@@ -253,7 +258,8 @@ export type UsageTotals = {
 };
 
 export type AgentQuota = {
-  agent: UsageAgent | "google";
+  /** Antigravity spend has no quota of its own: it draws on the Google quota. */
+  agent: Exclude<UsageAgent, "antigravity"> | "google";
   source: string;
   as_of_ms: number | null;
   stale: boolean;
@@ -271,7 +277,7 @@ export type UsageReport = {
   totals: UsageTotals;
   by_agent: ({ agent: UsageAgent } & UsageTotals)[];
   by_model: ({ agent: UsageAgent; model: string; priced: boolean } & UsageTotals)[];
-  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number; opencode_go: number; opencode_go_tokens: number; models: { agent: UsageAgent; model: string; cost_usd: number; tokens: number }[] }[];
+  timeline: { start_ms: number; claude: number; codex: number; claude_tokens: number; codex_tokens: number; opencode_go: number; opencode_go_tokens: number; antigravity: number; antigravity_tokens: number; models: { agent: UsageAgent; model: string; cost_usd: number; tokens: number }[] }[];
   bucket: "hour" | "day";
   efficiency: {
     tasks_with_spend: number;

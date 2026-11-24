@@ -1,5 +1,5 @@
-// Agent usage: tokens, estimated cost and quota for Claude Code and Codex,
-// read from their local session logs. Costs are API-equivalent estimates
+// Agent usage: tokens, estimated cost and quota for Claude Code, Codex,
+// OpenCode Go and Antigravity, read from their local session logs. Costs are API-equivalent estimates
 // (subscriptions are not billed per token).
 //
 // Sources:
@@ -9,18 +9,25 @@
 //   running total -> count deltas; model from the latest turn_context. Codex
 //   sessions omnigent starts keep their own CODEX_HOME, under
 //   ~/.omnigent/codex-native/<id>/codex-home/sessions.
+// - Antigravity: <home>/brain/<conversation>/.system_generated/logs/
+//   transcript_full.jsonl, one line per step; model steps carry input (uncached),
+//   cache_read and output tokens. Homes: ~/.gemini/antigravity-cli,
+//   ~/.gemini/antigravity-acp and each omnigent session's agy-home under
+//   ~/.omnigent/antigravity-native. cwd = the conversation's workspace in
+//   <home>/conversation_summaries.db.
 // - Claude quota: ccstatusline's cache (~/.cache/ccstatusline/usage*.json).
 // - Codex quota: rate_limits on the latest token_count event.
 
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { taskLabel, type Task } from "./types.ts";
 import { withDeadline } from "./deadline.ts";
 
-export type UsageAgent = "claude" | "codex" | "opencode-go";
+export type UsageAgent = "claude" | "codex" | "opencode-go" | "antigravity";
 
 /** One API call (Claude) or one token_count delta (Codex). */
 export interface UsageRecord {
@@ -73,6 +80,13 @@ export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   // https://dev.opencode.ai/v2/docs/console/models
   "beam-free": { input: 0, output: 0 },
   "hy4-flash-free": { input: 0, output: 0 },
+  // Standard paid tier, output includes thinking. Antigravity suffixes the
+  // effort and tier ("gemini-4-neon-medium"), priced at the base model's rate.
+  // https://aistudio.google.com/docs/pricing (as of 2026-11-24)
+  "gemini-4-neon*": { input: 3, output: 15, cacheRead: 0.15 },
+  "gemini-4-hydrogen*": { input: 1.5, output: 7.5, cacheRead: 0.075 },
+  // Rate until 2026-12-31; it doubles on 2027-01-01.
+  "gemini-3.8-flash*": { input: 0.75, output: 3.75, cacheRead: 0.075 },
 };
 
 export function priceFor(model: string, prices: Record<string, ModelPrice>): ModelPrice | null {
@@ -206,6 +220,65 @@ export function parseCodexLines(lines: Iterable<string>, fileKey: string): Codex
   return { records, rateLimits };
 }
 
+/** Parse an Antigravity transcript_full.jsonl. input_tokens excludes cache
+ *  reads (cache_read_tokens is often larger), so both map as they are. */
+export function parseAntigravityLines(lines: Iterable<string>, conversationId: string, cwd: string): UsageRecord[] {
+  const records: UsageRecord[] = [];
+  for (const line of lines) {
+    if (!line.includes('"output_tokens"')) continue;
+    let d: Record<string, any>;
+    try {
+      d = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof d.output_tokens !== "number" && typeof d.input_tokens !== "number") continue;
+    records.push({
+      agent: "antigravity",
+      key: `antigravity:${conversationId}:${d.step_index ?? records.length}`,
+      ts: Date.parse(d.created_at) || 0,
+      model: typeof d.model === "string" && d.model ? d.model : "unknown",
+      cwd,
+      input: num(d.input_tokens),
+      output: num(d.output_tokens),
+      cacheRead: num(d.cache_read_tokens),
+      cacheWrite5m: 0,
+      cacheWrite1h: 0,
+    });
+  }
+  return records;
+}
+
+/** Conversation id -> workspace path, from an Antigravity home's summaries DB.
+ *  Sub-agent conversations have no workspace: when the home holds a single
+ *  workspace (one omnigent session), they get that one. */
+function antigravityWorkspaces(home: string): { get(conversationId: string): string } {
+  const map = new Map<string, string>();
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(join(home, "conversation_summaries.db"), { readOnly: true });
+    for (const row of db.prepare("SELECT conversation_id, workspace_uris FROM conversation_summaries").all()) {
+      try {
+        const uris = JSON.parse(String(row.workspace_uris));
+        const first = Array.isArray(uris) ? uris.find((u) => typeof u === "string" && u.startsWith("file://")) : undefined;
+        if (first) map.set(String(row.conversation_id), fileURLToPath(first));
+      } catch { /* Ignore malformed rows. */ }
+    }
+  } catch { /* No summaries yet: cwd stays empty. */ } finally { db?.close(); }
+  const distinct = new Set(map.values());
+  const only = distinct.size === 1 ? [...distinct][0] : "";
+  return { get: (id) => map.get(id) ?? only };
+}
+
+/** Where an Antigravity transcript lives: its home and conversation id. */
+function antigravityTranscript(path: string): { home: string; conversation: string } | null {
+  const marker = `${sep}brain${sep}`;
+  const i = path.lastIndexOf(marker);
+  if (i < 0) return null;
+  const conversation = path.slice(i + marker.length).split(sep)[0];
+  return conversation ? { home: path.slice(0, i), conversation } : null;
+}
+
 // ---- file scanning with a per-file cache ----
 
 function listJsonl(root: string): string[] {
@@ -246,6 +319,8 @@ export interface UsageSources {
   opencodeDir?: string;
   /** Omnigent's home: Codex sessions it starts log under codex-native/. */
   omnigentDir?: string;
+  /** Roots searched for Antigravity transcript_full.jsonl files. */
+  antigravityDirs?: string[];
 }
 
 /** Session dirs of the Codex homes omnigent creates, one per session. */
@@ -267,6 +342,11 @@ export function defaultSources(): UsageSources {
     claudeQuotaDir: join(home, ".cache", "ccstatusline"),
     opencodeDir: process.env.OPENCODE_DATA_DIR || join(process.env.XDG_DATA_HOME || join(home, ".local", "share"), "opencode"),
     omnigentDir: join(home, ".omnigent"),
+    antigravityDirs: [
+      join(home, ".gemini", "antigravity-cli"),
+      join(home, ".gemini", "antigravity-acp"),
+      join(home, ".omnigent", "antigravity-native"),
+    ],
   };
 }
 
@@ -307,7 +387,13 @@ export class UsageScanner {
       ...[this.sources.codexDir, ...omnigentCodexDirs(this.sources.omnigentDir)]
         .flatMap((dir) => listJsonl(dir))
         .map((p): [string, UsageAgent] => [p, "codex"]),
+      // transcript.jsonl and chunks/ repeat the same steps: read the full one only.
+      ...(this.sources.antigravityDirs ?? [])
+        .flatMap((dir) => listJsonl(dir))
+        .filter((p) => p.endsWith(`${sep}transcript_full.jsonl`))
+        .map((p): [string, UsageAgent] => [p, "antigravity"]),
     ];
+    const workspaces = new Map<string, ReturnType<typeof antigravityWorkspaces>>();
     for (const [path, agent] of jobs) {
       seen.add(path);
       let st;
@@ -325,6 +411,15 @@ export class UsageScanner {
             const r = parseClaudeLine(line);
             if (r) records.push(r);
           }
+          this.files.set(path, { size: st.size, mtimeMs: st.mtimeMs, records, rateLimits: null });
+        } else if (agent === "antigravity") {
+          const where = antigravityTranscript(path);
+          if (!where) continue;
+          let ws = workspaces.get(where.home);
+          if (!ws) workspaces.set(where.home, (ws = antigravityWorkspaces(where.home)));
+          const lines: string[] = [];
+          for await (const line of readLines(path)) lines.push(line);
+          const records = parseAntigravityLines(lines, where.conversation, ws.get(where.conversation));
           this.files.set(path, { size: st.size, mtimeMs: st.mtimeMs, records, rateLimits: null });
         } else {
           const lines: string[] = [];
@@ -396,7 +491,8 @@ export interface QuotaWindow {
   used_percent: number;
   resets_ms: number | null;
 }
-export type QuotaAgent = UsageAgent | "google";
+/** Antigravity draws on the Google quota; it has no quota of its own. */
+export type QuotaAgent = Exclude<UsageAgent, "antigravity"> | "google";
 
 export interface AgentQuota {
   agent: QuotaAgent;
@@ -577,6 +673,8 @@ export interface UsageTimelineBucket {
   codex_tokens: number;
   opencode_go: number;
   opencode_go_tokens: number;
+  antigravity: number;
+  antigravity_tokens: number;
   /** Unpriced calls add tokens but no cost. */
   models: { agent: UsageAgent; model: string; cost_usd: number; tokens: number }[];
 }
@@ -611,7 +709,7 @@ function emptyTotals(): UsageTotals {
 }
 
 function emptyBucket(start_ms: number): UsageTimelineBucket {
-  return { start_ms, claude: 0, codex: 0, claude_tokens: 0, codex_tokens: 0, opencode_go: 0, opencode_go_tokens: 0, models: [] };
+  return { start_ms, claude: 0, codex: 0, claude_tokens: 0, codex_tokens: 0, opencode_go: 0, opencode_go_tokens: 0, antigravity: 0, antigravity_tokens: 0, models: [] };
 }
 
 function add(t: UsageTotals, r: UsageRecord, cost: number | null): void {

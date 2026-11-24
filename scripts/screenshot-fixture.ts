@@ -23,7 +23,7 @@ export const screenshotFavorites: Favorite[] = [
 ];
 
 export function seedScreenshotData(db: Db): void {
-  const rows: (Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning" | "review"> & Partial<Pick<Task, "jira_key" | "jira_url" | "branch" | "pr_url">>)[] = [
+  const rows: (Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning" | "review"> & Partial<Pick<Task, "jira_key" | "jira_url" | "branch" | "pr_url" | "repeat_of" | "retry_of">>)[] = [
     { id: "sample-open", title: "Improve search results", status: "open", target: "codex", model: "gpt-5.4", reasoning: "high" },
     { id: "sample-running", title: "Add keyboard navigation", status: "dispatched", target: "claude", model: null, reasoning: null, review: "cubic review --base main --json", jira_key: "EX-1234", jira_url: "https://jira.example.com/browse/EX-1234" },
     { id: "sample-done", title: "Update project documentation", status: "done", target: "codex", model: null, reasoning: null },
@@ -33,6 +33,11 @@ export function seedScreenshotData(db: Db): void {
     // The task behind the auto-captured question: its closing message carries
     // Markdown, which must render as prose and not as a raw code block.
     { id: "sample-stopped-task", title: "Investigate proposed KPI improvement", status: "dispatched", target: "claude", model: null, reasoning: null },
+    // A task whose label nearly matches a done one: the row shows the probable-repeat link.
+    { id: "sample-repeat", title: "Update the project documentation again", status: "open", target: "codex", model: null, reasoning: null, repeat_of: "sample-done" },
+    // A task archived (wrong repo) and recreated with the same label: the new row links its retry.
+    { id: "sample-archived", title: "Fix widget size rounding", status: "archived", target: "claude", model: null, reasoning: null },
+    { id: "sample-retry", title: "Fix widget size rounding", status: "open", target: "codex", model: null, reasoning: null, retry_of: "sample-archived" },
   ];
   const now = Date.UTC(2025, 0, 15, 12);
   rows.forEach((row, index) => db.insertTask({
@@ -350,7 +355,7 @@ export function seedTaskHistory(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
 }
 
 /** Open inbox items: a ready PR, a PR still needing work, two questions — the
- *  last one from the Jira-imported task, so rows show ticket provenance. Plus,
+ *  first snoozed twice, the last one from the Jira-imported task, so rows show ticket provenance. Plus,
  *  for the in-progress view, a PR item the agent is handling (merge conflicts)
  *  whose task has already reported done. */
 export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
@@ -510,6 +515,9 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
     },
   ];
   for (const item of items) db.insertItem(item);
+  // A question put off twice already: the inbox flags it and lists it first.
+  db.snoozeItem("sample-question", now - 2 * 60 * 60_000);
+  db.snoozeItem("sample-question", now - 60 * 60_000);
 }
 
 /** Synthetic Claude session logs so the Usage page has chart data in captures. */
@@ -546,6 +554,27 @@ export function seedScreenshotUsage(home: string): void {
     }
   }
   writeFileSync(join(dir, "usage.jsonl"), lines.join("\n") + "\n");
+
+  // Synthetic Antigravity transcript (one omnigent session) for the agent chart.
+  const agyLogs = join(home, ".omnigent", "antigravity-native", "fixture", "agy-home", ".gemini", "antigravity-cli", "brain", "fixture-conversation", ".system_generated", "logs");
+  mkdirSync(agyLogs, { recursive: true });
+  const steps: string[] = [];
+  for (let day = 6; day >= 0; day--) {
+    for (let call = 0; call < 3; call++) {
+      steps.push(JSON.stringify({
+        step_index: steps.length,
+        source: "MODEL",
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: new Date(now - day * 86_400_000 - call * 3_600_000).toISOString(),
+        model: call === 2 ? "gemini-4-hydrogen-high" : "gemini-4-neon-medium",
+        input_tokens: 20_000 + call * 5_000,
+        cache_read_tokens: 40_000,
+        output_tokens: 6_000 + day * 500,
+      }));
+    }
+  }
+  writeFileSync(join(agyLogs, "transcript_full.jsonl"), steps.join("\n") + "\n");
 
   // Synthetic Claude quota snapshot (ccstatusline cache) for sidebar + Usage rings.
   const ccDir = join(home, ".cache", "ccstatusline");

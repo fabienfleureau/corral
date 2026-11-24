@@ -45,7 +45,7 @@ export function formatUsageWindow(
 type Metric = "cost" | "tokens";
 type ChartGroup = "agent" | "model";
 type ChartSeries = { key: string; label: string; className: string; values: number[] };
-const AGENT_LABEL: Record<AgentQuota["agent"], string> = { claude: "Claude", codex: "Codex", "opencode-go": "OpenCode Go", google: "Google" };
+const AGENT_LABEL: Record<UsageAgent | "google", string> = { claude: "Claude", codex: "Codex", "opencode-go": "OpenCode Go", antigravity: "Antigravity", google: "Google" };
 const QUOTA_AGENTS = ["claude", "codex", "opencode-go", "google"] as const;
 const PLATFORMS = ["github", "gitlab"] as const;
 const MAX_MODEL_SERIES = 6;
@@ -186,6 +186,7 @@ function Timeline({ report, metric, group }: { report: UsageReport; metric: Metr
       ["claude", "claude", "claude_tokens", "Claude", "usage-seg-claude"],
       ["codex", "codex", "codex_tokens", "Codex", "usage-seg-codex"],
       ["opencode", "opencode_go", "opencode_go_tokens", "OpenCode Go", "usage-seg-opencode"],
+      ["antigravity", "antigravity", "antigravity_tokens", "Antigravity", "usage-seg-antigravity"],
     ] as const).map(([key, cost, costTokens, label, className]) => ({
       key,
       label,

@@ -19,6 +19,7 @@ import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 import { batchImportItems } from "../jira-import";
 import type { ImportSettings } from "../jira-import";
 import { taskFocusFromHash, taskPrefillFromHash } from "../selection-task";
+import { repoMismatch } from "../repo-mismatch";
 import type { TaskPrefill } from "../selection-task";
 
 export function TasksPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
@@ -183,7 +184,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} focused={task.id === focusedTaskId} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} version={eventVersion} refresh={refresh} parentTitle={task.parent_task_id ? parentLabel(tasks, task.parent_task_id) : null} />
+              <TaskRow key={task.id} task={task} focused={task.id === focusedTaskId} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} version={eventVersion} refresh={refresh} parentTitle={task.parent_task_id ? parentLabel(tasks, task.parent_task_id) : null} repeatTitle={task.repeat_of ? repeatLabel(tasks, task.repeat_of) : null} retryTitle={task.retry_of ? repeatLabel(tasks, task.retry_of) : null} />
             ))}
           </div>
         ) : null}
@@ -254,12 +255,18 @@ function TaskRow({
   version,
   refresh,
   parentTitle,
+  repeatTitle,
+  retryTitle,
 }: {
   task: Task;
   /** Linked from the daily page: highlight this row. */
   focused: boolean;
   /** Title of the spec task this one was created from (multi-repo), or null. */
   parentTitle: string | null;
+  /** Label of the done task this one probably repeats, or null. */
+  repeatTitle: string | null;
+  /** Label of the archived or failed task this one retries, or null. */
+  retryTitle: string | null;
   repos: Repo[];
   targets: string[];
   quotas: AgentQuota[];
@@ -423,6 +430,16 @@ function TaskRow({
           {task.kind === "grill" || task.kind === "grill-docs" ? <span className="badge badge-review">{task.kind === "grill" ? "grill" : "grill with docs"}</span> : null}
           {spec ? <span className="badge badge-review" title="Writes the contract between the sub-projects in repo_path; approving its plan in the inbox creates one task per sub-project">multi-repo spec</span> : null}
           {parentTitle ? <span className="badge badge-review" title="Created from a multi-repo plan; the contract is appended to this task's prompt">from {parentTitle}</span> : null}
+          {task.retry_of && retryTitle ? (
+            <a href={`#/tasks?task=${encodeURIComponent(task.retry_of)}`} className="badge badge-mute" title="Same label as a task archived or failed in the 24 hours before this one was created">
+              retry of {retryTitle}
+            </a>
+          ) : null}
+          {task.repeat_of && repeatTitle ? (
+            <a href={`#/tasks?task=${encodeURIComponent(task.repeat_of)}`} className="badge badge-warn" title="A done task in this repo has a near-identical label: the same problem may be back">
+              probable repeat of {repeatTitle}
+            </a>
+          ) : null}
           {task.target ? <span className="badge badge-target">{task.target}</span> : null}
           {task.attachment_count ? <span className="badge badge-target" title="Files sent to the agent with the prompt">{task.attachment_count} {task.attachment_count === 1 ? "attachment" : "attachments"}</span> : null}
           {task.terminal_address ? <>
@@ -680,6 +697,13 @@ function parentLabel(tasks: Task[], id: string): string {
   return parent ? (parent.title.trim() || firstLine(parent.prompt) || "spec") : "plan";
 }
 
+function repeatLabel(tasks: Task[], id: string): string {
+  const done = tasks.find((t) => t.id === id);
+  const label = done ? (done.title.trim() || firstLine(done.prompt)) : "";
+  if (!label) return "an earlier task";
+  return label.length > 60 ? `${label.slice(0, 59)}…` : label;
+}
+
 function firstLine(text: string): string {
   return text.trim().split("\n")[0].slice(0, 120);
 }
@@ -785,6 +809,11 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
   const selectedTarget = formTargets.includes(target) ? target : formTargets[0] ?? "";
   const prUrlValid = isPrUrl(prUrl);
   const hasContent = review ? prUrlValid : !!prompt.trim();
+  // A code task whose prompt targets another registered repo: warn, never block.
+  const mismatch = useMemo(
+    () => (review || spec || grill || selectedRepo === "__custom__" ? null : repoMismatch(prompt, selectedRepo, repos, tasks)),
+    [prompt, selectedRepo, repos, tasks, review, spec, grill],
+  );
 
   // A pasted PR/MR URL picks its repo when the registry recognizes the project.
   // The lookup is best effort: no match keeps the default or the manual pick.
@@ -933,6 +962,14 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
           </label>
         )}
       </div>}
+      {mismatch ? (
+        <p className="inline-warn" role="status">
+          <span>{mismatch.reason === "named"
+            ? <>This prompt names <b>{mismatch.name}</b>, not the selected repo.</>
+            : <>This prompt uses words from <b>{mismatch.name}</b> tasks ({mismatch.terms.slice(0, 4).join(", ")}), none from the selected repo.</>}</span>
+          <button type="button" className="btn" onClick={() => setManualRepo(mismatch.path)}>Use {mismatch.name}</button>
+        </p>
+      ) : null}
       {favorites.length > 0 ? <div className="field"><FavoritesTitle context={formContext} /><div className="chip-row">{shownFavorites.length === 0 ? <span className="muted">No {formContext} favorites</span> : null}{shownFavorites.map((f, i) => (
         <FavoriteChip
           key={i}

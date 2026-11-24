@@ -84,7 +84,8 @@ What each one is for:
   review comments (fix, or reply with *what changed and where, or why not* —
   then resolve only the threads you fixed, since a reply already answers the
   review), merge conflicts (`rebase`, `--force-with-lease`), failing CI checks
-  (inspect, reproduce, fix, or report a question if external/flaky), and the
+  (inspect, reproduce, fix, or report a question if external/flaky), a
+  regression test reproducing the reported symptom with every bug fix, and the
   rule to never merge.
 - **`pre-pr-review.md`** — runs the task's configured reviewer command on the
   diff before the PR opens; two rounds max, and the outcome goes in the PR body.
