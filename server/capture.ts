@@ -238,7 +238,7 @@ export class CaptureEngine {
     if (this.pendingRetries.has(e.address)) return;
 
     const initialRetryExhausted = Boolean(
-      this.db.raw.prepare("SELECT 1 FROM metrics_events WHERE name = ? AND ref = ? LIMIT 1").get("task.initial_retry", e.address),
+      this.db.stmt("SELECT 1 FROM metrics_events WHERE name = ? AND ref = ? LIMIT 1").get("task.initial_retry", e.address),
     );
     const category = classifyStoppedRun(e.status ?? null, outcome, { initialRetryExhausted });
     const budget = stoppedRetryBudget(this.retryPolicy, category);
@@ -349,14 +349,14 @@ export class CaptureEngine {
   }
 
   private latestMetricId(): number {
-    const row = this.db.raw.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM metrics_events").get() as { id: number };
+    const row = this.db.stmt("SELECT COALESCE(MAX(id), 0) AS id FROM metrics_events").get() as { id: number };
     return row.id;
   }
 
   private lastResetMetricId(address: string): number {
     let since = this.resetAfterId.get(address) ?? 0;
-    const rows = this.db.raw
-      .prepare("SELECT id, data FROM metrics_events WHERE name = 'item.replied' AND id > ? ORDER BY id DESC LIMIT 50")
+    const rows = this.db
+      .stmt("SELECT id, data FROM metrics_events WHERE name = 'item.replied' AND id > ? ORDER BY id DESC LIMIT 50")
       .all(since) as { id: number; data: string | null }[];
     for (const row of rows) {
       if (!row.data) continue;
@@ -373,8 +373,8 @@ export class CaptureEngine {
 
   private episodeAttempts(address: string, category: "error" | "silent"): number {
     const sinceId = this.lastResetMetricId(address);
-    const rows = this.db.raw
-      .prepare("SELECT data FROM metrics_events WHERE name = 'task.stopped_retry' AND ref = ? AND id > ?")
+    const rows = this.db
+      .stmt("SELECT data FROM metrics_events WHERE name = 'task.stopped_retry' AND ref = ? AND id > ?")
       .all(address, sinceId) as { data: string | null }[];
     let count = 0;
     for (const row of rows) {
@@ -393,8 +393,8 @@ export class CaptureEngine {
     const existing = this.db.latestQuestionItemForTerminal(address);
     if (!existing) return false;
     if (existing.status === "open" || existing.status === "archived") return true;
-    const replied = this.db.raw
-      .prepare("SELECT 1 FROM metrics_events WHERE name = 'item.replied' AND ref = ? LIMIT 1")
+    const replied = this.db
+      .stmt("SELECT 1 FROM metrics_events WHERE name = 'item.replied' AND ref = ? LIMIT 1")
       .get(existing.id);
     return !replied;
   }
@@ -403,7 +403,7 @@ export class CaptureEngine {
   private awaitingNobody(address: string, taskId: string): boolean {
     const task = this.db.getTask(taskId);
     if (!task || task.status !== "dispatched" || task.terminal_address !== address) return false;
-    return !this.db.raw.prepare("SELECT 1 FROM items WHERE status = 'open' AND (source_ref = ? OR task_id = ?) LIMIT 1").get(address, taskId);
+    return !this.db.hasOpenItemFor(address, taskId);
   }
 
   private async retryInitialFailure(address: string, taskId: string | null): Promise<boolean> {
@@ -411,7 +411,7 @@ export class CaptureEngine {
     if (this.archiving.has(address) || !task || task.status !== "dispatched" || task.terminal_address !== address ||
         Date.now() - task.updated_ms > 10 * 60_000 ||
         !this.backend.initialFailurePrompt || this.retrying.has(address) ||
-        this.db.raw.prepare("SELECT 1 FROM metrics_events WHERE name = ? AND ref = ? LIMIT 1").get("task.initial_retry", address)) return false;
+        this.db.stmt("SELECT 1 FROM metrics_events WHERE name = ? AND ref = ? LIMIT 1").get("task.initial_retry", address)) return false;
     this.retrying.add(address);
     try {
       if (typeof this.backend.get === "function") {
@@ -673,9 +673,7 @@ export class CaptureEngine {
     }
     // Completion: one open digest per task while unacknowledged.
     if (itemKind === "digest" && taskId) {
-      const existing = this.db
-        .listItems({ kind: "digest", status: "open" })
-        .find((i) => i.task_id === taskId);
+      const existing = this.db.findOpenItemForTask(taskId, "digest");
       if (existing) {
         this.db.updateItem(existing.id, {
           title: opts.title,
@@ -696,9 +694,7 @@ export class CaptureEngine {
     // Completion: one PR item per task. Reuse the one the periodic sync may
     // have created; stay unready until syncTaskPr verifies the gate.
     if (itemKind === "pr" && taskId) {
-      const existing = this.db
-        .listItems({ kind: "pr" })
-        .find((i) => i.task_id === taskId && i.status !== "archived");
+      const existing = this.db.findPrItemForTask(taskId);
       if (existing) {
         this.db.updateItem(existing.id, {
           title: opts.title,
@@ -792,7 +788,7 @@ export class CaptureEngine {
     });
     const updatedTask = this.db.getTask(taskId);
     if (updatedTask) this.hub.broadcast("task.updated", updatedTask);
-    const existing = this.db.listItems({ kind: "plan" }).find((i) => i.task_id === taskId && i.status === "open");
+    const existing = this.db.findOpenItemForTask(taskId, "plan");
     if (existing) {
       this.db.updateItem(existing.id, {
         title,
@@ -853,12 +849,7 @@ export function resumeSnoozedItems(
 ): Item[] {
   const { taskId = null, address = null } = target;
   if (!taskId && !address) return [];
-  const snoozed = db.listItems({ status: "open" }).filter(
-    (item) =>
-      item.snooze_until_ms !== null &&
-      item.snooze_until_ms > now &&
-      ((taskId !== null && item.task_id === taskId) || (address !== null && item.source_ref === address)),
-  );
+  const snoozed = db.listSnoozedOpenItemsFor({ taskId, address, now });
   if (snoozed.length === 0) return [];
   const updated: Item[] = [];
   let reopenTaskId: string | null = null;

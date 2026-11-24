@@ -182,21 +182,21 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
   const since = now - days * DAY;
 
   const count = (sql: string, ...args: (string | number)[]): number =>
-    (db.raw.prepare(sql).get(...args) as { n: number }).n;
+    (db.stmt(sql).get(...args) as { n: number }).n;
 
   // Tasks recently touched, plus every task an item or task event points at.
   const taskCount = count("SELECT COUNT(*) AS n FROM tasks WHERE updated_ms >= ?", since);
-  const recentTasks = db.raw
-    .prepare("SELECT * FROM tasks WHERE updated_ms >= ? ORDER BY updated_ms DESC LIMIT ?")
+  const recentTasks = db
+    .stmt("SELECT * FROM tasks WHERE updated_ms >= ? ORDER BY updated_ms DESC LIMIT ?")
     .all(since, taskLimit) as unknown as Task[];
 
   const itemCount = count("SELECT COUNT(*) AS n FROM items WHERE created_ms >= ? OR status = 'open'", since);
-  const itemRows = db.raw
-    .prepare("SELECT * FROM items WHERE created_ms >= ? OR status = 'open' ORDER BY created_ms DESC LIMIT ?")
+  const itemRows = db
+    .stmt("SELECT * FROM items WHERE created_ms >= ? OR status = 'open' ORDER BY created_ms DESC LIMIT ?")
     .all(since, itemLimit) as unknown as Item[];
 
-  const taskEventRefs = db.raw
-    .prepare("SELECT DISTINCT ref FROM metrics_events WHERE ts >= ? AND name LIKE 'task.%' AND ref IS NOT NULL")
+  const taskEventRefs = db
+    .stmt("SELECT DISTINCT ref FROM metrics_events WHERE ts >= ? AND name LIKE 'task.%' AND ref IS NOT NULL")
     .all(since) as { ref: string }[];
   const recentIds = new Set(recentTasks.map((t) => t.id));
   const candidateLinkedIds = [...new Set([
@@ -221,8 +221,8 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
   const inTaskWindow = new Set(recentTasks.map((t) => t.id));
 
   // Aggregate counts do not depend on the event cap.
-  const aggregates = db.raw
-    .prepare("SELECT ref, name, COUNT(*) AS count, MIN(ts) AS first_ms, MAX(ts) AS last_ms FROM metrics_events WHERE ts >= ? AND ref IS NOT NULL GROUP BY ref, name")
+  const aggregates = db
+    .stmt("SELECT ref, name, COUNT(*) AS count, MIN(ts) AS first_ms, MAX(ts) AS last_ms FROM metrics_events WHERE ts >= ? AND ref IS NOT NULL GROUP BY ref, name")
     .all(since) as unknown as AggregateRow[];
   const aggByRef = new Map<string, Map<string, AggregateRow>>();
   for (const row of aggregates) {

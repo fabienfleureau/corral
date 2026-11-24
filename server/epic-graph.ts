@@ -127,14 +127,30 @@ export function epicSummary(views: EpicTaskView[]): EpicSummary {
  * longer ready, so the inbox never offers to launch something stale.
  */
 export function archiveEpicLaunchItems(db: Db, hub: Hub): void {
-  const items = db.listItems();
-  for (const epic of db.listEpics()) {
-    const views = epicViews(db.listEpicTasks(epic.id), db.listEpicLinks(epic.id), items);
+  const launchItems = db.listItems({ kind: "launch", status: "open" });
+  if (launchItems.length === 0) return;
+  const byTaskId = new Map<string, Item[]>();
+  for (const item of launchItems) {
+    if (!item.task_id) continue;
+    const list = byTaskId.get(item.task_id);
+    if (list) list.push(item);
+    else byTaskId.set(item.task_id, [item]);
+  }
+  if (byTaskId.size === 0) return;
+  const epicIds = new Set<string>();
+  for (const task of db.getTasksByIds([...byTaskId.keys()])) {
+    if (task.epic_id) epicIds.add(task.epic_id);
+  }
+  if (epicIds.size === 0) return;
+  const prItems = db.listActivePrItems();
+  for (const epicId of epicIds) {
+    const views = epicViews(db.listEpicTasks(epicId), db.listEpicLinks(epicId), prItems);
     for (const v of views) {
-      const existing = items.find((i) => i.kind === "launch" && i.task_id === v.task.id && i.status === "open");
-      if (!existing || v.state === "ready") continue;
-      db.updateItem(existing.id, { status: "archived", resolved_ms: Date.now() });
-      hub.broadcast("item.updated", db.getItem(existing.id));
+      if (v.state === "ready") continue;
+      for (const existing of byTaskId.get(v.task.id) ?? []) {
+        db.updateItem(existing.id, { status: "archived", resolved_ms: Date.now() });
+        hub.broadcast("item.updated", db.getItem(existing.id));
+      }
     }
   }
 }
