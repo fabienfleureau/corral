@@ -193,6 +193,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [grillOpen, setGrillOpen] = useState(false);
   const [planViewing, setPlanViewing] = useState<{ revisionId: string | null; version: number | null }>({ revisionId: null, version: null });
   const [planConflict, setPlanConflict] = useState<PlanStaleConflict | null>(null);
+  const [approvePlanBusy, setApprovePlanBusy] = useState(false);
+  const [planNotice, setPlanNotice] = useState<{ kind: "ok" | "warn"; text: string } | null>(null);
 
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -417,6 +419,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
     setStatusFilter(next);
     setSelected(null);
     setSelectedTaskId(null);
+    setPlanNotice(null);
   };
 
   const linkedTask = selected?.task_id ? tasksById[selected.task_id] ?? null : null;
@@ -580,6 +583,19 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
       />
 
       <div className="detail-pane">
+        {planNotice ? (
+          <div
+            className={`plan-approve-notice plan-approve-notice-${planNotice.kind}`}
+            role={planNotice.kind === "warn" ? "alert" : "status"}
+          >
+            <span>
+              {planNotice.text} <a href="#/tasks">Open tasks</a>
+            </span>
+            <button type="button" className="btn" onClick={() => setPlanNotice(null)}>
+              Dismiss
+            </button>
+          </div>
+        ) : null}
         {selectedTask ? (
           <>
             <div className="detail-head">
@@ -715,11 +731,25 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     onClick={() => void (async () => {
                       if (actionsLocked) return;
                       setActionBusy(true);
+                      setApprovePlanBusy(true);
                       setActionError(null);
                       setPlanConflict(null);
+                      setPlanNotice(null);
                       try {
-                        await api.approvePlan(linkedTask.id, planViewing.revisionId ?? undefined);
+                        const res = await api.approvePlan(linkedTask.id, planViewing.revisionId ?? undefined);
                         if (planViewing.revisionId) clearPlanDraft(window.localStorage, linkedTask.id, planViewing.revisionId);
+                        const total = res.children.length;
+                        const errors = res.dispatch_errors ?? [];
+                        const dispatched = total - errors.length;
+                        const noun = total === 1 ? "task" : "tasks";
+                        if (errors.length === 0) {
+                          setPlanNotice({ kind: "ok", text: `Plan approved: ${total} ${noun} created and dispatched.` });
+                        } else {
+                          setPlanNotice({
+                            kind: "warn",
+                            text: `Plan approved: ${total} ${noun} created (${dispatched} dispatched). Dispatch failed for ${errors.map((e) => `${e.title}: ${e.error}`).join("; ")}`,
+                          });
+                        }
                         applyItem({ ...selected, status: "resolved", resolved_ms: Date.now() });
                         lockActions();
                       } catch (err: unknown) {
@@ -734,14 +764,15 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                           setActionError(errText(err));
                         }
                       } finally {
+                        setApprovePlanBusy(false);
                         setActionBusy(false);
                       }
                     })()}
                     disabled={actionsLocked}
-                    title="Create one task per sub-project, each carrying the contract"
+                    title="Create and dispatch one task per sub-project, each carrying the contract"
                   >
-                    {actionBusy ? <Spinner /> : null}
-                    Approve plan
+                    {approvePlanBusy ? <Spinner /> : null}
+                    {approvePlanBusy ? "Approving…" : "Approve plan"}
                   </button>
                 ) : null}
                 {selected.kind === "launch" && selected.status === "open" && linkedTask ? (

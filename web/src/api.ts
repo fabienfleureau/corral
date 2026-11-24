@@ -6,7 +6,7 @@ import type { ImprovementMetrics } from "../../shared/improvement-metrics";
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
 import type { AttachmentInput } from "./attachments";
-import type { AgentQuota, Config, DailyActivity, Epic, EpicDetail, EpicSummary, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlanReview, PlanReviewComment, PlanRevisionsResponse, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, TrackedTerminal, UsageRange, UsageReport } from "./types";
+import type { AgentQuota, ApprovePlanResponse, Config, DailyActivity, Epic, EpicDetail, EpicSummary, Item, JiraImportResult, JiraSearchResult, ModelAvailability, ModelCatalog, PlanReview, PlanReviewComment, PlanRevisionsResponse, PlatformRateLimit, Pull, Repo, SessionInfo, Task, TaskEvent, TrackedTerminal, UsageRange, UsageReport } from "./types";
 
 /** Schedule and run state of a server-side analysis (improvement, skills). */
 export type AnalysisStatus = { intervalDays: number; lastSuccessMs: number | null; lastAttemptMs: number | null; error: string | null; running: boolean };
@@ -266,8 +266,8 @@ export const api = {
     input: { revision_id: string; note?: string; comments?: PlanReviewComment[] },
   ): Promise<{ review: PlanReview; item: Item | null; sent_to: string }> =>
     post<{ review: PlanReview; item: Item | null; sent_to: string }>(`/api/tasks/${taskId}/request-plan-changes`, input),
-  approvePlan: (taskId: string, revisionId?: string): Promise<{ children: Task[] }> =>
-    post<{ children: Task[] }>(`/api/tasks/${taskId}/approve-plan`, revisionId ? { revision_id: revisionId } : undefined),
+  approvePlan: (taskId: string, revisionId?: string): Promise<ApprovePlanResponse> =>
+    post<ApprovePlanResponse>(`/api/tasks/${taskId}/approve-plan`, revisionId ? { revision_id: revisionId } : undefined),
   patchTask: (id: string, input: Partial<Task>): Promise<Task> => patch<Task>(`/api/tasks/${id}`, input),
   requestArtifact: (id: string): Promise<{ ok: boolean }> => post(`/api/tasks/${id}/artifact`),
   /** Archive a task with its session when it has one; otherwise just archive the task. */

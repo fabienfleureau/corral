@@ -15,16 +15,21 @@ import { createHttpServer, type AppState } from "../api.ts";
 import type { WorkerBackend, WorkerStart, WorkerSession } from "../worker.ts";
 import type { Item, Task } from "../types.ts";
 
-function fakeBackend(opts: { sendError?: Error } = {}) {
+function fakeBackend(opts: { sendError?: Error; startError?: (s: WorkerStart) => Error | null } = {}) {
   const started: WorkerStart[] = [];
   const sent: { address: string; message: string }[] = [];
   let sendError: Error | null = opts.sendError ?? null;
+  let startError: ((s: WorkerStart) => Error | null) | null = opts.startError ?? null;
   const backend = {
     name: "fake",
     async start(s: WorkerStart): Promise<WorkerSession> {
+      if (startError) {
+        const err = startError(s);
+        if (err) throw err;
+      }
       started.push(s);
       return {
-        address: "s1", task_id: s.taskId, name: s.name, harness: s.harness, status: "working",
+        address: `s${started.length}`, task_id: s.taskId, name: s.name, harness: s.harness, status: "working",
         blocked_kind: null, state: "live", turn: 1, cwd: s.repoPath, created_ms: Date.now(), exit_code: null, parent: null,
       };
     },
@@ -41,7 +46,13 @@ function fakeBackend(opts: { sendError?: Error } = {}) {
     tree: async () => [],
     onEvent: () => ({ stop: () => undefined }),
   } as WorkerBackend;
-  return { backend, started, sent, setSendError: (err: Error | null) => { sendError = err; } };
+  return {
+    backend,
+    started,
+    sent,
+    setSendError: (err: Error | null) => { sendError = err; },
+    setStartError: (fn: ((s: WorkerStart) => Error | null) | null) => { startError = fn; },
+  };
 }
 
 /** A folder holding two git repos and one plain directory. */
@@ -52,6 +63,7 @@ function withFolder(fn: (ctx: {
   started: WorkerStart[];
   sent: { address: string; message: string }[];
   setSendError: (err: Error | null) => void;
+  setStartError: (fn: ((s: WorkerStart) => Error | null) | null) => void;
   call: (m: string, p: string, b?: unknown) => Promise<Response>;
 }) => Promise<void>): () => Promise<void> {
   return async () => {
@@ -63,7 +75,7 @@ function withFolder(fn: (ctx: {
     }
     mkdirSync(join(folder, "docs"));
     const db = new Db(join(dir, "test.db"));
-    const { backend, started, sent, setSendError } = fakeBackend();
+    const { backend, started, sent, setSendError, setStartError } = fakeBackend();
     const hub = { broadcast: () => undefined };
     const capture = new CaptureEngine(db, backend, hub);
     const server = createHttpServer({ db, backend, hub, capture, cfg: { token: "test", configDir: dir, host: "localhost", port: 4787 } } as unknown as AppState);
@@ -75,7 +87,7 @@ function withFolder(fn: (ctx: {
     const home = process.env.HOME;
     process.env.HOME = dir; // dispatch pre-trusts the workspace in ~/.claude.json
     try {
-      await fn({ db, dir, folder, started, sent, setSendError, call });
+      await fn({ db, dir, folder, started, sent, setSendError, setStartError, call });
     } finally {
       process.env.HOME = home;
       server.closeAllConnections();
@@ -175,7 +187,7 @@ test("plan report: a plan needs a spec task, and unsafe sub-task repos are refus
   assert.equal(db.getTask(task.id)?.spec ?? null, null);
 }));
 
-test("approve: creates one code task per sub-task, completes the spec, and each child gets the contract", withFolder(async ({ db, folder, started, call }) => {
+test("approve: creates and dispatches one code task per sub-task, completes the spec, and each child gets the contract", withFolder(async ({ db, folder, started, call }) => {
   const task = (await (await call("POST", "/api/tasks", { kind: "spec", prompt: "p", repo_path: folder, target: "claude" })).json()) as Task;
   assert.equal((await call("POST", `/api/tasks/${task.id}/approve-plan`)).status, 400, "no plan yet");
   await call("POST", "/api/reports", plan(task.id, [
@@ -188,29 +200,38 @@ test("approve: creates one code task per sub-task, completes the spec, and each 
   assert.equal((await call("POST", `/api/tasks/${task.id}/approve-plan`)).status, 400, "revision_id required");
   const res = await call("POST", `/api/tasks/${task.id}/approve-plan`, { revision_id: storedSpec.revision_id });
   assert.equal(res.status, 200);
-  const { children } = (await res.json()) as { children: Task[] };
+  const { children, dispatch_errors } = (await res.json()) as { children: Task[]; dispatch_errors: unknown[] };
   assert.equal(children.length, 2);
+  assert.deepEqual(dispatch_errors, []);
   for (const child of children) {
     assert.equal(child.kind, "code");
     assert.equal(child.parent_task_id, task.id);
-    assert.equal(child.status, "open");
+    assert.equal(child.status, "dispatched");
     assert.equal(child.target, "claude");
+    assert.equal(child.target_state, "confirmed");
+    assert.ok(child.branch, "dispatched child has a branch");
     assert.ok(db.getRepoByPath(child.repo_path), "sub-repo is registered");
   }
+  assert.deepEqual(children.map((c) => c.terminal_address), ["s1", "s2"]);
   assert.deepEqual(children.map((c) => c.repo_path.split("/").pop()), ["spec", "core"]);
   assert.equal(db.getTask(task.id)?.status, "done");
   assert.equal(db.listItems({ kind: "plan" })[0].status, "resolved");
   assert.equal((await call("POST", `/api/tasks/${task.id}/approve-plan`, { revision_id: storedSpec.revision_id })).status, 400, "approval is once");
 
-  // A child dispatch carries the parent's contract, and the normal PR flow.
-  const dispatched = await call("POST", `/api/tasks/${children[1].id}/dispatch`, { target: "claude" });
-  assert.equal(dispatched.status, 200);
-  const prompt = started[0].prompt;
-  assert.match(prompt, /Multi-repo contract/);
-  assert.match(prompt, /POST \/v1\/x returns/);
-  assert.match(prompt, /Implement POST \/v1\/x/);
-  assert.match(prompt, /glab mr create/);
-  assert.equal(started[0].repoPath, children[1].repo_path);
+  // Both children were immediately dispatched with worktrees, the parent's contract, and the normal PR flow.
+  assert.equal(started.length, 2);
+  assert.notEqual(started[0].git, null);
+  assert.notEqual(started[1].git, null);
+  assert.equal(started[0].repoPath, children[0].repo_path);
+  assert.equal(started[1].repoPath, children[1].repo_path);
+  assert.match(started[0].prompt, /Multi-repo contract/);
+  assert.match(started[0].prompt, /POST \/v1\/x returns/);
+  assert.match(started[0].prompt, /Edit openapi\.yaml/);
+  assert.match(started[0].prompt, /glab mr create/);
+  assert.match(started[1].prompt, /Multi-repo contract/);
+  assert.match(started[1].prompt, /POST \/v1\/x returns/);
+  assert.match(started[1].prompt, /Implement POST \/v1\/x/);
+  assert.match(started[1].prompt, /glab mr create/);
 }));
 
 test("approve: refuses a non-spec task and a plan whose folder changed", withFolder(async ({ db, folder, call }) => {
@@ -307,7 +328,7 @@ test("plan revisions: multi-revision lifecycle, request changes, handling state,
   assert.equal(hist2.reviews[0].revision_id, hist1.revisions[0].id);
 }));
 
-test("plan revisions: stale revision returns 409 on request-changes and approve, v2 approval succeeds and blocks v3", withFolder(async ({ db, folder, sent, call }) => {
+test("plan revisions: stale revision returns 409 on request-changes and approve, v2 approval succeeds and blocks v3", withFolder(async ({ db, folder, started, sent, call }) => {
   const task = (await (await call("POST", "/api/tasks", { kind: "spec", prompt: "p", repo_path: folder })).json()) as Task;
   await call("POST", `/api/tasks/${task.id}/dispatch`, { target: "claude" });
   await call("POST", "/api/reports", plan(task.id, [{ repo: "spec", title: "v1", prompt: "p1" }]));
@@ -335,10 +356,16 @@ test("plan revisions: stale revision returns 409 on request-changes and approve,
   assert.equal(staleApproveBody.current_version, 2);
   assert.equal(db.listTasks().filter((t) => t.parent_task_id === task.id).length, 0);
 
-  // Tab B approves v2 -> 200 and creates child task.
+  // Tab B approves v2 -> 200 and creates and dispatches child task.
   const okApprove = await call("POST", `/api/tasks/${task.id}/approve-plan`, { revision_id: v2Id });
   assert.equal(okApprove.status, 200);
+  const { children, dispatch_errors } = (await okApprove.json()) as { children: Task[]; dispatch_errors: unknown[] };
+  assert.equal(children.length, 1);
+  assert.deepEqual(dispatch_errors, []);
+  assert.equal(children[0].status, "dispatched");
   assert.equal(db.listTasks().filter((t) => t.parent_task_id === task.id).length, 1);
+  assert.equal(started.length, 2);
+  assert.match(started[1].prompt, /p2/);
 
   // Further plan reports after approval are rejected with 409.
   const afterApprove = await call("POST", "/api/reports", plan(task.id, [{ repo: "spec", title: "v3", prompt: "p3" }]));
@@ -380,15 +407,104 @@ test("plan revisions: backwards compatibility for legacy spec tasks without plan
   assert.equal(hist.revisions[0].version, 1);
   assert.equal(hist.revisions[0].contract, "Legacy contract text");
 
-  // Legacy spec without revision_id can still be approved without sending revision_id.
+  // Legacy spec without revision_id can still be approved without sending revision_id, and dispatches directly.
   const approveRes = await call("POST", `/api/tasks/${task.id}/approve-plan`);
   assert.equal(approveRes.status, 200);
-  const { children } = (await approveRes.json()) as { children: Task[] };
+  const { children, dispatch_errors } = (await approveRes.json()) as { children: Task[]; dispatch_errors: unknown[] };
   assert.equal(children.length, 1);
-
-  const disp = await call("POST", `/api/tasks/${children[0].id}/dispatch`, { target: "claude" });
-  assert.equal(disp.status, 200);
+  assert.deepEqual(dispatch_errors, []);
+  assert.equal(children[0].status, "dispatched");
+  assert.equal(started.length, 1);
   assert.match(started[0].prompt, /Legacy contract text/);
+}));
+
+test("approve: inherits target, agent, model, and reasoning from the spec task on child dispatch", withFolder(async ({ db, folder, started, call }) => {
+  const task = (await (await call("POST", "/api/tasks", { kind: "spec", prompt: "p", repo_path: folder })).json()) as Task;
+  const specDispatch = await call("POST", `/api/tasks/${task.id}/dispatch`, {
+    target: "claude",
+    agent: "custom-agent",
+    model: "claude-sonnet-4-6",
+    reasoning: "high",
+  });
+  assert.equal(specDispatch.status, 200);
+  await call("POST", "/api/reports", plan(task.id, [
+    { repo: "spec", title: "Spec change", prompt: "Update spec" },
+    { repo: "core", title: "Core change", prompt: "Update core" },
+  ]));
+  const revId = (JSON.parse(db.getTask(task.id)!.spec!) as { revision_id: string }).revision_id;
+  const approveRes = await call("POST", `/api/tasks/${task.id}/approve-plan`, { revision_id: revId });
+  assert.equal(approveRes.status, 200);
+  const { children, dispatch_errors } = (await approveRes.json()) as { children: Task[]; dispatch_errors: unknown[] };
+  assert.deepEqual(dispatch_errors, []);
+  assert.equal(children.length, 2);
+  for (const child of children) {
+    assert.equal(child.status, "dispatched");
+    assert.equal(child.target, "claude");
+    assert.equal(child.agent, "custom-agent");
+    assert.equal(child.model, "claude-sonnet-4-6");
+    assert.equal(child.reasoning, "high");
+  }
+  assert.equal(started.length, 3);
+  for (const childStart of started.slice(1)) {
+    assert.equal(childStart.harness, "claude");
+    assert.equal(childStart.agent, "custom-agent");
+    assert.equal(childStart.model, "claude-sonnet-4-6");
+    assert.equal(childStart.reasoning, "high");
+  }
+}));
+
+test("approve: partial dispatch failure keeps failed child open, records dispatch_errors, preserves idempotency, and allows manual retry", withFolder(async ({ db, folder, setStartError, call }) => {
+  const task = (await (await call("POST", "/api/tasks", { kind: "spec", prompt: "p", repo_path: folder, target: "claude" })).json()) as Task;
+  await call("POST", "/api/reports", plan(task.id, [
+    { repo: "spec", title: "Add x to the spec", prompt: "Edit openapi.yaml" },
+    { repo: "core", title: "Serve x", prompt: "Implement POST /v1/x" },
+  ]));
+  const revId = (JSON.parse(db.getTask(task.id)!.spec!) as { revision_id: string }).revision_id;
+
+  setStartError((s) => (s.repoPath.endsWith("/core") ? new Error("omnigent down") : null));
+  const res = await call("POST", `/api/tasks/${task.id}/approve-plan`, { revision_id: revId });
+  assert.equal(res.status, 200);
+  const { children, dispatch_errors } = (await res.json()) as {
+    children: Task[];
+    dispatch_errors: { task_id: string; title: string; error: string }[];
+  };
+  assert.equal(children.length, 2);
+  assert.equal(children[0].status, "dispatched");
+  assert.equal(children[1].status, "open");
+  assert.equal(children[1].terminal_address, null);
+  assert.equal(dispatch_errors.length, 1);
+  assert.equal(dispatch_errors[0].task_id, children[1].id);
+  assert.equal(dispatch_errors[0].title, "Serve x");
+  assert.match(dispatch_errors[0].error, /omnigent down/);
+
+  assert.equal(db.getTask(task.id)?.status, "done");
+  assert.equal(db.listItems({ kind: "plan" })[0].status, "resolved");
+  assert.equal((await call("POST", `/api/tasks/${task.id}/approve-plan`, { revision_id: revId })).status, 400, "approval remains once-only");
+
+  setStartError(null);
+  const retryRes = await call("POST", `/api/tasks/${children[1].id}/dispatch`, { target: "claude" });
+  assert.equal(retryRes.status, 200);
+  assert.equal(db.getTask(children[1].id)?.status, "dispatched");
+}));
+
+test("approve: spec task without target creates open children and reports them in dispatch_errors", withFolder(async ({ db, folder, started, call }) => {
+  const task = (await (await call("POST", "/api/tasks", { kind: "spec", prompt: "p", repo_path: folder })).json()) as Task;
+  await call("POST", "/api/reports", plan(task.id, [
+    { repo: "core", title: "Serve x", prompt: "Implement POST /v1/x" },
+  ]));
+  const revId = (JSON.parse(db.getTask(task.id)!.spec!) as { revision_id: string }).revision_id;
+  const res = await call("POST", `/api/tasks/${task.id}/approve-plan`, { revision_id: revId });
+  assert.equal(res.status, 200);
+  const { children, dispatch_errors } = (await res.json()) as {
+    children: Task[];
+    dispatch_errors: { task_id: string; title: string; error: string }[];
+  };
+  assert.equal(children.length, 1);
+  assert.equal(children[0].status, "open");
+  assert.equal(dispatch_errors.length, 1);
+  assert.equal(dispatch_errors[0].task_id, children[0].id);
+  assert.match(dispatch_errors[0].error, /no harness/);
+  assert.equal(started.length, 0);
 }));
 
 test("dispatch: a spec on a missing folder fails, a code task on a non-git folder still fails", withFolder(async ({ db, folder }) => {

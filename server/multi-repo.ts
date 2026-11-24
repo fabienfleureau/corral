@@ -1,7 +1,7 @@
 // Multi-repo tasks. A `spec` task runs in a folder of sub-projects, writes the
 // contract between them and proposes one code task per sub-project. The human
-// approves the plan in the inbox; approval creates the code tasks. The contract
-// lives on the spec task and is read back at each child's dispatch.
+// approves the plan in the inbox; approval creates and dispatches the code
+// tasks. The contract lives on the spec task and is read back at each child's dispatch.
 
 import { randomUUID } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
@@ -256,11 +256,28 @@ export async function requestPlanChanges(
   return { review, item: updatedItem, sent_to: address };
 }
 
+export interface PlanDispatchFailure {
+  task_id: string;
+  title: string;
+  error: string;
+}
+
+export interface ApprovePlanResult {
+  children: Task[];
+  dispatch_errors: PlanDispatchFailure[];
+}
+
 /**
- * Create one code task per proposed sub-task and complete the spec task.
+ * Create and dispatch one code task per proposed sub-task and complete the spec task.
  * Idempotent per spec: a second approval is refused.
  */
-export function approvePlan(db: Db, hub: Hub, parent: Task, revisionId?: string): Task[] {
+export async function approvePlan(
+  db: Db,
+  hub: Hub,
+  parent: Task,
+  revisionId: string | undefined,
+  dispatchChild: (child: Task, target: string) => Promise<unknown>,
+): Promise<ApprovePlanResult> {
   if (parent.kind !== "spec") throw new PlanError("only spec tasks have a plan");
   const spec = readSpec(parent);
   if (!spec) throw new PlanError("the spec task has no plan yet");
@@ -285,8 +302,9 @@ export function approvePlan(db: Db, hub: Hub, parent: Task, revisionId?: string)
     repo_path: realpathSync(resolve(parent.repo_path, s.repo)),
     target: parent.target,
     target_state: "suggested",
-    model: null,
-    reasoning: null,
+    agent: parent.agent ?? null,
+    model: parent.model ?? null,
+    reasoning: parent.reasoning ?? null,
     base_branch: null,
     branch: null,
     worktree_path: null,
@@ -316,15 +334,56 @@ export function approvePlan(db: Db, hub: Hub, parent: Task, revisionId?: string)
   }
   const stored: TaskSpec = { ...spec, subtasks, children: children.map((c) => c.id) };
   db.updateTask(parent.id, { spec: JSON.stringify(stored), status: "done" });
-  logTaskEvent(db, parent.id, "session", `Plan approved: ${children.length} tasks created`, {
-    children: stored.children,
-    ...(spec.revision_id ? { revision_id: spec.revision_id } : {}),
-    ...(spec.version ? { version: spec.version } : {}),
-  });
   for (const item of db.listOpenItemsForTask(parent.id, "plan")) {
     db.updateItem(item.id, { status: "resolved", resolved_ms: now });
     hub.broadcast("item.updated", db.getItem(item.id));
   }
   hub.broadcast("task.updated", db.getTask(parent.id));
-  return children;
+
+  const dispatch_errors: PlanDispatchFailure[] = [];
+  const finalChildren: Task[] = [];
+  for (const child of children) {
+    const target = child.target.trim();
+    if (!target) {
+      const error = "task has no harness — pick one on the Tasks page to dispatch";
+      dispatch_errors.push({ task_id: child.id, title: child.title, error });
+      logTaskEvent(db, child.id, "session", "Auto-dispatch after plan approval skipped: no harness", {
+        source: "multi-repo",
+        parent: parent.id,
+        error,
+      });
+      finalChildren.push(db.getTask(child.id) ?? child);
+      continue;
+    }
+    try {
+      await dispatchChild(child, target);
+      const updated = db.getTask(child.id) ?? child;
+      hub.broadcast("task.updated", updated);
+      finalChildren.push(updated);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      dispatch_errors.push({ task_id: child.id, title: child.title, error });
+      logTaskEvent(db, child.id, "session", "Auto-dispatch after plan approval failed", {
+        source: "multi-repo",
+        parent: parent.id,
+        error,
+      });
+      finalChildren.push(db.getTask(child.id) ?? child);
+    }
+  }
+
+  const dispatchedCount = finalChildren.length - dispatch_errors.length;
+  const noun = finalChildren.length === 1 ? "task" : "tasks";
+  const summary = dispatch_errors.length === 0
+    ? `Plan approved: ${finalChildren.length} ${noun} created and dispatched`
+    : `Plan approved: ${finalChildren.length} ${noun} created (${dispatchedCount} dispatched, ${dispatch_errors.length} failed)`;
+  logTaskEvent(db, parent.id, "session", summary, {
+    children: stored.children,
+    dispatched: dispatchedCount,
+    ...(dispatch_errors.length ? { dispatch_errors } : {}),
+    ...(spec.revision_id ? { revision_id: spec.revision_id } : {}),
+    ...(spec.version ? { version: spec.version } : {}),
+  });
+
+  return { children: finalChildren, dispatch_errors };
 }
