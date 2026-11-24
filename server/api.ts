@@ -25,6 +25,7 @@ import { summarizeText, llmComplete } from "./llm.ts";
 import { ensureTaskTitle, type TitleCompleter } from "./task-title.ts";
 import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
+import { DEFAULT_METRIC_DAYS, DEFAULT_WAIT_DAYS, STOPPED_RETRY_PIVOT_MS, prWaitSplit, stoppedRunRate } from "./improvement-metrics.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
 import { KPI_IDS } from "../shared/kpis.ts";
@@ -309,6 +310,16 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!isInterval(days)) return json(res, 400, { error: "Invalid interval" });
     improvement.setIntervalDays(days);
     json(res, 200, improvement.status());
+  });
+  on("GET", "/api/improvement/metrics", (_req, res, { url }) => {
+    const days = Number(url.searchParams.get("days") ?? DEFAULT_METRIC_DAYS);
+    const pivotRaw = url.searchParams.get("pivot");
+    const pivot = pivotRaw === null ? STOPPED_RETRY_PIVOT_MS : /^\d+$/.test(pivotRaw) ? Number(pivotRaw) : Date.parse(pivotRaw);
+    if (!Number.isInteger(days) || days < 1 || days > 90) return json(res, 400, { error: "days must be an integer from 1 to 90" });
+    if (!Number.isFinite(pivot)) return json(res, 400, { error: "Invalid pivot" });
+    const waitDays = Number(url.searchParams.get("wait_days") ?? DEFAULT_WAIT_DAYS);
+    if (!Number.isInteger(waitDays) || waitDays < 1 || waitDays > 365) return json(res, 400, { error: "wait_days must be an integer from 1 to 365" });
+    json(res, 200, { stopped_runs: stoppedRunRate(state.db, { pivot_ms: pivot, days }), pr_wait: prWaitSplit(state.db, { days: waitDays }) });
   });
   on("POST", "/api/improvement/run", async (_req, res) => {
     try { json(res, 200, await improvement.run()); }

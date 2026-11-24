@@ -2,6 +2,8 @@ import { Db } from "../server/db.ts";
 import type { Favorite } from "../server/favorites.ts";
 import { prItemBody, type PrInfo } from "../server/pr.ts";
 import { classifyPrTriage } from "../server/pr-triage.ts";
+import { STOPPED_RETRY_PIVOT_MS } from "../server/improvement-metrics.ts";
+import { STOPPED_ESCALATED_METRIC } from "../server/stopped-retry.ts";
 import type { Pull } from "../server/pulls.ts";
 import type { Item, Task } from "../server/types.ts";
 import type { TaskEvent } from "../server/task-events.ts";
@@ -59,6 +61,52 @@ export function seedScreenshotData(db: Db): void {
   seedPulls(db, now);
   seedKpis(db, now);
   seedAgentRuns(db, now);
+  seedStoppedRuns(db);
+  seedPrWaits(db);
+}
+
+/** Dispatch, ready-for-review and resolution times for the Improve page's PR
+ *  wait table. Its window ends at the real now, so these follow Date.now();
+ *  merged PRs are archived items on tasks no board lists them for; the open
+ *  one reuses the epic's existing PR item and only gains events. */
+function seedPrWaits(db: Db): void {
+  const now = Date.now();
+  const hour = 3_600_000;
+  const insert = db.raw.prepare("INSERT INTO metrics_events (ts, name, ref, data) VALUES (?, ?, ?, ?)");
+  const waits: { task: string; item: string; dispatched: number; ready: number; merged: number | null }[] = [
+    { task: "sample-running", item: "fixture-pr-merged-1", dispatched: 80, ready: 74, merged: 50 },
+    { task: "sample-epic-request", item: "fixture-pr-merged-2", dispatched: 60, ready: 58, merged: 20 },
+    { task: "sample-open", item: "fixture-pr-merged-3", dispatched: 40, ready: 31, merged: 29 },
+    { task: "sample-epic-EX-102", item: "sample-epic-pr-EX-102", dispatched: 30, ready: 26, merged: null },
+  ];
+  for (const w of waits) {
+    if (w.merged !== null) {
+      db.insertItem({
+        id: w.item, kind: "pr", status: "archived", title: "PR merged", summary: "", body: "", context: "", options: null,
+        ready: 1, handling: 0, source_ref: null, task_id: w.task, structured: 1, created_ms: now - w.ready * hour,
+        updated_ms: now - w.merged * hour, resolved_ms: now - w.merged * hour, snooze_until_ms: null,
+      });
+    }
+    insert.run(now - w.dispatched * hour, "task.dispatched", w.task, JSON.stringify({ target: "claude" }));
+    insert.run(now - w.ready * hour, "item.ready_for_review", w.item, JSON.stringify({ task_id: w.task }));
+  }
+}
+
+/** Dispatches and stopped-run escalations around the default pivot, so the
+ *  Improve page's stopped-run table has rows. The pivot is fixed, unlike `now`. */
+function seedStoppedRuns(db: Db): void {
+  const hour = 3_600_000;
+  const insert = db.raw.prepare("INSERT INTO metrics_events (ts, name, ref, data) VALUES (?, ?, ?, ?)");
+  const runs: [number, string, string, boolean][] = [
+    [-90, "sample-done", "codex", true], [-80, "sample-done", "codex", false], [-70, "sample-pr-task", "claude", true],
+    [-60, "sample-pr-task", "claude", true], [-50, "sample-stopped-task", "claude", false], [-40, "sample-open", "codex", true],
+    [2, "sample-done", "codex", false], [4, "sample-pr-task", "claude", true], [6, "sample-stopped-task", "claude", false],
+  ];
+  for (const [offset, taskId, target, escalated] of runs) {
+    const ts = STOPPED_RETRY_PIVOT_MS + offset * hour;
+    insert.run(ts, "task.dispatched", taskId, JSON.stringify({ target }));
+    if (escalated) insert.run(ts + hour, STOPPED_ESCALATED_METRIC, taskId, JSON.stringify({ item_id: `fixture-stop-${offset}`, category: "silent", attempts: 1 }));
+  }
 }
 
 /** The fixture has no worker, so seed the tracked terminals Corral would have
