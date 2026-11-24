@@ -40,6 +40,7 @@ type Task = {
   jira_key: string | null; jira_url: string | null; jira_parent_key: string | null;
   jira_status: string | null; // Jira status last reached by the status sync (cached; written by the sync)
   status: "open" | "dispatched" | "done" | "archived";
+  outcome: "merged" | "closed" | "reported" | null; // how the task ended: its PR merged or closed unmerged, or the agent reported done with no PR (ADR 0022); null while open, when marked done by hand, or before this field existed
   terminal_address: string | null; exit_code: number | null;
   created_ms: number; updated_ms: number;
 };
@@ -189,7 +190,7 @@ a dispatch or a PR sync.
   Evidence is included in the task prompt. Scheduled runs catch up after restart and failed launches retry after one hour.
 
 ### Misc
-- `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`. A `plan` report (`{task_id, kind:"plan", title, contract, subtasks:[{repo,title,prompt}]}`, spec tasks only) appends a new `plan_revisions` row (`version = prev + 1`), updates `tasks.spec` to the latest revision, and creates or refreshes the single open `plan` item with `handling: 0` (409 if the plan is already approved); every `repo` must be a git repository root inside the task folder (relative, no `..`, no symlink out; ≤12, no duplicates) or the report is refused with 400. A spec task is dispatched with `skills/spec.md` in `repo_path` itself, no worktree, no branch, no PR sync. A `done` report on a review or ops task creates a `digest` item (no PR gate); those tasks are never PR-synced
+- `GET /api/reports` is not a route; agents POST structured questions to `POST /api/reports` `{task_id?, terminal?, kind, title, body}` → `Item`. A `plan` report (`{task_id, kind:"plan", title, contract, subtasks:[{repo,title,prompt}]}`, spec tasks only) appends a new `plan_revisions` row (`version = prev + 1`), updates `tasks.spec` to the latest revision, and creates or refreshes the single open `plan` item with `handling: 0` (409 if the plan is already approved); every `repo` must be a git repository root inside the task folder (relative, no `..`, no symlink out; ≤12, no duplicates) or the report is refused with 400. A spec task is dispatched with `skills/spec.md` in `repo_path` itself, no worktree, no branch, no PR sync. A `done` report on a task with a PR of its own (code, grill-docs with a PR) keeps the task in its status: the PR sync completes it when the PR merges (`outcome: "merged"`) or closes (`"closed"`), or as `"reported"` when no PR is found; while the PR is open, the end of the session does not complete it either (ADR 0022). A `done` report on a review or ops task creates a `digest` item (no PR gate) and completes the task with `outcome: "reported"`; those tasks are never PR-synced
 - `GET /api/metrics/summary` → `{by_name: [{name, count, last_ms}], recent: [{id, ts, name, ref, data}]}`
 - `GET /api/terminals` → tracked terminals `[{address, task_id, name, agent, last_status, last_turn, updated_ms}]`
 - `GET /api/config` → `{port, host, agents: string[], assistant, herdrSocket, worktreesDir, jiraConfigured, jiraJql, favorites: Favorite[], reviewers: Reviewer[], models: {[modelId]: ModelFacts}, token /* masked */}` — `models` holds only the user's overrides, not the shipped defaults.

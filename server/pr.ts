@@ -11,7 +11,7 @@ import { archiveEpicLaunchItems } from "./epic-graph.ts";
 import type { Db } from "./db.ts";
 import type { WorkerBackend } from "./worker.ts";
 import type { Hub } from "./capture.ts";
-import type { Item, MergeReadiness, Task } from "./types.ts";
+import type { Item, MergeReadiness, Task, TaskOutcome } from "./types.ts";
 import { DATA_NOT_INSTRUCTIONS, questionConvention, slugify } from "./dispatch.ts";
 import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraStage, type JiraTransitionGateway } from "./jira-status.ts";
@@ -597,6 +597,8 @@ interface PrMeta {
   checks_attempts?: { sha: string; count: number } | null;
   /** Last observed state; see PrSnapshot. */
   pr?: PrSnapshot;
+  /** When the agent reported done while the task stays open for its PR (ADR 0022). */
+  done_reported_ms?: number;
 }
 
 function readMeta(raw: string | null): PrMeta {
@@ -605,6 +607,38 @@ function readMeta(raw: string | null): PrMeta {
   } catch {
     return {};
   }
+}
+
+/** Tasks whose PR the loop follows: their own PR completes them. Review,
+ *  spec, analysis, ops and grill tasks have no PR of their own. */
+export function isPrSyncedTask(task: Pick<Task, "kind">): boolean {
+  return task.kind !== "review" && task.kind !== "spec" && task.kind !== "analysis" && task.kind !== "ops" && task.kind !== "grill";
+}
+
+/** The agent reported done on this task while its PR may still be open. */
+export function doneReported(task: Pick<Task, "pr_meta">): boolean {
+  return readMeta(task.pr_meta).done_reported_ms !== undefined;
+}
+
+/** Remember a done report: the task stays in its status until its PR merges
+ *  or closes (ADR 0022). Not task activity, so updated_ms is kept. */
+export function noteDoneReport(db: Db, taskId: string): void {
+  patchMeta(db, taskId, { done_reported_ms: Date.now() }, false);
+}
+
+/** Mark a task done with how it ended. A task already done or archived keeps
+ *  its status but still records the outcome its PR settled. */
+export function completeTask(db: Db, hub: Hub, taskId: string, outcome: TaskOutcome, how: string, message: string, data: Record<string, unknown> = {}): void {
+  const current = db.getTask(taskId);
+  if (!current) return;
+  const finish = current.status !== "done" && current.status !== "archived";
+  if (!finish && current.outcome === outcome) return;
+  db.updateTask(taskId, finish ? { status: "done", outcome } : { outcome }, finish);
+  if (finish) {
+    db.recordMetric("task.done", taskId, { how, outcome });
+    logTaskEvent(db, taskId, "pr", message, data);
+  }
+  hub.broadcast("task.updated", db.getTask(taskId));
 }
 
 function patchMeta(db: Db, taskId: string, patch: PrMeta, touch = true): void {
@@ -685,7 +719,7 @@ export interface SyncOptions {
 export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOptions = {}): Promise<PrInfo | null> {
   // A review task's pr_url is someone else's MR: its threads are not work for
   // the agent, and its merge does not complete the review.
-  if (staleTask.kind === "review" || staleTask.kind === "spec" || staleTask.kind === "analysis" || staleTask.kind === "ops" || staleTask.kind === "grill") return null;
+  if (!isPrSyncedTask(staleTask)) return null;
   const finder = opts.finder ?? findPr;
   const item = db.findPrItemForTask(staleTask.id);
   const reportedUrl = item?.body.match(/https?:\/\/[^\s<>)]+(?:\/pull\/|(?:\/-)?\/merge_requests\/)\d+/)?.[0];
@@ -854,6 +888,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
     }
     hub.broadcast("item.created", item);
     if (merged) await resolveMergedTask(db, hub, task, opts.backend);
+    else if (pr.state === "CLOSED") resolveClosedTask(db, hub, task);
     return pr;
   }
 
@@ -892,6 +927,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
     }
   }
   if (merged) await resolveMergedTask(db, hub, task, opts.backend);
+  else if (pr.state === "CLOSED") resolveClosedTask(db, hub, task);
   return pr;
 }
 
@@ -966,14 +1002,18 @@ async function resolveMergedTask(db: Db, hub: Hub, task: Task, backend: WorkerBa
     db.updateItem(item.id, { status: "archived", resolved_ms: item.resolved_ms ?? now });
     hub.broadcast("item.updated", db.getItem(item.id));
   }
-  const current = db.getTask(task.id);
-  if (current && current.status !== "done" && current.status !== "archived") {
-    db.updateTask(task.id, { status: "done" });
-    db.recordMetric("task.done", task.id, { how: "pr-merged" });
-    logTaskEvent(db, task.id, "pr", "PR merged — task done, inbox items archived", { pr: current.pr_url });
-    hub.broadcast("task.updated", db.getTask(task.id));
-  }
+  completeTask(db, hub, task.id, "merged", "pr-merged", "PR merged — task done, inbox items archived", { pr: db.getTask(task.id)?.pr_url ?? null });
   if (backend) await cleanupFinishedTask(db, backend, task.id, { hub, reason: "pr-closed" });
+}
+
+/** A PR closed without merging settles a task whose run already ended: one the
+ *  agent reported done, or one already done. A task still being worked on
+ *  keeps going (the agent may open another PR). */
+function resolveClosedTask(db: Db, hub: Hub, task: Task): void {
+  const current = db.getTask(task.id);
+  if (!current) return;
+  if (!doneReported(current) && current.status !== "done" && current.status !== "archived") return;
+  completeTask(db, hub, task.id, "closed", "pr-closed", "PR closed without merging — task done", { pr: current.pr_url });
 }
 
 let lastSyncAll = 0;
