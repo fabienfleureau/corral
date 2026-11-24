@@ -11,7 +11,7 @@ import { archiveEpicLaunchItems } from "./epic-graph.ts";
 import type { Db } from "./db.ts";
 import type { WorkerBackend } from "./worker.ts";
 import type { Hub } from "./capture.ts";
-import type { Item, Task } from "./types.ts";
+import type { Item, MergeReadiness, Task } from "./types.ts";
 import { DATA_NOT_INSTRUCTIONS, questionConvention, slugify } from "./dispatch.ts";
 import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraStage, type JiraTransitionGateway } from "./jira-status.ts";
@@ -57,6 +57,8 @@ export interface PrInfo {
   failed_checks?: PrCheckFailure[];
   /** Unresolved review threads — the "comments to manage". */
   threads: PrThread[];
+  /** Merge time reported by the platform (ms), when merged and known. */
+  merged_ms?: number | null;
   /** False when thread data could not be fetched: readiness stays pending. */
   threads_known?: boolean;
 }
@@ -127,6 +129,13 @@ async function repoSlug(repoPath: string): Promise<string | null> {
   }
 }
 
+/** ISO timestamp from gh/glab -> ms, or null when absent or unparsable. */
+function platformTime(value: unknown): number | null {
+  if (typeof value !== "string" || !value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
 function summarizeChecks(rollup: unknown[]): { checks: PrInfo["checks"]; failedChecks: PrCheckFailure[] } {
   let failed = 0;
   let pending = 0;
@@ -161,7 +170,7 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
     "gh",
     [
       "pr", "view", branch,
-      "--json", "url,title,state,number,body,additions,deletions,changedFiles,files,headRefOid,mergeable,baseRefName,reviewDecision,statusCheckRollup",
+      "--json", "url,title,state,number,body,additions,deletions,changedFiles,files,headRefOid,mergedAt,mergeable,baseRefName,reviewDecision,statusCheckRollup",
     ],
     repoPath,
   );
@@ -246,6 +255,7 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
     ...(failedChecks.length > 0 ? { failed_checks: failedChecks } : {}),
     threads,
     threads_known: threadsKnown,
+    merged_ms: platformTime(d.mergedAt),
   };
 }
 
@@ -346,6 +356,7 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
     ...(failedChecks.length > 0 ? { failed_checks: failedChecks } : {}),
     threads,
     threads_known: state !== "OPEN" || discussions !== null,
+    merged_ms: platformTime(mr.merged_at),
   };
 }
 
@@ -699,6 +710,8 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   const shouldResolve = pr.state !== "OPEN";
   const merged = pr.state === "MERGED";
   syncJiraPrStage(db, hub, task, pr, ready, merged, opts);
+  // Before the snapshot below replaces it: the last state seen while open.
+  if (merged) recordMerge(db, hub, task, pr, readMeta(task.pr_meta).pr ?? null);
   if (merged && task.terminal_address && opts.backend?.archive) {
     await opts.backend.archive(task.terminal_address).catch(() => undefined);
   }
@@ -910,6 +923,40 @@ function syncJiraPrStage(
   void syncJiraStage({ db, hub, gateway: jira, statuses: opts.cfg?.jira?.statuses }, task, stage).catch(
     () => undefined,
   );
+}
+
+/** The readiness gate's state from the last snapshot taken while the PR was
+ *  open, or null when there was none (first seen already merged). */
+export function mergeReadiness(prev: PrSnapshot | null): MergeReadiness | null {
+  if (!prev || prev.state !== "OPEN") return null;
+  return {
+    ready: prev.ready,
+    reasons: prev.reasons,
+    failing_checks: prev.checks.failed,
+    pending_checks: prev.checks.pending,
+    unresolved_threads: prev.threads.unresolved,
+    review_decision: prev.review_decision,
+    checked_ms: prev.checked_ms,
+  };
+}
+
+/** Record the merge once: when it happened and how ready the PR looked just
+ *  before. Written whatever the task status: most tasks are already done
+ *  (reported) when their PR merges. */
+function recordMerge(db: Db, hub: Hub, task: Task, pr: PrInfo, prev: PrSnapshot | null): void {
+  const current = db.getTask(task.id);
+  if (!current || current.merged_ms != null) return;
+  const readiness = mergeReadiness(prev);
+  const mergedMs = pr.merged_ms ?? Date.now();
+  db.updateTask(task.id, { merged_ms: mergedMs, merge_readiness: readiness ? JSON.stringify(readiness) : null }, false);
+  db.recordMetric("pr.merged", task.id, {
+    pr: pr.url,
+    merged_ms: mergedMs,
+    merged_at_known: pr.merged_ms != null,
+    ready: readiness ? readiness.ready : null,
+    reasons: readiness?.reasons ?? null,
+  });
+  hub.broadcast("task.updated", db.getTask(task.id));
 }
 
 /** A merged or closed PR completes the task, archives its items and frees its worktree. */
