@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { JiraTransitionGateway } from "./jira-status.ts";
-import type { WorkerBackend, WorkerElicitation, WorkerEvent, WorkerRunOutcome } from "./worker.ts";
+import type { WorkerBackend, WorkerElicitation, WorkerEvent, WorkerRunOutcome, WorkerSession } from "./worker.ts";
 import { clearItemHandling, syncTaskPr } from "./pr.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
@@ -63,6 +63,8 @@ export class CaptureEngine {
   private retrySentAt = new Map<string, number>();
   /** Monotonic metrics_events.id watermark per session after a manual human intervention. */
   private resetAfterId = new Map<string, number>();
+  /** Sessions currently being archived (prevents pending retries/events from reviving them). */
+  private archiving = new Set<string>();
 
   constructor(
     db: Db,
@@ -81,12 +83,28 @@ export class CaptureEngine {
     this.retryStallMs = opts.retryStallMs ?? DEFAULT_RETRY_STALL_MS;
   }
 
-  /** Cancel any pending retry timer and start a fresh retry episode for this session
-   *  (called when the human manually replies or sends a new instruction). */
-  resetStoppedRetries(address: string): void {
+  /** Cancel any pending retry timer and clear stop-tracking state for this session. */
+  cancelStoppedRetries(address: string): void {
     this.cancelPendingRetry(address);
     this.retrySentAt.delete(address);
     this.unreadStops.delete(address);
+  }
+
+  /** Suppress retries and cancel pending timers while an archive request is in flight. */
+  beginArchiving(address: string): void {
+    this.archiving.add(address);
+    this.cancelStoppedRetries(address);
+  }
+
+  /** Clear the in-flight archive guard after the archive request completes or fails. */
+  endArchiving(address: string): void {
+    this.archiving.delete(address);
+  }
+
+  /** Cancel any pending retry timer and start a fresh retry episode for this session
+   *  (called when the human manually replies or sends a new instruction). */
+  resetStoppedRetries(address: string): void {
+    this.cancelStoppedRetries(address);
     this.resetAfterId.set(address, this.latestMetricId());
   }
 
@@ -125,6 +143,7 @@ export class CaptureEngine {
     const tracked = this.db.getTerminal(e.address);
     const taskId = e.task_id ?? tracked?.task_id ?? null;
     if (!tracked && !taskId) return; // not a Corral session
+    const task = taskId ? this.db.getTask(taskId) : null;
     const blocked = e.status === "blocked";
     const wasBlocked = tracked?.last_status === "blocked";
     const status = e.status ?? null;
@@ -143,6 +162,11 @@ export class CaptureEngine {
     });
     if (tracked?.last_status !== (e.status ?? null)) {
       this.hub.broadcast("session.updated", { address: e.address, task_id: taskId, status: e.status ?? null });
+    }
+    if (task?.status === "archived" || this.archiving.has(e.address)) {
+      this.cancelStoppedRetries(e.address);
+      if (runEnded && taskId) clearItemHandling(this.db, this.hub, taskId);
+      return;
     }
 
     // A failed lookup must not abort the rest of the handler: the stop below would be lost.
@@ -172,8 +196,11 @@ export class CaptureEngine {
       }
       const sentAt = this.retrySentAt.get(e.address);
       const stalledAfterRetry = sentAt !== undefined && Date.now() - sentAt >= this.retryStallMs;
-      const ended = tracked?.last_status !== status || this.unreadStops.has(e.address) || stalledAfterRetry ||
-        (e.type === "created" && !this.hasDismissedQuestion(e.address));
+      const wasStopped = tracked?.last_status != null && STOPPED_STATUSES.has(tracked.last_status);
+      const newlyStopped = e.type === "created"
+        ? (!wasStopped && tracked?.last_status != null) || !this.hasDismissedQuestion(e.address)
+        : !wasStopped || (status === "error" && tracked?.last_status !== "error");
+      const ended = newlyStopped || this.unreadStops.has(e.address) || stalledAfterRetry;
       if (stopped && ended && !retried && taskId) await this.handleStoppedRun(e, taskId);
     }
   }
@@ -185,7 +212,18 @@ export class CaptureEngine {
    *  back to the human. Nothing is closed on the agent's behalf. */
   private async handleStoppedRun(e: WorkerEvent, taskId: string): Promise<void> {
     this.unreadStops.delete(e.address);
-    if (!this.awaitingNobody(e.address, taskId) || this.pendingRetries.has(e.address)) return;
+    if (this.archiving.has(e.address) || !this.awaitingNobody(e.address, taskId) || this.pendingRetries.has(e.address)) return;
+    if (typeof this.backend.get === "function") {
+      try {
+        const live = await this.backend.get(e.address, { strict: true });
+        if (live?.state === "finished") return;
+        if (live?.status && !STOPPED_STATUSES.has(live.status)) return;
+      } catch {
+        this.unreadStops.add(e.address);
+        return;
+      }
+    }
+    if (this.archiving.has(e.address) || !this.awaitingNobody(e.address, taskId) || this.pendingRetries.has(e.address)) return;
     let outcome: WorkerRunOutcome | null = null;
     if (this.backend.lastRunOutcome) {
       try {
@@ -196,7 +234,7 @@ export class CaptureEngine {
       }
     }
     // While the session was being read the agent may have reported, or started a new run.
-    if (!this.awaitingNobody(e.address, taskId) || this.db.getTerminal(e.address)?.last_status !== e.status) return;
+    if (this.archiving.has(e.address) || !this.awaitingNobody(e.address, taskId) || this.db.getTerminal(e.address)?.last_status !== e.status) return;
     if (this.pendingRetries.has(e.address)) return;
 
     const initialRetryExhausted = Boolean(
@@ -229,8 +267,22 @@ export class CaptureEngine {
     outcome: WorkerRunOutcome | null,
     budget: number,
   ): Promise<void> {
+    if (this.archiving.has(e.address)) return;
     const currentStatus = this.db.getTerminal(e.address)?.last_status ?? null;
     if (!this.awaitingNobody(e.address, taskId) || !STOPPED_STATUSES.has(currentStatus ?? "")) return;
+    if (typeof this.backend.get === "function") {
+      let live: WorkerSession | null;
+      try {
+        live = await this.backend.get(e.address, { strict: true });
+      } catch {
+        this.unreadStops.add(e.address);
+        return;
+      }
+      if (!live || live.state === "finished") return;
+      if (live.status && !STOPPED_STATUSES.has(live.status)) return;
+      const statusAfter = this.db.getTerminal(e.address)?.last_status ?? null;
+      if (this.archiving.has(e.address) || !this.awaitingNobody(e.address, taskId) || !STOPPED_STATUSES.has(statusAfter ?? "")) return;
+    }
     const used = this.episodeAttempts(e.address, category);
     if (used >= budget) {
       await this.escalateStoppedRun(e, taskId, outcome, category, used);
@@ -274,7 +326,7 @@ export class CaptureEngine {
     sendError: string | null = null,
   ): Promise<void> {
     this.retrySentAt.delete(e.address);
-    if (!this.awaitingNobody(e.address, taskId)) return;
+    if (this.archiving.has(e.address) || !this.awaitingNobody(e.address, taskId)) return;
     const task = this.db.getTask(taskId);
     const content = stoppedEscalationContent({
       label: task?.title.trim(),
@@ -335,12 +387,12 @@ export class CaptureEngine {
     return count;
   }
 
-  /** True when the terminal's latest question item was dismissed without a reply,
+  /** True when the terminal's latest question item was dismissed or archived without a reply,
    *  so a server restart does not re-surface a stop the human already acknowledged. */
   private hasDismissedQuestion(address: string): boolean {
-    const existing = this.db.questionItemForTerminal(address);
+    const existing = this.db.latestQuestionItemForTerminal(address);
     if (!existing) return false;
-    if (existing.status === "open") return true;
+    if (existing.status === "open" || existing.status === "archived") return true;
     const replied = this.db.raw
       .prepare("SELECT 1 FROM metrics_events WHERE name = 'item.replied' AND ref = ? LIMIT 1")
       .get(existing.id);
@@ -356,15 +408,19 @@ export class CaptureEngine {
 
   private async retryInitialFailure(address: string, taskId: string | null): Promise<boolean> {
     const task = taskId ? this.db.getTask(taskId) : null;
-    if (!task || task.status !== "dispatched" || task.terminal_address !== address ||
+    if (this.archiving.has(address) || !task || task.status !== "dispatched" || task.terminal_address !== address ||
         Date.now() - task.updated_ms > 10 * 60_000 ||
         !this.backend.initialFailurePrompt || this.retrying.has(address) ||
         this.db.raw.prepare("SELECT 1 FROM metrics_events WHERE name = ? AND ref = ? LIMIT 1").get("task.initial_retry", address)) return false;
     this.retrying.add(address);
     try {
+      if (typeof this.backend.get === "function") {
+        const live = await this.backend.get(address, { strict: true });
+        if (live?.state === "finished") return false;
+      }
       const prompt = await this.backend.initialFailurePrompt(address);
       const current = this.db.getTask(task.id);
-      if (!prompt || current?.status !== "dispatched" || current.terminal_address !== address) return false;
+      if (this.archiving.has(address) || !prompt || current?.status !== "dispatched" || current.terminal_address !== address) return false;
       // Claim before sending: an uncertain delivery must never trigger duplicates.
       this.db.recordMetric("task.initial_retry", address, { task_id: task.id });
       await this.backend.send(address, prompt);
