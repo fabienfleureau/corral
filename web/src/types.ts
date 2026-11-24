@@ -29,6 +29,8 @@ export type Task = {
   jira_url: string | null;
   jira_parent_key: string | null;
   pr_url: string | null;
+  /** How the task ended: PR merged, PR closed unmerged, or reported done without a PR. */
+  outcome?: "merged" | "closed" | "reported" | null;
   jira_status?: string | null;
   epic_id?: string | null;
   /** Review tasks: whether the drafted comments were posted; null while unknown. */

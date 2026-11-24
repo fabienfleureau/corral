@@ -30,6 +30,7 @@ They are required when a change makes or revisits such a decision.
 | [0019](0019-pr-risk-triage-observe-only.md) | Proposed | Observe-only risk triage for PR inbox items |
 | [0020](0020-epic-agent-operates-corral-tasks.md) | Proposed | Opted-in epic agent operates through real Corral tasks (create, launch/dispatch, instruct, PR check, status/Jira sync) like a human |
 | [0021](0021-flag-repeatedly-snoozed-items.md) | Proposed | Count snoozes and flag items snoozed 2+ times, observe only |
+| [0022](0022-task-outcome-and-keep-open.md) | Proposed | A done report on a task with an open PR keeps the task open until the PR merges or closes; tasks record an outcome (merged, closed, reported) |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.

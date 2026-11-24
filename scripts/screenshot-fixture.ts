@@ -57,6 +57,8 @@ export function seedScreenshotData(db: Db): void {
     exit_code: null, created_ms: now - rows.length * 60000, updated_ms: now - rows.length * 60000,
   });
   db.updateTask("sample-review", { review_outcome: "skipped" }, false);
+  // How the done task ended: the task row shows it next to the status.
+  db.updateTask("sample-done", { outcome: "merged" }, false);
   seedMultiRepo(db, now);
   db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
   db.insertRepo({ id: "sample-home", name: "side-project", path: "/sample/side-project", jira_prefix: null, context: "personal", source: "manual", created_ms: now });

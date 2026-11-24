@@ -442,7 +442,7 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
     await engine.handleEvent({ type: "status", address: "s9", status: "idle" });
     assert.equal(db.openQuestionItemForTerminal("s9")?.title, "Use Postgres or SQLite?", "the report stays open");
 
-    // completion report: pr item + task done + handoff stored
+    // completion report: pr item + handoff stored; the task waits for its PR (ADR 0022)
     const done = await engine.createStructuredQuestion({
       kind: "done",
       taskId: "task-1",
@@ -452,7 +452,7 @@ test("capture: elicitation, fallback, auto-resolution, completion handoff", asyn
     });
     assert.equal(done.kind, "pr");
     const task = db.getTask("task-1")!;
-    assert.equal(task.status, "done", "task marked done by the completion report");
+    assert.notEqual(task.status, "done", "a task with a PR stays open until the PR sync settles it");
     assert.match(task.handoff ?? "", /keep tests green/);
 
     // fallback path (no elicitation): raw tail, after the human closes the report

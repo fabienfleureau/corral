@@ -119,7 +119,7 @@ test("a completion report resolves an earlier stopped-run question", async () =>
     const report = await capture.createStructuredQuestion({ kind: "done", taskId: "task-1", title: "PR ready", body: "Finished." });
     assert.equal(report.kind, "pr");
     assert.equal(db.getItem(fallback.id)?.status, "resolved");
-    assert.equal(db.getTask("task-1")?.status, "done");
+    assert.equal(db.getTask("task-1")?.status, "dispatched", "a PR report waits for the PR sync (ADR 0022)");
   } finally { db.close(); }
 });
 
