@@ -5,6 +5,7 @@
 import { useEffect, useId, useState } from "react";
 import { api } from "../api";
 import type { AnalysisStatus } from "../api";
+import type { RateCounts, StoppedRunRate } from "../../../shared/improvement-metrics";
 import type { Repo } from "../types";
 import { errText } from "../util";
 
@@ -67,6 +68,75 @@ function AnalysisPanel({ title, intro, subject, status: loadStatus, setSchedule,
   </section>;
 }
 
+const DAY = 86_400_000;
+
+function day(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function rateCell(c: RateCounts) {
+  if (c.rate === null) return <span className="muted">no dispatch</span>;
+  return <>{Math.round(c.rate * 100)}% <span className="muted">({c.escalations}/{c.dispatches})</span></>;
+}
+
+/** Stopped or failed runs escalated to the inbox, per dispatch, around a pivot
+ *  (by default the merge of the automatic retry, ADR 0016). */
+function StoppedRunsPanel() {
+  const [pivot, setPivot] = useState("");
+  const [days, setDays] = useState(14);
+  const [data, setData] = useState<StoppedRunRate | null>(null);
+  const [error, setError] = useState("");
+  const pivotId = useId();
+  const daysId = useId();
+  const captionId = useId();
+
+  useEffect(() => {
+    let live = true;
+    api.improvementMetrics({ days, pivot: pivot || undefined })
+      .then((m) => { if (live) { setData(m.stopped_runs); setError(""); } })
+      .catch((e: unknown) => { if (live) setError(errText(e)); });
+    return () => { live = false; };
+  }, [pivot, days]);
+
+  const afterDays = data ? Math.round((data.after.end_ms - data.after.start_ms) / DAY * 10) / 10 : 0;
+  return <section className="panel-form">
+    <h2 className="panel-title">Runs that stopped without reporting</h2>
+    <p className="muted">Inbox escalations of stopped or failed agent runs, divided by dispatches, per harness. An escalation counts in the window where its run was dispatched. The default pivot is the automatic retry (ADR 0016).</p>
+    <div className="improve-metric-controls">
+      <div className="field"><label htmlFor={pivotId}>Pivot date</label>
+        <input id={pivotId} type="date" value={pivot || (data ? day(data.pivot_ms) : "")} onChange={(e) => setPivot(e.target.value)} />
+      </div>
+      <div className="field"><label htmlFor={daysId}>Window</label>
+        <select id={daysId} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={7}>7 days</option><option value={14}>14 days</option><option value={30}>30 days</option>
+        </select>
+      </div>
+    </div>
+    {error ? <div className="inline-error" role="alert">{error}</div> : null}
+    {data ? <>
+      <div className="improve-table-wrap" tabIndex={0} role="region" aria-labelledby={captionId}>
+        <table className="usage-table">
+          <caption id={captionId} className="visually-hidden">Stopped-run rate per harness, before and after the pivot</caption>
+          <thead><tr>
+            <th scope="col">Harness</th>
+            <th scope="col" className="num">Before ({day(data.before.start_ms)} → {day(data.before.end_ms)})</th>
+            <th scope="col" className="num">After ({day(data.after.start_ms)} → {day(data.after.end_ms)}, {afterDays} d)</th>
+          </tr></thead>
+          <tbody>
+            {data.by_harness.map((r) => <tr key={r.harness}>
+              <th scope="row">{r.harness}</th>
+              <td className="num">{rateCell(r.before)}</td>
+              <td className="num">{rateCell(r.after)}</td>
+            </tr>)}
+            <tr><th scope="row">All</th><td className="num">{rateCell(data.total.before)}</td><td className="num">{rateCell(data.total.after)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="muted">Recognised by marker {data.sources.marker}, capture event {data.sources.capture_event}, title {data.sources.title}. Rows older than the marker miss reopened escalations.</p>
+    </> : null}
+  </section>;
+}
+
 export function ImprovePage() {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [repo, setRepo] = useState("");
@@ -87,6 +157,7 @@ export function ImprovePage() {
         </div>
         {repoError ? <div className="inline-error" role="alert">{repoError}</div> : null}
       </section>
+      <StoppedRunsPanel />
       <div className="settings-grid">
         <AnalysisPanel
           title="Engineering improvement analysis"

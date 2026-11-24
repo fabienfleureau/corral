@@ -24,6 +24,7 @@ import { BlockConflict } from "./jira-blocks.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
 import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
+import { DEFAULT_METRIC_DAYS, STOPPED_RETRY_PIVOT_MS, stoppedRunRate } from "./improvement-metrics.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
 import { KPI_IDS } from "../shared/kpis.ts";
@@ -287,6 +288,14 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!isInterval(days)) return json(res, 400, { error: "Invalid interval" });
     improvement.setIntervalDays(days);
     json(res, 200, improvement.status());
+  });
+  on("GET", "/api/improvement/metrics", (_req, res, { url }) => {
+    const days = Number(url.searchParams.get("days") ?? DEFAULT_METRIC_DAYS);
+    const pivotRaw = url.searchParams.get("pivot");
+    const pivot = pivotRaw === null ? STOPPED_RETRY_PIVOT_MS : /^\d+$/.test(pivotRaw) ? Number(pivotRaw) : Date.parse(pivotRaw);
+    if (!Number.isInteger(days) || days < 1 || days > 90) return json(res, 400, { error: "days must be an integer from 1 to 90" });
+    if (!Number.isFinite(pivot)) return json(res, 400, { error: "Invalid pivot" });
+    json(res, 200, { stopped_runs: stoppedRunRate(state.db, { pivot_ms: pivot, days }) });
   });
   on("POST", "/api/improvement/run", async (_req, res) => {
     try { json(res, 200, await improvement.run()); }

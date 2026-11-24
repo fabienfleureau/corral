@@ -1,6 +1,7 @@
 import type { EpicAgentSettings, EpicAgentView } from "../../shared/epic-agent";
 import type { KpiArtifactRequest } from "../../shared/kpi-artifact";
 import type { KpiId, KpiSettings, KpiView } from "../../shared/kpis";
+import type { ImprovementMetrics } from "../../shared/improvement-metrics";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
@@ -355,6 +356,13 @@ export const api = {
   improvementStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/improvement"),
   setImprovementSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/improvement", { intervalDays }),
   runImprovement: (): Promise<Task> => post<Task>("/api/improvement/run"),
+  improvementMetrics: (opts: { days?: number; pivot?: string } = {}): Promise<ImprovementMetrics> => {
+    const q = new URLSearchParams();
+    if (opts.days) q.set("days", String(opts.days));
+    if (opts.pivot) q.set("pivot", opts.pivot);
+    const qs = q.toString();
+    return get<ImprovementMetrics>(`/api/improvement/metrics${qs ? `?${qs}` : ""}`);
+  },
   skillsAnalysisStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/skills-analysis"),
   setSkillsAnalysisSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/skills-analysis", { intervalDays }),
   runSkillsAnalysis: (): Promise<Task> => post<Task>("/api/skills-analysis/run"),

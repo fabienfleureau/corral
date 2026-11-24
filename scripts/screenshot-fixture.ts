@@ -2,6 +2,8 @@ import { Db } from "../server/db.ts";
 import type { Favorite } from "../server/favorites.ts";
 import { prItemBody, type PrInfo } from "../server/pr.ts";
 import { classifyPrTriage } from "../server/pr-triage.ts";
+import { STOPPED_RETRY_PIVOT_MS } from "../server/improvement-metrics.ts";
+import { STOPPED_ESCALATED_METRIC } from "../server/stopped-retry.ts";
 import type { Pull } from "../server/pulls.ts";
 import type { Item, Task } from "../server/types.ts";
 import type { TaskEvent } from "../server/task-events.ts";
@@ -52,6 +54,24 @@ export function seedScreenshotData(db: Db): void {
   seedPulls(db, now);
   seedKpis(db, now);
   seedAgentRuns(db, now);
+  seedStoppedRuns(db);
+}
+
+/** Dispatches and stopped-run escalations around the default pivot, so the
+ *  Improve page's stopped-run table has rows. The pivot is fixed, unlike `now`. */
+function seedStoppedRuns(db: Db): void {
+  const hour = 3_600_000;
+  const insert = db.raw.prepare("INSERT INTO metrics_events (ts, name, ref, data) VALUES (?, ?, ?, ?)");
+  const runs: [number, string, string, boolean][] = [
+    [-90, "sample-done", "codex", true], [-80, "sample-done", "codex", false], [-70, "sample-pr-task", "claude", true],
+    [-60, "sample-pr-task", "claude", true], [-50, "sample-stopped-task", "claude", false], [-40, "sample-open", "codex", true],
+    [2, "sample-done", "codex", false], [4, "sample-pr-task", "claude", true], [6, "sample-stopped-task", "claude", false],
+  ];
+  for (const [offset, taskId, target, escalated] of runs) {
+    const ts = STOPPED_RETRY_PIVOT_MS + offset * hour;
+    insert.run(ts, "task.dispatched", taskId, JSON.stringify({ target }));
+    if (escalated) insert.run(ts + hour, STOPPED_ESCALATED_METRIC, taskId, JSON.stringify({ item_id: `fixture-stop-${offset}`, category: "silent", attempts: 1 }));
+  }
 }
 
 /** The fixture has no worker, so seed the tracked terminals Corral would have

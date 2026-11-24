@@ -11,6 +11,7 @@ import type { Db } from "./db.ts";
 import { taskLabel, type Item, type Task } from "./types.ts";
 import type { PrSnapshot } from "./pr.ts";
 import type { UsageEvidence } from "./usage.ts";
+import { stoppedRunRate, type StoppedRunRate } from "./improvement-metrics.ts";
 
 const DAY = 86_400_000;
 
@@ -23,6 +24,7 @@ const LIFECYCLE_EVENTS = [
   "task.pr_found",
   "task.initial_retry",
   "task.stopped_retry",
+  "task.stopped_escalated",
   "task.worktree_removed",
   "item.created",
   "item.replied",
@@ -130,6 +132,8 @@ export interface ImprovementEvidence {
     items_outside_task_window: number;
   };
   usage: UsageEvidence | null;
+  /** Aggregate metrics over the full tables, not the capped samples above. */
+  metrics: { stopped_runs: StoppedRunRate };
 }
 
 export interface ImprovementEvidenceOptions {
@@ -396,6 +400,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       "Review thread bodies are not persisted; only the unresolved count and ids are available.",
       "PR snapshots (checks, mergeability, thread counts) exist only for syncs that ran after they were added.",
       "Events and items are capped as listed in limits/truncated; counts come from aggregate queries, not the sampled event list.",
+      "metrics.stopped_runs counts stopped or failed runs escalated to the inbox per dispatch, before and after the automatic retry (ADR 0016). Before the task.stopped_escalated marker, a reopened escalation item was not recorded, so older windows undercount repeat stops.",
       usage
         ? "Costs are API-list-price estimates from local agent logs, not billed amounts."
         : "Usage costs were unavailable for this run.",
@@ -427,6 +432,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       items_outside_task_window: evidenceItems.filter((i) => i.flags.includes("outside_task_window")).length,
     },
     usage,
+    metrics: { stopped_runs: stoppedRunRate(db, { now }) },
   };
 }
 

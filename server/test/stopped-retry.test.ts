@@ -8,6 +8,7 @@ import { Db } from "../db.ts";
 import { CaptureEngine, type CaptureEngineOptions } from "../capture.ts";
 import {
   DEFAULT_STOPPED_RETRY,
+  STOPPED_ESCALATED_METRIC,
   classifyStoppedRun,
   isFatalStopError,
   resolveStoppedRetryConfig,
@@ -148,6 +149,34 @@ test("fatal errors skip retries and escalate to inbox immediately", async () => 
     assert.ok(item, "inbox item created immediately");
     assert.match(item.body, /The run failed\./);
     assert.doesNotMatch(item.body, /automatic retry/);
+  } finally { env.close(); }
+});
+
+test("every escalation records the stopped-run marker, a reopened item included", async () => {
+  const env = setup({ kind: "error", text: "401 Unauthorized" });
+  const markers = () => env.db.raw
+    .prepare("SELECT ref, data FROM metrics_events WHERE name = ? ORDER BY id")
+    .all(STOPPED_ESCALATED_METRIC) as { ref: string; data: string }[];
+  try {
+    await env.emit("error");
+    const item = env.db.openQuestionItemForTerminal("s1");
+    assert.ok(item);
+    assert.equal(markers().length, 1);
+    assert.equal(markers()[0].ref, "task-1");
+    assert.deepEqual(JSON.parse(markers()[0].data), { item_id: item.id, category: "fatal", attempts: 0, address: "s1" });
+
+    env.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now() });
+    env.db.recordMetric("item.replied", item.id, { address: "s1" });
+    env.capture.resetStoppedRetries("s1");
+    await env.emit("working");
+    await env.emit("error");
+    assert.equal(env.db.openQuestionItemForTerminal("s1")?.id, item.id, "the same item is reopened");
+    assert.equal(markers().length, 2, "the reopen counts as a second escalation");
+    assert.equal(
+      (env.db.raw.prepare("SELECT COUNT(*) AS n FROM metrics_events WHERE name = 'item.created'").get() as { n: number }).n,
+      1,
+      "item.created alone misses the reopen",
+    );
   } finally { env.close(); }
 });
 

@@ -3791,3 +3791,13 @@ select:focus {
   .kpi-inputs { grid-template-columns: minmax(0, 1fr); }
   .artifact-format-grid, .artifact-axis-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+.improve-metric-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.improve-table-wrap {
+  overflow-x: auto;
+  max-inline-size: 100%;
+}

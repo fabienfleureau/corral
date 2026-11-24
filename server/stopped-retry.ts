@@ -32,6 +32,10 @@ export const STOPPED_STATUSES = new Set(["idle", "done", "error"]);
 
 export type StoppedCategory = "fatal" | "error" | "silent";
 
+/** Metric recorded on every escalation to the inbox, a reopened item included:
+ *  the structural marker the stopped-run rate counts (ref = task id). */
+export const STOPPED_ESCALATED_METRIC = "task.stopped_escalated";
+
 function clampInt(value: unknown, fallback: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.max(0, Math.min(max, Math.floor(value)));

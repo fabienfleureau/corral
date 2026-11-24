@@ -24,6 +24,7 @@ import {
   classifyStoppedRun,
   resolveStoppedRetryConfig,
   stoppedEscalationContent,
+  STOPPED_ESCALATED_METRIC,
   stoppedRetryBudget,
   stoppedRetryDelayMs,
   stoppedRetryPrompt,
@@ -285,7 +286,10 @@ export class CaptureEngine {
       maxTextLen: STOPPED_TEXT_MAX,
       sendError,
     });
-    await this.ensureQuestionItem(e, taskId, content);
+    const item = await this.ensureQuestionItem(e, taskId, content);
+    if (item) {
+      this.db.recordMetric(STOPPED_ESCALATED_METRIC, taskId, { item_id: item.id, category, attempts: attemptsUsed, address: e.address });
+    }
   }
 
   private cancelPendingRetry(address: string): void {
