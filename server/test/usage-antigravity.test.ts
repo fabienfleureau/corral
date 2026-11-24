@@ -29,6 +29,8 @@ test("Gemini 4 models are priced from the base model's list price", () => {
   assert.equal(recordCost(rec, DEFAULT_PRICES), 1.5 + 0.075 + 7.5);
   const neon = parseAntigravityLines([model(1, "gemini-4-neon-medium", 1_000_000, 0, 1_000_000)], "c", "")[0];
   assert.equal(recordCost(neon, DEFAULT_PRICES), 18);
+  const flash = parseAntigravityLines([model(1, "gemini-3.8-flash-high", 1_000_000, 0, 1_000_000)], "c", "")[0];
+  assert.equal(recordCost(flash, DEFAULT_PRICES), 4.5);
 });
 
 test("UsageScanner reads omnigent Antigravity sessions and attributes them by workspace", async () => {
