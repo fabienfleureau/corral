@@ -420,7 +420,7 @@ test("epic agent task lifecycle: create, launch with saved agent, move task & Ji
   const dir = mkdtempSync(join(tmpdir(), "corral-epic-lifecycle-"));
   const repoDir = join(dir, "repo");
   mkdirSync(repoDir, { recursive: true });
-  execFileSync("git", ["init", "-q", repoDir]);
+  execFileSync("git", ["init", "-q", "-b", "main", repoDir]);
   execFileSync("git", ["-C", repoDir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-q", "-m", "init"]);
 
   const repo: Repo = { id: "r1", name: "app", path: repoDir, jira_prefix: "EX", context: null, source: "manual", created_ms: 0 };
