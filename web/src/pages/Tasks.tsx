@@ -13,7 +13,7 @@ import { modelFactsReport, retentionLabel } from "../model-indicators";
 import { usePeakNow } from "../use-peak-now";
 import type { HarnessModels, ModelFactsReport, ModelSelection } from "../model-indicators";
 import { favoritesFor, repoContext } from "../favorite-context";
-import { reviewerBlocked, reviewerOptionLabel } from "../reviewers";
+import { reviewerBlocked, reviewerBySummary, reviewerOptionLabel } from "../reviewers";
 import { errText, formatTs, isPrUrl, prLabel, timeAgo } from "../util";
 import { Chevron, ExternalLinkIcon, Spinner } from "../ui";
 import { batchImportItems } from "../jira-import";
@@ -284,7 +284,7 @@ function TaskRow({
   const [model, setModel] = useState(task.model ?? "");
   const [reasoning, setReasoning] = useState(task.reasoning ?? "");
   const [agent, setAgent] = useState(task.agent ?? "");
-  const [reviewName, setReviewName] = useState("");
+  const [reviewName, setReviewName] = useState(() => reviewerBySummary(task.review, reviewers)?.name ?? "");
   const [useWorktree, setUseWorktree] = useState(true);
   const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
   const [showComment, setShowComment] = useState(false);
@@ -297,6 +297,15 @@ function TaskRow({
   useEffect(() => {
     setShowDispatch(task.status === "open" || (task.status === "dispatched" && !task.terminal_address));
   }, [task.status, task.terminal_address]);
+
+  useEffect(() => {
+    if (task.status !== "open") return;
+    setTarget(task.target || "claude");
+    setModel(task.model ?? "");
+    setReasoning(task.reasoning ?? "");
+    setAgent(task.agent ?? "");
+    setReviewName(reviewerBySummary(task.review, reviewers)?.name ?? "");
+  }, [task.status, task.target, task.agent, task.model, task.reasoning, task.review, reviewers]);
 
   const run = async (label: string, fn: () => Promise<unknown>, okMsg?: string) => {
     if (busy) return;

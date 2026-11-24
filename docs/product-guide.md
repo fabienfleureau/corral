@@ -47,6 +47,10 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   [`ocr delegate`](https://github.com/alibaba/open-code-review) sub-agent on
   that harness, so a Claude task can be reviewed on the Codex quota and the other
   way round. Delegates need the Claude harness and no explicit agent.
+- **Task titles** — leave the title empty and Corral names the task from its
+  prompt: the first sentence, cut to about 60 characters, then a short title
+  from the `assistant` command when one is configured. A title you type is
+  never replaced.
 - **Prompt attachments** — drop files on the New task prompt, paste a screenshot
   or pick them: PNG, JPEG, GIF and WebP images, PDFs, and text or code files (up
   to 10 files, 25 MB). They are stored with the task and sent to the agent with
@@ -75,7 +79,7 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   `Repo:` line in the ticket picks the repo. The page shows what is blocked, ready to
   launch, running, PR-ready or merged, and a summary such as "3/7 merged · 2 testable".
   A task whose prerequisites are ready waits on the Epics page: nothing is added to the
-  inbox and nothing runs until you click **Launch** there. In the same repo it stacks on
+  inbox and nothing runs until you click **Launch** there. Assign a **Task favorite** at the top of the epic to run its tasks with that designated conf (harness, agent, model, reasoning, and pre-PR reviewer): applying a favorite updates compatible open tasks and supplies the default conf when new epic tasks are created or launched (per-task overrides remain possible). In the same repo it stacks on
   its prerequisite's branch only when launched. Decision: [ADR 0002](adr/0002-epic-tasks-start-from-epic-page.md).
   The **Ask about this epic** input takes any free-form request — a question, a change to the epic or its design, an action on an existing task, or creating epic or classic Corral tasks — and creates an open `ops` task tracked on the Tasks page, outside the Jira board.
   Its prompt starts with the epic's Jira ticket, summary and link, and at dispatch it receives `skills/epic-request.md` so the agent can determine your intent and interact with the epic and Corral tasks through the Corral API.
@@ -87,7 +91,10 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   **amendment** per unstarted task, which you apply (written to the Jira ticket) or
   reject from the inbox. Jira stays the source of truth; Corral only writes its own
   delimited `[corral:begin:…]` blocks. The `epic-brainstorm` skill turns a
-  brainstorming into an epic in that format. Vocabulary: [`GLOSSARY.md`](../GLOSSARY.md),
+  brainstorming into an epic in that format. Use **Remove** on the Epics page to
+  remove an epic from Corral (design history, proposed amendments, and autonomous agent
+  settings/report) without touching Jira; existing Corral tasks remain detached on the
+  Tasks page and the epic can be re-imported by its Jira key later. Vocabulary: [`GLOSSARY.md`](../GLOSSARY.md),
   decision: [ADR 0001](adr/0001-jira-source-of-truth-for-epics.md).
 - **Question inbox** — dispatched agents are given `skills/question-report.md`,
   which tells them to POST a clean question via `$CORRAL_URL/api/reports`. Structured

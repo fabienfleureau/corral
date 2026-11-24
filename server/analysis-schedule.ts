@@ -33,13 +33,13 @@ export class AnalysisSchedule {
   }
 
   status() {
-    const row = this.db.raw.prepare(`SELECT * FROM ${this.table} WHERE id = 1`).get() as unknown as Row;
+    const row = this.db.stmt(`SELECT * FROM ${this.table} WHERE id = 1`).get() as unknown as Row;
     return { intervalDays: row.interval_days, lastSuccessMs: row.last_success_ms, lastAttemptMs: row.last_attempt_ms, error: row.error };
   }
 
   setIntervalDays(days: number): void {
     if (!isInterval(days)) throw new Error("Invalid interval");
-    this.db.raw.prepare(`UPDATE ${this.table} SET interval_days = ?, last_attempt_ms = NULL WHERE id = 1`).run(days);
+    this.db.stmt(`UPDATE ${this.table} SET interval_days = ?, last_attempt_ms = NULL WHERE id = 1`).run(days);
   }
 
   /** A run is due when scheduled, the last success is older than the interval,
@@ -53,14 +53,14 @@ export class AnalysisSchedule {
   }
 
   begin(now: number): void {
-    this.db.raw.prepare(`UPDATE ${this.table} SET last_attempt_ms = ?, error = NULL WHERE id = 1`).run(now);
+    this.db.stmt(`UPDATE ${this.table} SET last_attempt_ms = ?, error = NULL WHERE id = 1`).run(now);
   }
 
   succeed(now: number): void {
-    this.db.raw.prepare(`UPDATE ${this.table} SET last_success_ms = ?, error = NULL WHERE id = 1`).run(now);
+    this.db.stmt(`UPDATE ${this.table} SET last_success_ms = ?, error = NULL WHERE id = 1`).run(now);
   }
 
   fail(err: unknown): void {
-    this.db.raw.prepare(`UPDATE ${this.table} SET error = ? WHERE id = 1`).run((err instanceof Error ? err.message : String(err)).slice(0, 500));
+    this.db.stmt(`UPDATE ${this.table} SET error = ? WHERE id = 1`).run((err instanceof Error ? err.message : String(err)).slice(0, 500));
   }
 }
