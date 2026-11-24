@@ -183,6 +183,9 @@ export interface Task {
   /** The amendment written into the Jira ticket (current one only) and the hash of that block. */
   amendment?: string | null;
   amendment_hash?: string | null;
+  /** A done task in the same repo with a near-identical label: this task
+   *  probably repeats it (see server/repeat.ts). Set once, at creation. */
+  repeat_of?: string | null;
   status: TaskStatus;
   terminal_address: string | null;
   exit_code: number | null;

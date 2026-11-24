@@ -106,6 +106,7 @@ before fixing, and update the humans through the same report channels.
 ## Rules
 
 - Tests green before you push. A push that breaks CI is worse than a late push.
+- A bug fix includes a regression test that reproduces the reported symptom and fails without the fix.
 - One fix per comment, in one push when possible.
 - If a comment requires a decision only the human can make, post a
   `kind= "question"` report for that one item only — and keep fixing the rest.

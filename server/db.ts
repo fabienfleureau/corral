@@ -299,6 +299,7 @@ export class Db {
     if (!taskNames.has("amendment")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN amendment TEXT`);
     if (!taskNames.has("amendment_hash")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN amendment_hash TEXT`);
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
+    if (!taskNames.has("repeat_of")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN repeat_of TEXT`);
     const epicCols = this.raw.prepare("PRAGMA table_info(epics)").all() as { name: string }[];
     if (!epicCols.some((c) => c.name === "design_block_hash")) this.raw.exec(`ALTER TABLE epics ADD COLUMN design_block_hash TEXT`);
     if (!epicCols.some((c) => c.name === "favorite_name")) this.raw.exec(`ALTER TABLE epics ADD COLUMN favorite_name TEXT`);
@@ -355,14 +356,14 @@ export class Db {
       .prepare(
         `INSERT INTO tasks (id, title, prompt, repo_path, target, target_state, base_branch, branch,
           worktree_path, assignee, jira_key, jira_url, jira_parent_key, jira_status, pr_url, pr_meta, handoff, status, terminal_address,
-          exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review, parent_task_id, spec, epic_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review, parent_task_id, spec, epic_id, repeat_of)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         t.id, t.title, t.prompt, t.repo_path, t.target, t.target_state, t.base_branch, t.branch,
         t.worktree_path, t.assignee, t.jira_key, t.jira_url, t.jira_parent_key, t.jira_status ?? null, t.pr_url, t.pr_meta ?? null,
         t.handoff ?? null, t.status, t.terminal_address, t.exit_code, t.created_ms, t.updated_ms, t.model ?? null, t.reasoning ?? null, t.agent ?? null,
-        t.kind ?? "code", t.review ?? null, t.parent_task_id ?? null, t.spec ?? null, t.epic_id ?? null,
+        t.kind ?? "code", t.review ?? null, t.parent_task_id ?? null, t.spec ?? null, t.epic_id ?? null, t.repeat_of ?? null,
       );
   }
 
@@ -437,6 +438,11 @@ export class Db {
       ? this.stmt(`SELECT * FROM tasks WHERE status = ? ORDER BY created_ms DESC`).all(status)
       : this.stmt(`SELECT * FROM tasks ORDER BY created_ms DESC`).all();
     return rows as unknown as Task[];
+  }
+
+  /** Done tasks of one repo, newest first: the candidates a new task may repeat. */
+  listDoneTasksInRepo(repoPath: string, limit = 500): Task[] {
+    return this.stmt(`SELECT * FROM tasks WHERE status = 'done' AND repo_path = ? ORDER BY updated_ms DESC LIMIT ?`).all(repoPath, limit) as unknown as Task[];
   }
 
   /** Events for tasks in registered professional repositories, in chronological order. */

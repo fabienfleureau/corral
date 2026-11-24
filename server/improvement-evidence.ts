@@ -77,6 +77,8 @@ export interface EvidenceTask {
   created_ms: number;
   updated_ms: number;
   dispatches: { count: number; at_ms: number[]; gaps_ms: number[] };
+  /** A done task in the same repo this one probably repeats (near-identical label). */
+  repeat_of: string | null;
   items_in_window: { total: number; open: number; question_open: number; pr_open: number; resolved: number; archived: number };
   pr: PrSnapshot | null;
   usage: { cost_usd: number; tokens: number; models: string[]; agents: string[]; unpriced_calls: number } | null;
@@ -120,6 +122,8 @@ export interface ImprovementEvidence {
     done_without_pr: string[];
     review_tasks_with_pr_url: string[];
     repeated_dispatches: { task_id: string; count: number; gaps_ms: number[] }[];
+    /** Tasks created for work already done in the same repo: the same symptom came back. */
+    probable_repeats: { task_id: string; repeat_of: string }[];
     orphan_items: { item_id: string; task_id: string }[];
     malformed_task_ids: { item_id: string; task_id: string }[];
     resolved_without_timestamp: { item_id: string; resolved_event_ms: number }[];
@@ -282,6 +286,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     if (task.kind === "review" && task.pr_url) flags.push("review_task_stores_reviewed_pr");
     if ((dispatchAgg?.count ?? 0) > 1) flags.push("dispatched_multiple_times");
     if (task.pr_url && !readPrSnapshot(task.pr_meta)) flags.push("no_pr_snapshot");
+    if (task.repeat_of) flags.push("probable_repeat");
     const usage = usageByTask.get(task.id);
     return {
       id: task.id,
@@ -308,6 +313,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
         at_ms: dispatchAt.length ? dispatchAt : dispatchAgg ? [dispatchAgg.first_ms, dispatchAgg.last_ms].filter((v, i, a) => a.indexOf(v) === i) : [],
         gaps_ms: gaps,
       },
+      repeat_of: task.repeat_of ?? null,
       items_in_window: {
         total: taskItems.length,
         open: taskItems.filter((i) => i.status === "open").length,
@@ -409,6 +415,9 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       done_without_pr: evidenceTasks.filter((t) => t.flags.includes("done_without_pr")).map((t) => t.id),
       review_tasks_with_pr_url: evidenceTasks.filter((t) => t.flags.includes("review_task_stores_reviewed_pr")).map((t) => t.id),
       repeated_dispatches: repeated,
+      probable_repeats: evidenceTasks
+        .filter((t) => t.repeat_of)
+        .map((t) => ({ task_id: t.id, repeat_of: t.repeat_of ?? "" })),
       orphan_items: evidenceItems
         .filter((i) => i.flags.includes("orphan_task"))
         .map((i) => ({ item_id: i.id, task_id: i.task_id ?? "" })),

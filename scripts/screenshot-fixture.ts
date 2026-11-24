@@ -23,7 +23,7 @@ export const screenshotFavorites: Favorite[] = [
 ];
 
 export function seedScreenshotData(db: Db): void {
-  const rows: (Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning" | "review"> & Partial<Pick<Task, "jira_key" | "jira_url" | "branch" | "pr_url">>)[] = [
+  const rows: (Pick<Task, "id" | "title" | "status" | "target" | "model" | "reasoning" | "review"> & Partial<Pick<Task, "jira_key" | "jira_url" | "branch" | "pr_url" | "repeat_of">>)[] = [
     { id: "sample-open", title: "Improve search results", status: "open", target: "codex", model: "gpt-5.4", reasoning: "high" },
     { id: "sample-running", title: "Add keyboard navigation", status: "dispatched", target: "claude", model: null, reasoning: null, review: "cubic review --base main --json", jira_key: "EX-1234", jira_url: "https://jira.example.com/browse/EX-1234" },
     { id: "sample-done", title: "Update project documentation", status: "done", target: "codex", model: null, reasoning: null },
@@ -33,6 +33,8 @@ export function seedScreenshotData(db: Db): void {
     // The task behind the auto-captured question: its closing message carries
     // Markdown, which must render as prose and not as a raw code block.
     { id: "sample-stopped-task", title: "Investigate proposed KPI improvement", status: "dispatched", target: "claude", model: null, reasoning: null },
+    // A task whose label nearly matches a done one: the row shows the probable-repeat link.
+    { id: "sample-repeat", title: "Update the project documentation again", status: "open", target: "codex", model: null, reasoning: null, repeat_of: "sample-done" },
   ];
   const now = Date.UTC(2025, 0, 15, 12);
   rows.forEach((row, index) => db.insertTask({

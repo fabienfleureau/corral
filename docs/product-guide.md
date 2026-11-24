@@ -14,6 +14,9 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   **status**, forward only: dispatch → `In Progress`, PR/MR opened → `Code Review`,
   PR shown by Corral as `ready to merge` (gate passed **and** a human approved it)
   → `Ready to merge`, merged → `Done` (names configurable per workflow).
+  A new task whose label nearly matches a done task in the same repo is tagged
+  a **probable repeat**: the row links to the earlier task, its history says so,
+  and the improvement analysis counts repeats (`data_quality.probable_repeats`).
 - **Agent control (MCP)** — an agent can create an open task, ask what waits
   next, and give an instruction on a task by id or title. Three tools are served
   over the authenticated HTTP API, with one-line answers so a voice agent can
@@ -134,7 +137,7 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
 - **Self-improvement** (`#/improve`) — three analyses, each on demand or on a
   schedule, that dispatch read-only agent tasks in a selected repository and post
   a digest to the inbox. The *improvement analysis* reviews recent
-  task and PR activity. The *engineering skills analysis* suggests learning topics
+  task and PR activity, including tasks tagged as probable repeats. The *engineering skills analysis* suggests learning topics
   and exercises from Corral activity, without inferring proficiency from delegated
   work. The *skills analysis* compares the skills installed on
   this machine with the last 90 days of Claude Code and Codex sessions, flags
