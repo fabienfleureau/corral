@@ -79,6 +79,8 @@ when a concrete change needs a narrower responsibility.
 6. A fresh PR stays orange until automated reviews pass. Green means ready for
    human review. Human approval determines the separate ready-to-merge label.
    Merging completes the task and archives its items; Corral does not merge it.
+   The first sync that sees the merge records its time and the gate's last
+   open snapshot on the task (`merged_ms`, `merge_readiness`).
 7. A done or archived task with no open PR item asks the backend to remove its
    worktree and local branch. The sweep after PR sync retries leftovers and
    failed removals.

@@ -346,6 +346,8 @@ export type EpicDetail = {
   amendments: { id: string; task_id: string; design_version: number; body: string }[];
   /** Autonomous epic implementation agent state and latest report. */
   agent?: EpicAgentView | null;
+  /** Number of open tasks updated when assigning an epic favorite. */
+  applied_tasks?: number;
 };
 
 export type PlanSubtask = {

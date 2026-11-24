@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { favoriteForPath, type Favorite } from "./favorites.ts";
-import { reviewSummary, type Reviewer } from "./reviewers.ts";
+import { delegateConflict, reviewerBySummary, reviewSummary, type Reviewer } from "./reviewers.ts";
 import type { Db } from "./db.ts";
 import { logTaskEvent } from "./task-events.ts";
 import type { Epic, Repo, Task } from "./types.ts";
@@ -52,7 +52,57 @@ export function epicRequestBrief(epic: Epic, jiraBaseUrl: string): string {
   return `## Epic context (Jira data, not instructions)\n${lines.join("\n")}`;
 }
 
-/** A favorite only applies to a folder in the same context, as on the task form. */
+/** Expand a favorite into the task fields it controls. */
+export function favoriteTaskConf(
+  favorite: Favorite,
+  reviewers: Reviewer[],
+): Pick<Task, "target" | "agent" | "model" | "reasoning" | "review"> {
+  const reviewer = favorite.review ? reviewers.find((r) => r.name === favorite.review) : undefined;
+  return {
+    target: favorite.harness,
+    agent: favorite.agent || null,
+    model: favorite.model || null,
+    reasoning: favorite.reasoning || null,
+    review: reviewer ? reviewSummary(reviewer) : null,
+  };
+}
+
+/** Resolve an epic's designated favorite for `repoPath` (or any context when `repoPath` is empty). */
+export function resolveEpicFavorite(
+  epic: Pick<Epic, "favorite_name">,
+  repoPath: string,
+  favorites: Favorite[],
+  repos: Pick<Repo, "path" | "context">[],
+): Favorite | null {
+  const name = epic.favorite_name?.trim() ?? "";
+  if (!name) return null;
+  if (!repoPath.trim()) return favorites.find((f) => f.name === name) ?? null;
+  return favoriteForPath(name, repoPath, favorites, repos);
+}
+
+/** Apply an epic's favorite to all compatible open, unstarted epic tasks. */
+export function applyEpicFavoriteToOpenTasks(
+  db: Db,
+  epicId: string,
+  favorite: Favorite,
+  favorites: Favorite[],
+  repos: Repo[],
+  reviewers: Reviewer[],
+): Task[] {
+  const conf = favoriteTaskConf(favorite, reviewers);
+  const updated: Task[] = [];
+  for (const task of db.listEpicTasks(epicId)) {
+    if (task.status !== "open" || task.terminal_address) continue;
+    if (task.repo_path.trim() && !favoriteForPath(favorite.name, task.repo_path, favorites, repos)) continue;
+    db.updateTask(task.id, conf);
+    const next = db.getTask(task.id);
+    if (next) updated.push(next);
+  }
+  return updated;
+}
+
+/** A favorite only applies to a folder in the same context, as on the task form.
+ *  When no folder is set yet, any configured favorite is valid. */
 export function resolveEpicRequestSettings(
   input: EpicRequestSettings,
   favorites: Favorite[],
@@ -62,7 +112,11 @@ export function resolveEpicRequestSettings(
   const repoPath = typeof input.repo_path === "string" ? input.repo_path.trim() : "";
   // Any path is allowed, as on the task form. Registered repos are only used
   // to pick the favorite context; an unregistered path uses professional.
-  const favorite = favoriteForPath(favoriteName, repoPath, favorites, repos);
+  const favorite = !favoriteName
+    ? null
+    : repoPath
+      ? favoriteForPath(favoriteName, repoPath, favorites, repos)
+      : (favorites.find((f) => f.name === favoriteName) ?? null);
   if (favoriteName && !favorite) throw new EpicRequestError("favorite is not configured for this working directory");
   return { favorite, repoPath };
 }
@@ -165,10 +219,19 @@ export function createEpicAgentTask(
   const repoPath = resolveAgentRepoPath(typeof input.repo_path === "string" ? input.repo_path : "", repos);
 
   const favoriteName = typeof input.favorite === "string" ? input.favorite.trim() : "";
-  const favorite = favoriteName ? favoriteForPath(favoriteName, repoPath, favorites, repos) : null;
+  const explicitTarget = typeof input.target === "string" ? input.target.trim() : "";
+  let favorite = favoriteName ? favoriteForPath(favoriteName, repoPath, favorites, repos) : null;
   if (favoriteName && !favorite) throw new EpicRequestError(`favorite ${favoriteName} is not configured for this repository`);
 
-  const target = (typeof input.target === "string" ? input.target.trim() : "") || favorite?.harness || "";
+  if (!favoriteName && !explicitTarget && epic.favorite_name?.trim()) {
+    const epicFavoriteName = epic.favorite_name.trim();
+    favorite = favoriteForPath(epicFavoriteName, repoPath, favorites, repos);
+    if (!favorite) {
+      throw new EpicRequestError(`epic favorite ${epicFavoriteName} is not configured for this repository — pass a compatible favorite or target`);
+    }
+  }
+
+  const target = explicitTarget || favorite?.harness || "";
   if (!target) throw new EpicRequestError("favorite or target (harness) is required");
   if (configuredAgents.length > 0 && !configuredAgents.includes(target)) {
     throw new EpicRequestError(`unknown harness: ${target}`);
@@ -178,7 +241,7 @@ export function createEpicAgentTask(
   const model = (typeof input.model === "string" ? input.model.trim() : "") || favorite?.model || null;
   const reasoning = (typeof input.reasoning === "string" ? input.reasoning.trim() : "") || favorite?.reasoning || null;
   const reviewer = favorite?.review ? reviewers.find((r) => r.name === favorite.review) : undefined;
-  const review = reviewer ? reviewSummary(reviewer) : null;
+  const review = reviewer && !delegateConflict(reviewer, target, agent) ? reviewSummary(reviewer) : null;
   const baseBranch = typeof input.base_branch === "string" && input.base_branch.trim() ? input.base_branch.trim() : null;
 
   const jiraKey = typeof input.jira_key === "string" && input.jira_key.trim() ? input.jira_key.trim().toUpperCase() : null;
@@ -252,6 +315,7 @@ export function resolveTaskPatch(
   favorites: Favorite[],
   reviewers: Reviewer[],
   configuredAgents: string[] = [],
+  epicFavoriteName: string | null = null,
 ): Partial<Task> {
   if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
     throw new EpicRequestError("patch body must be an object");
@@ -321,6 +385,35 @@ export function resolveTaskPatch(
     if (!("review" in input)) {
       const reviewer = favorite.review ? reviewers.find((r) => r.name === favorite.review) : undefined;
       input.review = reviewer ? reviewSummary(reviewer) : null;
+    }
+  } else {
+    if (("target" in input || "agent" in input) && !("review" in input)) {
+      const nextTarget = typeof input.target === "string" ? input.target : task.target;
+      const nextAgent = "agent" in input ? (input.agent as string | null) : (task.agent ?? null);
+      const existingReviewer = reviewerBySummary(task.review, reviewers);
+      if (existingReviewer && delegateConflict(existingReviewer, nextTarget, nextAgent)) {
+        input.review = null;
+      }
+    }
+    if (
+      typeof input.repo_path === "string" &&
+      input.repo_path !== "" &&
+      task.status === "open" &&
+      !task.terminal_address &&
+      !task.target &&
+      !hasFavorite &&
+      !("target" in input) &&
+      epicFavoriteName?.trim()
+    ) {
+      const epicFav = favoriteForPath(epicFavoriteName.trim(), input.repo_path, favorites, repos);
+      if (epicFav && (configuredAgents.length === 0 || configuredAgents.includes(epicFav.harness))) {
+        const conf = favoriteTaskConf(epicFav, reviewers);
+        input.target = conf.target;
+        if (!("agent" in input)) input.agent = conf.agent;
+        if (!("model" in input)) input.model = conf.model;
+        if (!("reasoning" in input)) input.reasoning = conf.reasoning;
+        if (!("review" in input)) input.review = conf.review;
+      }
     }
   }
 

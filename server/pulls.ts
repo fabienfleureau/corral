@@ -517,7 +517,7 @@ export interface PullRefresh {
 
 /** Load the last listing saved before the previous shutdown. */
 export function primePullCache(db: Db): void {
-  const row = db.raw.prepare("SELECT fetched_ms, pulls FROM pull_snapshot WHERE id = 1").get() as
+  const row = db.stmt("SELECT fetched_ms, pulls FROM pull_snapshot WHERE id = 1").get() as
     | { fetched_ms: number; pulls: string }
     | undefined;
   if (!row) return;
@@ -533,11 +533,9 @@ export function primePullCache(db: Db): void {
 
 function savePullCache(db: Db, pulls: Pull[], fetchedMs: number): void {
   try {
-    db.raw
-      .prepare(
-        "INSERT INTO pull_snapshot (id, fetched_ms, pulls) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET fetched_ms=excluded.fetched_ms, pulls=excluded.pulls",
-      )
-      .run(fetchedMs, JSON.stringify(pulls));
+    db.stmt(
+      "INSERT INTO pull_snapshot (id, fetched_ms, pulls) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET fetched_ms=excluded.fetched_ms, pulls=excluded.pulls",
+    ).run(fetchedMs, JSON.stringify(pulls));
   } catch {
     /* the page still works from memory */
   }

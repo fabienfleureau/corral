@@ -255,3 +255,40 @@ test("capture: sequential session questions reuse one item and retain history", 
   assert.match(second.body, /Second question/);
   assert.equal(db.listItems({ kind: "question" }).length, 1);
 }));
+
+test("omnigent: pollOnce ignores archived sessions and emits finished when a tracked session becomes archived", async () => {
+  const backend = new OmnigentBackend({ baseUrl: "http://x", token: "", hostId: "", agents: {} });
+  let poll = 0;
+  (backend as unknown as { request: (m: string, p: string) => Promise<unknown> }).request = async (_m, path) => {
+    if (!path.startsWith("/v1/sessions?")) return {};
+    poll++;
+    if (poll === 1) {
+      return {
+        data: [
+          { id: "live-1", live_status: "running", archived: false, labels: { "corral.task": "t1" } },
+          { id: "arch-flag", live_status: "waiting", archived: true, labels: { "corral.task": "t2" } },
+          { id: "arch-ts", live_status: "idle", archived_at: 1700000000, labels: { "corral.task": "t3" } },
+        ],
+      };
+    }
+    return {
+      data: [
+        { id: "live-1", live_status: "waiting", archived: true, labels: { "corral.task": "t1" } },
+      ],
+    };
+  };
+  const events: WorkerEvent[] = [];
+  (backend as unknown as { subs: Set<(e: WorkerEvent) => void> }).subs.add((e) => events.push(e));
+  const tick = () => (backend as unknown as { tick: () => Promise<void> }).tick();
+
+  await tick();
+  await tick();
+
+  assert.deepEqual(
+    events.map((e) => ({ type: e.type, address: e.address, task_id: e.task_id })),
+    [
+      { type: "created", address: "live-1", task_id: "t1" },
+      { type: "finished", address: "live-1", task_id: "t1" },
+    ],
+  );
+});

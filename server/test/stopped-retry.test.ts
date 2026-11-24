@@ -4,7 +4,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Db } from "../db.ts";
+import { createHttpServer, type AppState } from "../api.ts";
 import { CaptureEngine, type CaptureEngineOptions } from "../capture.ts";
 import {
   DEFAULT_STOPPED_RETRY,
@@ -15,8 +19,10 @@ import {
   stoppedRetryDelayMs,
   stoppedRetryPrompt,
 } from "../stopped-retry.ts";
+import type { Config } from "../config.ts";
+import type { JiraClient } from "../jira.ts";
 import type { Task } from "../types.ts";
-import type { WorkerBackend, WorkerEvent, WorkerRunOutcome } from "../worker.ts";
+import type { WorkerBackend, WorkerEvent, WorkerRunOutcome, WorkerSession } from "../worker.ts";
 
 function makeTask(over: Partial<Task> = {}): Task {
   const now = Date.now();
@@ -411,4 +417,276 @@ test("a session that stays stopped after an auto-retry escalates after the stall
     assert.ok(item, "escalated even though session never transitioned back to working");
     assert.match(item.body, /after 1 automatic retry/);
   } finally { env.close(); }
+});
+
+function fakeSession(over: Partial<WorkerSession> = {}): WorkerSession {
+  return {
+    address: "s1",
+    task_id: "task-1",
+    name: "corral-test",
+    harness: "claude",
+    status: "done",
+    blocked_kind: null,
+    state: "live",
+    turn: 1,
+    cwd: "/tmp/repo",
+    created_ms: Date.now(),
+    exit_code: null,
+    parent: null,
+    ...over,
+  };
+}
+
+test("delayed retry does not send or revive when session is archived in backend before timer fires", async () => {
+  const env = setup({ kind: "message", text: "All done." }, {
+    engine: { stoppedRetry: { maxAttempts: 1, delaysSec: [0.015], silentStopAttempts: 1 } },
+  });
+  let session: WorkerSession | null = fakeSession({ state: "live", status: "done" });
+  (env.backend as { get: WorkerBackend["get"] }).get = async () => session;
+  try {
+    await env.emit("done");
+    session = fakeSession({ state: "finished", status: "done" });
+    await wait(40);
+    assert.equal(env.sent.length, 0, "no nudge sent to archived session");
+    assert.equal(env.db.metricSummary().find((m) => m.name === "task.stopped_retry"), undefined);
+    assert.equal(env.db.openQuestionItemForTerminal("s1"), null);
+  } finally { env.close(); }
+});
+
+test("stop event on an already-archived backend session does not retry or escalate", async () => {
+  const env = setup({ kind: "message", text: "All done." }, {
+    engine: { stoppedRetry: { maxAttempts: 0, delaysSec: [0.005], silentStopAttempts: 0 } },
+  });
+  (env.backend as { get: WorkerBackend["get"] }).get = async () => fakeSession({ state: "finished", status: "done" });
+  try {
+    await env.emit("done");
+    await wait(25);
+    assert.equal(env.sent.length, 0);
+    assert.equal(env.db.openQuestionItemForTerminal("s1"), null);
+  } finally { env.close(); }
+});
+
+test("delayed retry does not send or escalate when session was deleted (404) before timer fires", async () => {
+  const env = setup({ kind: "message", text: "All done." }, {
+    engine: { stoppedRetry: { maxAttempts: 1, delaysSec: [0.015], silentStopAttempts: 1 } },
+  });
+  let session: WorkerSession | null = fakeSession({ state: "live", status: "done" });
+  (env.backend as { get: WorkerBackend["get"] }).get = async () => session;
+  try {
+    await env.emit("done");
+    session = null;
+    await wait(40);
+    assert.equal(env.sent.length, 0, "no nudge sent to deleted session");
+    assert.equal(env.db.metricSummary().find((m) => m.name === "task.stopped_retry"), undefined);
+    assert.equal(env.db.openQuestionItemForTerminal("s1"), null);
+  } finally { env.close(); }
+});
+
+test("archived task ignores blocked, idle, and done worker events", async () => {
+  const env = setup({ kind: "message", text: "All done." }, {
+    task: { status: "archived" },
+    engine: { stoppedRetry: { maxAttempts: 1, delaysSec: [0.005], silentStopAttempts: 1 } },
+  });
+  try {
+    await env.capture.handleEvent({
+      type: "status",
+      address: "s1",
+      task_id: "task-1",
+      status: "blocked",
+      elicitations: [{ id: "el-1", kind: "permission", prompt: "Allow?", choices: ["yes"] }],
+    });
+    await env.emit("idle");
+    await env.emit("done");
+    await wait(25);
+    assert.equal(env.sent.length, 0);
+    assert.equal(env.db.listItems({ kind: "question" }).length, 0);
+  } finally { env.close(); }
+});
+
+test("archived inbox question and done-to-idle decay do not re-nudge on restart or status poll", async () => {
+  const env = setup({ kind: "message", text: "Finished." }, {
+    lastStatus: "done",
+    engine: { stoppedRetry: { maxAttempts: 1, delaysSec: [0.005], silentStopAttempts: 1 } },
+  });
+  try {
+    env.db.insertItem({
+      id: "q-archived",
+      kind: "question",
+      status: "archived",
+      title: "Stopped",
+      summary: "",
+      body: "Stopped",
+      context: "",
+      options: null,
+      ready: 1,
+      source_ref: "s1",
+      task_id: "task-1",
+      structured: 0,
+      created_ms: 1,
+      updated_ms: 1,
+      resolved_ms: 2,
+      snooze_until_ms: null,
+    });
+    // Server restart ("created" with status="done") must respect archived question item.
+    await env.emit("done", "created");
+    await wait(25);
+    assert.equal(env.sent.length, 0, "restart does not nudge after archived question");
+    assert.equal(env.db.openQuestionItemForTerminal("s1"), null);
+
+    // Waiting ("done") decaying to "idle" without running a new turn must not nudge.
+    await env.emit("idle", "status");
+    await wait(25);
+    assert.equal(env.sent.length, 0, "done -> idle decay does not nudge");
+    assert.equal(env.db.openQuestionItemForTerminal("s1"), null);
+  } finally { env.close(); }
+});
+
+test("archive-session cancels in-flight delayed retries even when backend.archive is slow, and clears guard on failure", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-archive-race-"));
+  const db = new Db(join(dir, "test.db"));
+  db.insertTask(makeTask({ status: "dispatched", terminal_address: "s1" }));
+  db.upsertTerminal({ address: "s1", task_id: "task-1", name: null, agent: "claude", last_status: "working", last_turn: 1, updated_ms: Date.now() });
+
+  const sent: string[] = [];
+  let releaseArchive!: () => void;
+  let markArchiveStarted!: () => void;
+  const archiveStarted = new Promise<void>((resolve) => { markArchiveStarted = resolve; });
+  let failArchive = false;
+  const backend = {
+    name: "fake",
+    read: async () => "tail",
+    get: async () => fakeSession({ state: "live", status: "done" }),
+    send: async (_a: string, text: string) => { sent.push(text); },
+    lastRunOutcome: async () => ({ kind: "message" as const, text: "Finished." }),
+    archive: async () => {
+      if (failArchive) throw new Error("archive unavailable");
+      markArchiveStarted();
+      await new Promise<void>((resolve) => { releaseArchive = resolve; });
+    },
+  } as unknown as WorkerBackend;
+  const hub = { broadcast: () => undefined, clients: new Set() };
+  const capture = new CaptureEngine(db, backend, hub, null, null, {
+    stoppedRetry: { maxAttempts: 1, delaysSec: [0.05], silentStopAttempts: 1 },
+  });
+  const server = createHttpServer({
+    db,
+    backend,
+    capture,
+    hub,
+    cfg: { token: "test", agents: {}, favorites: [], reviewers: [] } as unknown as Config,
+    jira: {} as JiraClient,
+  } as unknown as AppState);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+
+  try {
+    // 1. If archive fails, the guard clears and the task remains dispatched.
+    failArchive = true;
+    const failedRes = await fetch(`${baseUrl}/api/tasks/task-1/archive-session`, {
+      method: "POST",
+      headers: { Authorization: "Bearer test" },
+    });
+    assert.equal(failedRes.status, 500);
+    assert.equal(db.getTask("task-1")?.status, "dispatched");
+
+    // 2. Schedule a delayed nudge, then start a slow archive that outlasts the delay.
+    failArchive = false;
+    await capture.handleEvent({ type: "status", address: "s1", task_id: "task-1", status: "done" });
+    const archivingReq = fetch(`${baseUrl}/api/tasks/task-1/archive-session`, {
+      method: "POST",
+      headers: { Authorization: "Bearer test" },
+    });
+    await archiveStarted;
+    await wait(70); // Past the 50ms retry delay while backend.archive is still awaiting.
+    assert.equal(sent.length, 0, "pending nudge was cancelled before archive completed");
+    releaseArchive();
+    const okRes = await archivingReq;
+    assert.equal(okRes.status, 200);
+    assert.equal(db.getTask("task-1")?.status, "archived");
+    assert.equal(sent.length, 0);
+  } finally {
+    capture.dispose();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("PATCH task to archived and POST item archive cancel pending stopped-run retries", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-cancel-retry-"));
+  const db = new Db(join(dir, "test.db"));
+  db.insertTask(makeTask({ id: "t1", status: "dispatched", terminal_address: "s1" }));
+  db.upsertTerminal({ address: "s1", task_id: "t1", name: null, agent: "claude", last_status: "working", last_turn: 1, updated_ms: Date.now() });
+  db.insertTask(makeTask({ id: "t2", status: "dispatched", terminal_address: "s2" }));
+  db.upsertTerminal({ address: "s2", task_id: "t2", name: null, agent: "claude", last_status: "working", last_turn: 1, updated_ms: Date.now() });
+  db.insertItem({
+    id: "item-2",
+    kind: "question",
+    status: "open",
+    title: "Stopped",
+    summary: "",
+    body: "Stopped",
+    context: "",
+    options: null,
+    ready: 1,
+    source_ref: "s2",
+    task_id: "t2",
+    structured: 0,
+    created_ms: 1,
+    updated_ms: 1,
+    resolved_ms: null,
+    snooze_until_ms: null,
+  });
+
+  const sent: string[] = [];
+  const backend = {
+    name: "fake",
+    read: async () => "tail",
+    get: async (address: string) => fakeSession({ address, state: "live", status: "done" }),
+    send: async (_a: string, text: string) => { sent.push(text); },
+    lastRunOutcome: async () => ({ kind: "message" as const, text: "Finished." }),
+  } as unknown as WorkerBackend;
+  const hub = { broadcast: () => undefined, clients: new Set() };
+  const capture = new CaptureEngine(db, backend, hub, null, null, {
+    stoppedRetry: { maxAttempts: 1, delaysSec: [0.05], silentStopAttempts: 1 },
+  });
+  const server = createHttpServer({
+    db,
+    backend,
+    capture,
+    hub,
+    cfg: { token: "test", agents: {}, favorites: [], reviewers: [] } as unknown as Config,
+    jira: {} as JiraClient,
+  } as unknown as AppState);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+
+  try {
+    await capture.handleEvent({ type: "status", address: "s1", task_id: "t1", status: "done" });
+    const patchRes = await fetch(`${baseUrl}/api/tasks/t1`, {
+      method: "PATCH",
+      headers: { Authorization: "Bearer test", "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "archived" }),
+    });
+    assert.equal(patchRes.status, 200);
+
+    // Schedule retry for t2 (when item-2 is still resolved? Actually resolve/archive cancels directly).
+    db.updateItem("item-2", { status: "resolved", resolved_ms: Date.now() });
+    await capture.handleEvent({ type: "status", address: "s2", task_id: "t2", status: "done" });
+    const archiveItemRes = await fetch(`${baseUrl}/api/items/item-2/archive`, {
+      method: "POST",
+      headers: { Authorization: "Bearer test" },
+    });
+    assert.equal(archiveItemRes.status, 200);
+
+    await wait(70);
+    assert.equal(sent.length, 0);
+  } finally {
+    capture.dispose();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
