@@ -86,6 +86,27 @@ interface Change {
   data?: Record<string, unknown>;
 }
 
+/** Task fields whose changes are recorded in `task_events` by `taskChanges()`.
+ *  Keep in sync with `taskChanges` so `Db.updateTask` knows when it can skip
+ *  reading the previous row for bookkeeping-only patches like `pr_meta`. */
+export const TRACKED_TASK_FIELDS: ReadonlySet<keyof Task> = new Set([
+  "status",
+  "title",
+  "prompt",
+  "repo_path",
+  "target",
+  "model",
+  "reasoning",
+  "agent",
+  "assignee",
+  "base_branch",
+  "branch",
+  "worktree_path",
+  "pr_url",
+  "jira_status",
+  "exit_code",
+]);
+
 /** The changes worth a line in a task's history. Field names that only drive
  *  bookkeeping (pr_meta, updated_ms, handoff) are deliberately absent. */
 export function taskChanges(before: Task, patch: Partial<Task>): Change[] {

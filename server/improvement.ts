@@ -113,7 +113,7 @@ export class ImprovementAnalysis {
     try {
       const source = await this.options.usage();
       if (!source) return null;
-      return buildUsageEvidence({ records: source.records, tasks: this.db.listTasks(), prices: source.prices, since_ms: since, scanning: source.scanning, now });
+      return buildUsageEvidence({ records: source.records, tasks: this.db.listTasks(), worktrees: this.db.listTaskWorktrees(), prices: source.prices, since_ms: since, scanning: source.scanning, now });
     } catch {
       return null;
     }

@@ -25,6 +25,13 @@ export function reviewSummary(r: Reviewer): string {
   return isDelegateReviewer(r) ? `sub-agent ${delegateAgentName(r)}` : r.command;
 }
 
+/** Find a configured reviewer by its name or frozen task summary. */
+export function reviewerBySummary(review: string | null | undefined, reviewers: Reviewer[]): Reviewer | null {
+  const trimmed = review?.trim() ?? "";
+  if (!trimmed) return null;
+  return reviewers.find((r) => r.name === trimmed || reviewSummary(r) === trimmed) ?? null;
+}
+
 /**
  * Why `reviewer` cannot run with this dispatch, or null when it can. A delegate
  * needs an agent that can call sub-agents: Corral picks one, which only works

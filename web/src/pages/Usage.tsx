@@ -9,12 +9,39 @@ import { errText, formatTs, timeAgo } from "../util";
 import { Spinner } from "../ui";
 import { quotaTone } from "../sidebar-quotas";
 
-const RANGES: { key: UsageRange; label: string }[] = [
-  { key: "24h", label: "24 hours" },
-  { key: "7d", label: "7 days" },
-  { key: "30d", label: "30 days" },
-  { key: "all", label: "All time" },
+export const RANGES: { key: UsageRange; label: string; shortLabel: string }[] = [
+  { key: "24h", label: "Last 24 hours", shortLabel: "Last 24h" },
+  { key: "7d", label: "Last 7 days", shortLabel: "Last 7d" },
+  { key: "30d", label: "Last 30 days", shortLabel: "Last 30d" },
+  { key: "all", label: "All time", shortLabel: "All time" },
 ];
+
+export function formatUsageWindow(
+  range: UsageRange,
+  report: Pick<UsageReport, "range" | "since_ms" | "generated_ms" | "timeline"> | null,
+  locale?: string,
+): { dates: string | null; label: string; tooltip?: string } {
+  const meta = RANGES.find((r) => r.key === range) ?? RANGES[1];
+  const active = report && report.range === range ? report : null;
+  if (!active) return { dates: null, label: meta.label };
+  const endMs = active.generated_ms;
+  const startMs = range === "all" ? (active.timeline[0]?.start_ms ?? null) : active.since_ms;
+  if (startMs === null || startMs > endMs) return { dates: null, label: meta.label };
+
+  const start = new Date(startMs);
+  const end = new Date(endMs);
+  const opts: Intl.DateTimeFormatOptions = range === "24h"
+    ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+    : start.getFullYear() !== end.getFullYear()
+      ? { month: "short", day: "numeric", year: "numeric" }
+      : { month: "short", day: "numeric" };
+  const dates = new Intl.DateTimeFormat(locale, opts).formatRange(start, end);
+  return {
+    dates,
+    label: `${meta.label} · ${dates}`,
+    tooltip: `${formatTs(startMs)} – ${formatTs(endMs)}`,
+  };
+}
 type Metric = "cost" | "tokens";
 type ChartGroup = "agent" | "model";
 type ChartSeries = { key: string; label: string; className: string; values: number[] };
@@ -350,20 +377,18 @@ export function UsagePage() {
   const eff = report?.efficiency;
   const unpriced = report?.by_model.filter((m) => !m.priced) ?? [];
   const loadingPane = (label: string) => <div className="pane-note">{error ? "Unavailable" : <Spinner label={label} />}</div>;
+  const rangeMeta = RANGES.find((r) => r.key === range) ?? RANGES[1];
+  const rangeWindow = formatUsageWindow(range, report);
+  const allTimeBadgeClass = range === "all" ? "badge" : "badge badge-warn";
+  const allTimeTooltip = range === "all" ? undefined : "All-time total across all linked PRs / MRs (not filtered by the selected timeframe)";
 
   return (
     <div className="page usage-page">
       <div className="page-scroll">
         <div className="page-toolbar">
           <h1 className="page-title">Usage</h1>
-          <div className="chip-row">
-            {RANGES.map((r) => (
-              <button key={r.key} className={`chip ${range === r.key ? "chip-active" : ""}`} onClick={() => update({ range: r.key })}>
-                {r.label}
-              </button>
-            ))}
-          </div>
           <button
+            type="button"
             className="btn"
             disabled={loading || quotaLoading}
             onClick={() => {
@@ -404,65 +429,105 @@ export function UsagePage() {
           ))}
         </div>
 
-        <h2 className="usage-h">Overview</h2>
-        <div className="usage-grid usage-stats">
+        <div className="usage-section-head">
+          <div className="usage-section-title">
+            <h2 className="usage-h">Overview</h2>
+            <span className="muted usage-small usage-window" title={rangeWindow.tooltip}>
+              {rangeWindow.dates ?? rangeMeta.label}
+            </span>
+          </div>
+          <div className="chip-row" role="group" aria-label="Usage timeframe">
+            {RANGES.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                className={`chip ${range === r.key ? "chip-active" : ""}`}
+                aria-pressed={range === r.key}
+                onClick={() => update({ range: r.key })}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="usage-grid usage-stats" aria-busy={loading || undefined}>
           <div className="usage-card">
-            <div className="muted">Estimated cost</div>
+            <div className="usage-card-head usage-stat-head">
+              <span className="muted">Estimated cost</span>
+              <span className="badge">{rangeMeta.shortLabel}</span>
+            </div>
             <div className="usage-big">{report ? usd(report.totals.cost_usd) : "—"}</div>
             <div className="muted usage-small">{report ? "API list prices; subscriptions are not billed per token" : <LoadingNote label="Loading usage…" error={error} />}</div>
           </div>
           <div className="usage-card">
-            <div className="muted">Lines added in PRs / MRs</div>
-            <div className="usage-big">{report?.pr_additions.data ? report.pr_additions.data.additions.toLocaleString() : "—"}</div>
-            <div className="muted usage-small">
-              {report ? (
-                <>
-                  {report.pr_additions.scanning ? "Updating · " : ""}All time · current diffs ·{" "}
-                  {report.pr_additions.data ? `${report.pr_additions.data.available} of ${report.pr_additions.data.total} linked PRs / MRs available` : "loading"}
-                </>
-              ) : <LoadingNote label="Loading usage…" error={error} />}
+            <div className="usage-card-head usage-stat-head">
+              <span className="muted">Tokens</span>
+              <span className="badge">{rangeMeta.shortLabel}</span>
             </div>
-          </div>
-          <div className="usage-card">
-            <div className="muted">Tokens</div>
             <div className="usage-big">{report ? tokens(allTokens(report.totals)) : "—"}</div>
             <div className="muted usage-small">
               {report ? `${tokens(report.totals.output)} out · ${tokens(report.totals.cache_read)} cache read` : <LoadingNote label="Loading usage…" error={error} />}
             </div>
           </div>
           <div className="usage-card">
-            <div className="muted">Tasks per $</div>
+            <div className="usage-card-head usage-stat-head">
+              <span className="muted">Tasks per $</span>
+              <span className="badge">{rangeMeta.shortLabel}</span>
+            </div>
             <div className="usage-big">{eff && eff.tasks_per_usd !== null ? eff.tasks_per_usd.toFixed(2) : "—"}</div>
             <div className="muted usage-small">
               {report ? (eff ? `${eff.tasks_done} done of ${eff.tasks_with_spend} tasks with spend` : "No attributed spend") : <LoadingNote label="Loading usage…" error={error} />}
             </div>
           </div>
           <div className="usage-card">
-            <div className="muted">Cost per done task</div>
+            <div className="usage-card-head usage-stat-head">
+              <span className="muted">Cost per done task</span>
+              <span className="badge">{rangeMeta.shortLabel}</span>
+            </div>
             <div className="usage-big">{eff && eff.usd_per_done_task !== null ? usd(eff.usd_per_done_task) : "—"}</div>
             <div className="muted usage-small">
               {report ? (eff ? `${usd(eff.unattributed_usd)} spent outside Corral tasks` : "No attributed spend") : <LoadingNote label="Loading usage…" error={error} />}
             </div>
           </div>
+          <div className="usage-card">
+            <div className="usage-card-head usage-stat-head">
+              <span className="muted">Lines added in PRs / MRs</span>
+              <span className={allTimeBadgeClass} title={allTimeTooltip}>All time</span>
+            </div>
+            <div className="usage-big">{report?.pr_additions.data ? report.pr_additions.data.additions.toLocaleString() : "—"}</div>
+            <div className="muted usage-small">
+              {report ? (
+                <>
+                  {report.pr_additions.scanning ? "Updating · " : ""}All linked PRs / MRs · current diffs ·{" "}
+                  {report.pr_additions.data ? `${report.pr_additions.data.available} of ${report.pr_additions.data.total} available` : "loading"}
+                </>
+              ) : <LoadingNote label="Loading usage…" error={error} />}
+            </div>
+          </div>
         </div>
 
         <div className="usage-section-head">
-          <h2 className="usage-h">Over time</h2>
+          <div className="usage-section-title">
+            <h2 className="usage-h">Over time</h2>
+            <span className="muted usage-small usage-window" title={rangeWindow.tooltip}>
+              {rangeWindow.label}
+            </span>
+          </div>
           <div className="usage-chart-controls">
             <div className="chip-row">
               <span className="muted usage-small">Split</span>
-              <button className={`chip ${group === "agent" ? "chip-active" : ""}`} onClick={() => update({ group: "agent" })}>
+              <button type="button" className={`chip ${group === "agent" ? "chip-active" : ""}`} aria-pressed={group === "agent"} onClick={() => update({ group: "agent" })}>
                 Agent
               </button>
-              <button className={`chip ${group === "model" ? "chip-active" : ""}`} onClick={() => update({ group: "model" })}>
+              <button type="button" className={`chip ${group === "model" ? "chip-active" : ""}`} aria-pressed={group === "model"} onClick={() => update({ group: "model" })}>
                 Model
               </button>
             </div>
             <div className="chip-row">
-              <button className={`chip ${metric === "cost" ? "chip-active" : ""}`} onClick={() => update({ metric: "cost" })}>
+              <button type="button" className={`chip ${metric === "cost" ? "chip-active" : ""}`} aria-pressed={metric === "cost"} onClick={() => update({ metric: "cost" })}>
                 Cost
               </button>
-              <button className={`chip ${metric === "tokens" ? "chip-active" : ""}`} onClick={() => update({ metric: "tokens" })}>
+              <button type="button" className={`chip ${metric === "tokens" ? "chip-active" : ""}`} aria-pressed={metric === "tokens"} onClick={() => update({ metric: "tokens" })}>
                 Tokens
               </button>
             </div>
@@ -470,7 +535,14 @@ export function UsagePage() {
         </div>
         {report ? <Timeline report={report} metric={metric} group={group} /> : loadingPane("Loading usage…")}
 
-        <h2 className="usage-h">By model</h2>
+        <div className="usage-section-head">
+          <div className="usage-section-title">
+            <h2 className="usage-h">By model</h2>
+            <span className="muted usage-small usage-window" title={rangeWindow.tooltip}>
+              {rangeWindow.label}
+            </span>
+          </div>
+        </div>
         {!report ? loadingPane("Loading usage…") : report.by_model.length === 0 ? (
           <div className="pane-note">No usage in this range.</div>
         ) : (
@@ -511,7 +583,14 @@ export function UsagePage() {
           </div>
         ) : null}
 
-        <h2 className="usage-h">Most expensive tasks</h2>
+        <div className="usage-section-head">
+          <div className="usage-section-title">
+            <h2 className="usage-h">Most expensive tasks</h2>
+            <span className="muted usage-small usage-window" title={rangeWindow.tooltip}>
+              {rangeWindow.label}
+            </span>
+          </div>
+        </div>
         {!report ? loadingPane("Loading usage…") : !eff || eff.top_tasks.length === 0 ? (
           <div className="pane-note">No spend attributed to Corral tasks in this range (matched by worktree path).</div>
         ) : (
@@ -542,10 +621,13 @@ export function UsagePage() {
         )}
 
         <div className="usage-section-head">
-          <h2 className="usage-h">Lines added by {linesGroup}</h2>
+          <div className="usage-section-title">
+            <h2 className="usage-h">Lines added by {linesGroup}</h2>
+            <span className={allTimeBadgeClass} title={allTimeTooltip}>All time</span>
+          </div>
           <div className="chip-row">
             {(["project", "model", "task"] as const).map((group) => (
-              <button key={group} className={`chip ${linesGroup === group ? "chip-active" : ""}`} onClick={() => setLinesGroup(group)}>{group[0].toUpperCase() + group.slice(1)}</button>
+              <button key={group} type="button" className={`chip ${linesGroup === group ? "chip-active" : ""}`} aria-pressed={linesGroup === group} onClick={() => setLinesGroup(group)}>{group[0].toUpperCase() + group.slice(1)}</button>
             ))}
           </div>
         </div>
