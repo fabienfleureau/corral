@@ -9,7 +9,7 @@ Prompt families:
 |---|---|---|---|
 | **Agent conventions** | `skills/*.md` | the dispatched coding agent (Claude Code, Codex, …) | every dispatch, and every PR-loop respawn |
 | **PR-loop messages** | string builders in `server/pr.ts` | a live agent session, or a fresh respawn | when the PR loop has work for the agent |
-| **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts` | the `assistant` command | when the human clicks Summarize, or a digest runs |
+| **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts`, `server/task-title.ts` | the `assistant` command | when the human clicks Summarize, a digest runs, or a task is created without a title |
 | **KPI analysis** | `kpiPrompt()` in `server/kpi.ts` | the Omnigent agent from the selected favorite | every manual or scheduled KPI cycle |
 | **KPI status artifacts** | `kpiArtifactPrompt()` in `server/kpi-artifact.ts` | a Claude `ops` task from a configured favorite | when the human builds an artifact from the KPI page |
 | **Epic autonomous agent** | `epicAgentPrompt()` in `server/epic-agent.ts` | the Omnigent agent from the epic's selected favorite | every manual or scheduled epic implementation cycle |
@@ -184,6 +184,7 @@ substituted — see `llmComplete()` in `server/llm.ts`).
 
 | Builder | Purpose | Rules it carries |
 |---|---|---|
+| `taskTitlePrompt()` — `server/task-title.ts` | a task created without a title (`POST /api/tasks`), after its derived title is stored | task description framed as data (first 4000 chars); reply is the title only, one line, ≤60 characters, imperative, no quotes; replaces the derived title only if nobody changed it meanwhile; any failure keeps the derived title |
 | `summarizeText()` — `server/llm.ts` | the inbox **Summarize** button on a raw captured output tail | one-sentence question + 2–4 sentences of context, no preamble, last 8000 chars of output |
 | `orchestrationPrompt()` — `server/epic-orchestration.ts` | on an epic orchestration request | asks for a reviewable plan using the current design, task states and blockers; makes no changes |
 | `amendmentPrompt()` — `server/epic-design.ts` | after an epic's design is revised: which unstarted tasks change and how | ticket text framed as data; reply is JSON only (`[{key, amendment}]`, `[]` when nothing changes); unknown keys and empty amendments are dropped; nothing is written to Jira until the human applies each one in the inbox |

@@ -10,8 +10,9 @@ export const ENGINEERING_SKILLS_OPENER = "Analyze Corral activity to suggest eng
 export const SKILLS_OPENER = "Review the agent skills on this machine against how the human's coding-agent sessions used them.";
 
 export const AMENDMENT_OPENER = "You are a helper inside a personal work-tracking app.";
+export const TITLE_OPENER = "You name tasks in a personal work-tracking app.";
 
-export const ASSISTANT_PROMPT_OPENERS: readonly string[] = [SUMMARIZE_OPENER, IMPROVEMENT_OPENER, ENGINEERING_SKILLS_OPENER, SKILLS_OPENER, AMENDMENT_OPENER];
+export const ASSISTANT_PROMPT_OPENERS: readonly string[] = [SUMMARIZE_OPENER, IMPROVEMENT_OPENER, ENGINEERING_SKILLS_OPENER, SKILLS_OPENER, AMENDMENT_OPENER, TITLE_OPENER];
 
 /** True when a session's first prompt is one of Corral's own assistant calls. */
 export function isAssistantPrompt(prompt: string | null): boolean {
