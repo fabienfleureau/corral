@@ -248,7 +248,11 @@ for (const target of ["codex", "claude", "opencode"]) {
         assert.equal(started[0].prompt.split("\n\n---\n")[0], scenario.expected);
         assert.ok(started[0].prompt.length > scenario.expected.length, "workflow conventions are appended");
         assert.equal(started[0].harness, target);
-        if (!scenario.title.trim()) assert.equal(started[0].name, null);
+        if (!scenario.title.trim()) {
+          // An untitled task is named from its prompt before dispatch.
+          assert.equal(db.getTask(task.id)?.title, "Fix task context");
+          assert.match(started[0].name ?? "", /^corral-fix-task-context/);
+        }
         assert.equal(db.getTask(task.id)?.status, "dispatched");
       } finally {
         db.close();

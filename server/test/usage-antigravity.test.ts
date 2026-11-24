@@ -33,7 +33,7 @@ test("Gemini 4 models are priced from the base model's list price", () => {
   assert.equal(recordCost(flash, DEFAULT_PRICES), 4.5);
 });
 
-test("UsageScanner reads omnigent Antigravity sessions and attributes them by workspace", async () => {
+test("UsageScanner reads omnigent Antigravity sessions and attributes them by workspace, also after worktree cleanup", async () => {
   const dir = mkdtempSync(join(tmpdir(), "corral-usage-agy-"));
   try {
     const worktree = join(dir, "repo-worktrees", "task-1");
@@ -60,8 +60,9 @@ test("UsageScanner reads omnigent Antigravity sessions and attributes them by wo
     assert.ok(records.every((r) => r.agent === "antigravity" && r.cwd === worktree));
 
     const now = Date.parse("2026-11-24T18:00:00Z");
-    const task = { id: "t1", title: "t1", prompt: "", status: "done", worktree_path: worktree } as Task;
-    const report = buildReport({ records, tasks: [task], prices: DEFAULT_PRICES, range: "24h", scanning: false, now });
+    // Worktree cleaned up: the path survives only in the task's history.
+    const task = { id: "t1", title: "t1", prompt: "", status: "done", worktree_path: null } as Task;
+    const report = buildReport({ records, tasks: [task], worktrees: [{ task_id: "t1", path: worktree }], prices: DEFAULT_PRICES, range: "24h", scanning: false, now });
     assert.equal(report.totals.unpriced_calls, 0);
     assert.equal(report.by_agent[0].agent, "antigravity");
     assert.equal(report.efficiency.top_tasks[0].agent, "antigravity");

@@ -6,7 +6,9 @@
 // - Claude Code: ~/.claude/projects/**/*.jsonl, one line per content block,
 //   each repeating message.usage -> dedupe by message.id + requestId.
 // - Codex: ~/.codex/sessions/**/rollout-*.jsonl, token_count events carry a
-//   running total -> count deltas; model from the latest turn_context.
+//   running total -> count deltas; model from the latest turn_context. Codex
+//   sessions omnigent starts keep their own CODEX_HOME, under
+//   ~/.omnigent/codex-native/<id>/codex-home/sessions.
 // - Antigravity: <home>/brain/<conversation>/.system_generated/logs/
 //   transcript_full.jsonl, one line per step; model steps carry input (uncached),
 //   cache_read and output tokens. Homes: ~/.gemini/antigravity-cli,
@@ -53,7 +55,9 @@ export interface ModelPrice {
 }
 
 // API list prices in USD per million tokens. Config prices can override these.
-// Anthropic: as of 2026-10-06; OpenAI, Xiaomi and OpenCode: as of 2026-11-05.
+// Anthropic: as of 2026-10-06; Xiaomi: as of 2026-11-05; OpenAI, Tencent and
+// OpenCode: as of 2026-11-24. A free model is priced at 0, so it counts as
+// priced, not as an unpriced call.
 export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   "claude-fable-5*": { input: 10, output: 50, cacheRead: 0.25 },
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
@@ -66,10 +70,16 @@ export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   // Standard short-context rates: https://developers.openai.com/api/docs/pricing
   "gpt-6.1-terra": { input: 1, output: 5, cacheRead: 0.05 },
   "gpt-6.1-sol": { input: 2, output: 10, cacheRead: 0.1 },
+  "gpt-6.2-sol": { input: 2, output: 10, cacheRead: 0.1 },
+  "gpt-6-luna": { input: 0.1, output: 0.5, cacheRead: 0.01 },
   // https://mimo.mi.com/docs/price
   "mimo-v2.6-pro": { input: 0.435, output: 0.87, cacheRead: 0.0036 },
+  // List price; the page's single "Cache" column is taken as cache read.
+  // https://www.tencentcloud.com/document/product/1300/78937
+  "hy4": { input: 0.834, output: 2.501, cacheRead: 0.042 },
   // https://dev.opencode.ai/v2/docs/console/models
   "beam-free": { input: 0, output: 0 },
+  "hy4-flash-free": { input: 0, output: 0 },
   // Standard paid tier, output includes thinking. Antigravity suffixes the
   // effort and tier ("gemini-4-neon-medium"), priced at the base model's rate.
   // https://aistudio.google.com/docs/pricing (as of 2026-11-24)
@@ -307,8 +317,21 @@ export interface UsageSources {
   codexDir: string;
   claudeQuotaDir: string;
   opencodeDir?: string;
+  /** Omnigent's home: Codex sessions it starts log under codex-native/. */
+  omnigentDir?: string;
   /** Roots searched for Antigravity transcript_full.jsonl files. */
   antigravityDirs?: string[];
+}
+
+/** Session dirs of the Codex homes omnigent creates, one per session. */
+function omnigentCodexDirs(omnigentDir?: string): string[] {
+  if (!omnigentDir) return [];
+  const root = join(omnigentDir, "codex-native");
+  try {
+    return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(root, e.name, "codex-home", "sessions"));
+  } catch {
+    return [];
+  }
 }
 
 export function defaultSources(): UsageSources {
@@ -318,6 +341,7 @@ export function defaultSources(): UsageSources {
     codexDir: join(home, ".codex", "sessions"),
     claudeQuotaDir: join(home, ".cache", "ccstatusline"),
     opencodeDir: process.env.OPENCODE_DATA_DIR || join(process.env.XDG_DATA_HOME || join(home, ".local", "share"), "opencode"),
+    omnigentDir: join(home, ".omnigent"),
     antigravityDirs: [
       join(home, ".gemini", "antigravity-cli"),
       join(home, ".gemini", "antigravity-acp"),
@@ -360,7 +384,9 @@ export class UsageScanner {
     const seen = new Set<string>();
     const jobs: [string, UsageAgent][] = [
       ...listJsonl(this.sources.claudeDir).map((p): [string, UsageAgent] => [p, "claude"]),
-      ...listJsonl(this.sources.codexDir).map((p): [string, UsageAgent] => [p, "codex"]),
+      ...[this.sources.codexDir, ...omnigentCodexDirs(this.sources.omnigentDir)]
+        .flatMap((dir) => listJsonl(dir))
+        .map((p): [string, UsageAgent] => [p, "codex"]),
       // transcript.jsonl and chunks/ repeat the same steps: read the full one only.
       ...(this.sources.antigravityDirs ?? [])
         .flatMap((dir) => listJsonl(dir))
@@ -705,20 +731,45 @@ function bucketStart(ts: number, bucket: "hour" | "day"): number {
   return d.getTime();
 }
 
-/** The task whose worktree contains cwd (longest match). */
-function taskForCwd(cwd: string, tasks: Task[]): Task | null {
-  let best: Task | null = null;
-  for (const t of tasks) {
-    const w = t.worktree_path;
-    if (!w) continue;
-    if ((cwd === w || cwd.startsWith(w.endsWith("/") ? w : w + "/")) && (!best || w.length > (best.worktree_path?.length ?? 0))) best = t;
+/** A worktree a task used, possibly removed since (cleanup clears
+ *  worktree_path, but the task's history keeps the path). */
+export interface TaskWorktree {
+  task_id: string;
+  path: string;
+}
+
+/** cwd -> the task whose worktree contains it (longest match), cached per cwd.
+ *  Paths come from each task's current worktree and its past ones, so spend
+ *  stays with a task after its worktree is cleaned up. */
+export function taskResolver(tasks: Task[], worktrees: TaskWorktree[] = []): (cwd: string) => Task | null {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const trim = (path: string) => path.replace(/\/+$/, "");
+  const paths = new Map<string, Task>();
+  for (const w of worktrees) {
+    const t = byId.get(w.task_id);
+    if (t && w.path) paths.set(trim(w.path), t);
   }
-  return best;
+  // A task's current worktree wins over a past one at the same path.
+  for (const t of tasks) if (t.worktree_path) paths.set(trim(t.worktree_path), t);
+  const cache = new Map<string, Task | null>();
+  return (cwd) => {
+    if (!cwd) return null;
+    const hit = cache.get(cwd);
+    if (hit !== undefined) return hit;
+    let best: { len: number; task: Task } | null = null;
+    for (const [w, t] of paths) {
+      if ((cwd === w || cwd.startsWith(w + "/")) && (!best || w.length > best.len)) best = { len: w.length, task: t };
+    }
+    cache.set(cwd, best?.task ?? null);
+    return best?.task ?? null;
+  };
 }
 
 export function buildReport(input: {
   records: UsageRecord[];
   tasks: Task[];
+  /** Past worktrees of the tasks, from their history. */
+  worktrees?: TaskWorktree[];
   prices: Record<string, ModelPrice>;
   range: UsageRange;
   scanning: boolean;
@@ -737,7 +788,7 @@ export function buildReport(input: {
   const perTask = new Map<string, { task: Task; cost: number; tokens: number; agents: Set<UsageAgent> }>();
   let attributed = 0;
   let unattributed = 0;
-  const cwdTask = new Map<string, Task | null>();
+  const taskFor = taskResolver(input.tasks, input.worktrees);
 
   for (const r of input.records) {
     if (since !== null && r.ts < since) continue;
@@ -762,8 +813,7 @@ export function buildReport(input: {
     mt.cost_usd += cost ?? 0;
     mt.tokens += tokensOf(r);
 
-    if (!cwdTask.has(r.cwd)) cwdTask.set(r.cwd, r.cwd ? taskForCwd(r.cwd, input.tasks) : null);
-    const task = cwdTask.get(r.cwd) ?? null;
+    const task = taskFor(r.cwd);
     if (task) {
       let pt = perTask.get(task.id);
       if (!pt) perTask.set(task.id, (pt = { task, cost: 0, tokens: 0, agents: new Set() }));
@@ -852,6 +902,8 @@ export interface UsageEvidence {
 export function buildUsageEvidence(input: {
   records: UsageRecord[];
   tasks: Task[];
+  /** Past worktrees of the tasks, from their history. */
+  worktrees?: TaskWorktree[];
   prices: Record<string, ModelPrice>;
   since_ms: number;
   scanning?: boolean;
@@ -861,7 +913,7 @@ export function buildUsageEvidence(input: {
   const byAgent = new Map<UsageAgent, UsageTotals>();
   const byModel = new Map<string, { agent: UsageAgent; model: string; priced: boolean } & UsageTotals>();
   const perTask = new Map<string, { task: Task; cost: number; tokens: number; unpriced: number; agents: Set<UsageAgent>; models: Set<string> }>();
-  const cwdTask = new Map<string, Task | null>();
+  const taskFor = taskResolver(input.tasks, input.worktrees);
   let attributed = 0;
   let unattributed = 0;
 
@@ -877,8 +929,7 @@ export function buildUsageEvidence(input: {
     if (!m) byModel.set(mk, (m = { agent: r.agent, model: r.model, priced: cost !== null, ...emptyTotals() }));
     add(m, r, cost);
 
-    if (!cwdTask.has(r.cwd)) cwdTask.set(r.cwd, r.cwd ? taskForCwd(r.cwd, input.tasks) : null);
-    const task = cwdTask.get(r.cwd) ?? null;
+    const task = taskFor(r.cwd);
     if (!task) {
       unattributed += cost ?? 0;
       continue;
