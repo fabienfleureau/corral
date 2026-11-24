@@ -12,6 +12,7 @@ import { taskLabel, type Item, type MergeReadiness, type Task } from "./types.ts
 import type { PrSnapshot } from "./pr.ts";
 import type { UsageEvidence } from "./usage.ts";
 import { isPublishQuestion } from "./review-outcome.ts";
+import { prWaitSplit, stoppedRunRate, type PrWaitSplit, type StoppedRunRate } from "./improvement-metrics.ts";
 
 const DAY = 86_400_000;
 
@@ -24,6 +25,7 @@ const LIFECYCLE_EVENTS = [
   "task.pr_found",
   "task.initial_retry",
   "task.stopped_retry",
+  "task.stopped_escalated",
   "task.worktree_removed",
   "item.created",
   "item.replied",
@@ -155,6 +157,8 @@ export interface ImprovementEvidence {
     items_outside_task_window: number;
   };
   usage: UsageEvidence | null;
+  /** Aggregate metrics over the full tables, not the capped samples above. */
+  metrics: { stopped_runs: StoppedRunRate; pr_wait: PrWaitSplit };
 }
 
 export interface ImprovementEvidenceOptions {
@@ -456,6 +460,8 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       "item.ready_for_review is now recorded once per head commit and review label; older counts include repeats caused by agent reports and transient gate states.",
       "Merge time and readiness at merge (merged_ms, merge_readiness) exist only for merges seen after they were added; older merges are not backfilled. merge_readiness is the last open snapshot, which can predate the merge by up to one sync interval.",
       "Events and items are capped as listed in limits/truncated; counts come from aggregate queries, not the sampled event list.",
+      "metrics.stopped_runs counts stopped or failed runs escalated to the inbox per dispatch, before and after the automatic retry (ADR 0016). Before the task.stopped_escalated marker, a reopened escalation item was not recorded, so older windows undercount repeat stops. Windows start no earlier than detection_start_ms (corral#126): before it a stopped run left no inbox item.",
+      "metrics.pr_wait splits PR waits per repository into agent time (first dispatch to first ready for review, including CI and automated reviews) and reviewer time (first ready to the PR item's resolution, snoozes included); PRs still awaiting review are counted but not in the reviewer percentiles.",
       usage
         ? "Costs are API-list-price estimates from local agent logs, not billed amounts."
         : "Usage costs were unavailable for this run.",
@@ -502,6 +508,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       items_outside_task_window: evidenceItems.filter((i) => i.flags.includes("outside_task_window")).length,
     },
     usage,
+    metrics: { stopped_runs: stoppedRunRate(db, { now }), pr_wait: prWaitSplit(db, { now, days }) },
   };
 }
 

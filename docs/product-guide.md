@@ -158,7 +158,13 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
 - **Self-improvement** (`#/improve`) — three analyses, each on demand or on a
   schedule, that dispatch read-only agent tasks in a selected repository and post
   a digest to the inbox. The *improvement analysis* reviews recent
-  task and PR activity, including tasks tagged as probable repeats. The *engineering skills analysis* suggests learning topics
+  task and PR activity, including tasks tagged as probable repeats. Above the analyses, *Runs that stopped without reporting*
+  shows, per harness, how many dispatched runs ended in an inbox escalation
+  (stopped, failed or silent) before and after a pivot date, by default the
+  automatic retry of ADR 0016. *Agent time and reviewer time on PRs* splits
+  each PR's wait per repository: from dispatch to ready for review (the agent,
+  CI and automated reviews), then from ready to merge or close (the human),
+  as median and p90. The *engineering skills analysis* suggests learning topics
   and exercises from Corral activity, without inferring proficiency from delegated
   work. The *skills analysis* compares the skills installed on
   this machine with the last 90 days of Claude Code and Codex sessions, flags
