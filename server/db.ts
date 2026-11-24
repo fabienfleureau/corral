@@ -577,6 +577,23 @@ export class Db {
     return rows as unknown as TaskEvent[];
   }
 
+  /** Every worktree path a task was given, oldest first. Worktree cleanup
+   *  clears tasks.worktree_path; the history keeps the path, so usage logged
+   *  in that worktree can still be attributed to its task. */
+  listTaskWorktrees(): { task_id: string; path: string }[] {
+    return this.stmt(`
+      SELECT task_id, path FROM (
+        SELECT task_id, ts, id, json_extract(data, '$.to') AS path FROM task_events
+        WHERE kind = 'session' AND message LIKE 'Worktree: %' AND json_valid(data)
+        UNION ALL
+        SELECT task_id, ts, id, json_extract(data, '$.worktree') AS path FROM task_events
+        WHERE kind = 'prompt' AND json_valid(data)
+      )
+      WHERE typeof(path) = 'text' AND path <> ''
+      ORDER BY ts, id
+    `).all() as unknown as { task_id: string; path: string }[];
+  }
+
   // ---- items ----
 
   insertItem(i: Item): void {

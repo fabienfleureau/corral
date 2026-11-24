@@ -1459,7 +1459,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       { ...buildReport({
         records: scanner.records(),
         tasks,
-        prices: { ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
+        worktrees: state.db.listTaskWorktrees(),
+        prices:{ ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
         range: raw as UsageRange,
         scanning: scanner.scanning,
       }), pr_additions: prAdditions },
