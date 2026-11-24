@@ -132,7 +132,7 @@ function StoppedRunsPanel() {
           </tbody>
         </table>
       </div>
-      <p className="muted">Recognised by marker {data.sources.marker}, capture event {data.sources.capture_event}, title {data.sources.title}. Rows older than the marker miss reopened escalations.</p>
+      <p className="muted">Recognised by marker {data.sources.marker}, capture event {data.sources.capture_event}, title {data.sources.title}. Rows older than the marker miss reopened escalations. Windows start no earlier than {day(data.detection_start_ms)}: stopped runs left no inbox item before.</p>
     </> : null}
   </section>;
 }

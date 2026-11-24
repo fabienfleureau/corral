@@ -13,6 +13,9 @@ const DAY = 86_400_000;
 
 /** Merge of the automatic stopped-run retry (ADR 0016, corral#218). */
 export const STOPPED_RETRY_PIVOT_MS = Date.parse("2026-11-23T15:32:51Z");
+/** Merge of corral#126: before it, a stopped run left no inbox item, so
+ *  windows start no earlier than this (else old dispatches dilute the rate). */
+export const STOPPED_DETECTION_START_MS = Date.parse("2026-11-14T23:29:27Z");
 export const DEFAULT_METRIC_DAYS = 14;
 
 /** Titles stoppedEscalationContent produces, for rows older than the marker. */
@@ -36,8 +39,10 @@ export function stoppedRunRate(db: Db, opts: { now?: number; pivot_ms?: number; 
   const now = opts.now ?? Date.now();
   const pivot = opts.pivot_ms ?? STOPPED_RETRY_PIVOT_MS;
   const days = opts.days ?? DEFAULT_METRIC_DAYS;
-  const before = { start_ms: pivot - days * DAY, end_ms: pivot };
-  const after = { start_ms: pivot, end_ms: Math.max(pivot, Math.min(pivot + days * DAY, now)) };
+  const clamp = (ms: number) => Math.max(ms, STOPPED_DETECTION_START_MS);
+  const before = { start_ms: Math.min(pivot, clamp(pivot - days * DAY)), end_ms: pivot };
+  const afterEnd = Math.max(pivot, Math.min(pivot + days * DAY, now));
+  const after = { start_ms: Math.min(afterEnd, clamp(pivot)), end_ms: afterEnd };
 
   const dispatches = (db.raw
     .prepare(
@@ -88,6 +93,7 @@ export function stoppedRunRate(db: Db, opts: { now?: number; pivot_ms?: number; 
   const sum = (w: "before" | "after", i: 0 | 1) => [...tally.values()].reduce((n, t) => n + t[w][i], 0);
   return {
     pivot_ms: pivot,
+    detection_start_ms: STOPPED_DETECTION_START_MS,
     days,
     before,
     after,

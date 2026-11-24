@@ -10,6 +10,8 @@ export interface RateCounts {
 /** Stopped or failed runs escalated to the inbox, per dispatch and harness. */
 export interface StoppedRunRate {
   pivot_ms: number;
+  /** Windows start no earlier than this: before it, stopped runs left no inbox item. */
+  detection_start_ms: number;
   days: number;
   before: { start_ms: number; end_ms: number };
   after: { start_ms: number; end_ms: number };
