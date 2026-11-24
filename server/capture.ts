@@ -33,6 +33,7 @@ import {
   type StoppedRetryConfig,
 } from "./stopped-retry.ts";
 import type { Item, TaskSpec } from "./types.ts";
+import { reviewReportedDone } from "./review-outcome.ts";
 import { pullUrlForRemotes } from "./repo-match.ts";
 import { gitRemoteUrls } from "./repos.ts";
 
@@ -676,6 +677,7 @@ export class CaptureEngine {
           ? { handoff }
           : { status: "done", handoff, ...(task.status === "done" ? {} : { outcome: "reported" as const }) });
         if (hold) noteDoneReport(this.db, task.id);
+        reviewReportedDone(this.db, this.hub, task.id);
         this.resolveOpenQuestions({
           taskId: task.id,
           address: address && address === task.terminal_address ? address : null,

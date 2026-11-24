@@ -438,6 +438,8 @@ function TaskRow({
           <span className={`badge status-${task.status}`} title={task.worktree_path ? `Worktree: ${task.worktree_path}` : undefined}>{task.status}</span>
           {task.outcome ? <span className={`badge outcome-${task.outcome}`} title={OUTCOME_TITLE[task.outcome]}>{OUTCOME_LABEL[task.outcome]}</span> : null}
           {review ? <span className="badge badge-review" title="Reviews the linked PR/MR; comments are published after your approval">review</span> : null}
+          {review && task.review_outcome === "published" ? <span className="badge badge-ready" title="You approved comments and the agent reported the review done">comments published</span> : null}
+          {review && task.review_outcome === "skipped" ? <span className="badge badge-mute" title="Declined, or the publish question was closed without a reply: no comments were approved">comments not published</span> : null}
           {task.kind === "grill" || task.kind === "grill-docs" ? <span className="badge badge-review">{task.kind === "grill" ? "grill" : "grill with docs"}</span> : null}
           {spec ? <span className="badge badge-review" title="Writes the contract between the sub-projects in repo_path; approving its plan in the inbox creates one task per sub-project">multi-repo spec</span> : null}
           {parentTitle ? <span className="badge badge-review" title="Created from a multi-repo plan; the contract is appended to this task's prompt">from {parentTitle}</span> : null}

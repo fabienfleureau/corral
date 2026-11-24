@@ -54,6 +54,7 @@ import { SessionFacts } from "./session-facts.ts";
 import type { SessionFact } from "./session-facts.ts";
 import { handleMcp, instructTask, InstructError } from "./agent-control.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
+import { reviewQuestionClosed, reviewReplied } from "./review-outcome.ts";
 import { findRepeatOf, findRetryOf, RETRY_WINDOW_MS } from "./repeat.ts";
 
 /** The skills prompt carries more evidence than a summary: allow a longer assistant call. */
@@ -435,6 +436,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.replied", item.id, { address });
+    if (content === undefined && !permission) reviewReplied(state.db, state.hub, item, text);
     state.capture?.resetStoppedRetries?.(address);
     const updatedItem = state.db.getItem(item.id);
     state.hub.broadcast("item.updated", updatedItem);
@@ -464,6 +466,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (address) state.capture?.cancelStoppedRetries?.(address);
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.resolved", params.id, { how: "manual" });
+    reviewQuestionClosed(state.db, state.hub, item, "acknowledged");
     const updated = state.db.getItem(params.id);
     state.hub.broadcast("item.updated", updated);
     json(res, 200, updated);
@@ -472,6 +475,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("POST", "/api/items/:id/archive", (_req, res, { params }) => {
     const existing = state.db.getItem(params.id);
     state.db.updateItem(params.id, { status: "archived", snooze_until_ms: null });
+    if (existing && existing.status !== "archived") reviewQuestionClosed(state.db, state.hub, existing, "archived");
     const address = existing?.source_ref ?? (existing?.task_id ? state.db.getTask(existing.task_id)?.terminal_address ?? null : null);
     if (address) state.capture?.cancelStoppedRetries?.(address);
     const updated = state.db.getItem(params.id);

@@ -50,6 +50,15 @@ export function seedScreenshotData(db: Db): void {
     jira_url: row.jira_url ?? null, jira_parent_key: null, pr_url: row.pr_url ?? null, pr_meta: null, terminal_address: null,
     exit_code: null, created_ms: now - index * 60000, updated_ms: now - index * 60000,
   }));
+  // A review whose publish question was archived without a reply.
+  db.insertTask({
+    id: "sample-review", title: "Review feat(billing): prorate plan upgrades", prompt: "Review the MR", kind: "review",
+    repo_path: "/sample/example-project", target: "claude", target_state: "confirmed", base_branch: "main", branch: null,
+    worktree_path: null, assignee: null, jira_key: null, jira_url: null, jira_parent_key: null,
+    pr_url: "https://gitlab.com/example/platform/-/merge_requests/31", pr_meta: null, status: "done", terminal_address: null,
+    exit_code: null, created_ms: now - rows.length * 60000, updated_ms: now - rows.length * 60000,
+  });
+  db.updateTask("sample-review", { review_outcome: "skipped" }, false);
   // How the done task ended: the task row shows it next to the status.
   db.updateTask("sample-done", { outcome: "merged" }, false);
   seedMultiRepo(db, now);

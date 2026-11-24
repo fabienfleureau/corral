@@ -33,6 +33,8 @@ export type Task = {
   outcome?: "merged" | "closed" | "reported" | null;
   jira_status?: string | null;
   epic_id?: string | null;
+  /** Review tasks: whether the drafted comments were posted; null while unknown. */
+  review_outcome?: "published" | "skipped" | null;
   /** A done task in the same repo this one probably repeats. */
   repeat_of?: string | null;
   /** An archived or failed task with the same label that this one retries. */

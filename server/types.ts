@@ -19,6 +19,9 @@ export type TargetState = "suggested" | "confirmed";
  *  branch, no PR. grill: discussion interview in place. grill-docs: interview
  *  that writes docs, in a worktree with a PR when the folder is a git repo,
  *  in place with a digest otherwise. Both accept any folder. */
+/** published: the human approved and the agent reported done. skipped: declined or closed without a reply. */
+export type ReviewOutcome = "published" | "skipped";
+
 export type TaskKind = "code" | "review" | "spec" | "analysis" | "ops" | "grill" | "grill-docs";
 
 /** One sub-task a spec proposes. `repo` is a directory relative to the spec task's folder. */
@@ -195,6 +198,8 @@ export interface Task {
   /** The amendment written into the Jira ticket (current one only) and the hash of that block. */
   amendment?: string | null;
   amendment_hash?: string | null;
+  /** Review tasks: whether the drafted comments were posted (see review-outcome.ts). Null while unknown. */
+  review_outcome?: ReviewOutcome | null;
   /** A done task in the same repo with a near-identical label: this task
    *  probably repeats it (see server/repeat.ts). Set once, at creation. */
   repeat_of?: string | null;
