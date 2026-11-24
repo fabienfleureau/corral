@@ -3,6 +3,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Db } from "../db.ts";
 import { CaptureEngine } from "../capture.ts";
 import { syncTaskPr, type PrInfo } from "../pr.ts";
@@ -104,6 +108,41 @@ test("an ops task's done report completes it as reported, without a PR lookup", 
     assert.equal(db.getTask("task-1")?.status, "done");
     assert.equal(db.getTask("task-1")?.outcome, "reported");
     assert.equal(looked, false);
+  } finally { db.close(); }
+});
+
+test("a grill task's done report linking its repo's PR completes it as reported", async () => {
+  // linkReportedPr adopts the PR, but the PR loop does not follow grill
+  // tasks: nothing would ever settle a hold, so the task completes now.
+  const dir = mkdtempSync(join(tmpdir(), "corral-outcome-"));
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "remote", "add", "origin", "git@github.com:acme/app.git"]);
+  let looked = false;
+  const { db, capture } = setup(() => { looked = true; return pr("OPEN"); }, { kind: "grill", branch: null, repo_path: dir });
+  try {
+    const item = await capture.createStructuredQuestion({ ...report, body: `Interview done, docs PR opened: ${URL}` });
+    assert.equal(item.kind, "digest");
+    assert.equal(db.getTask("task-1")?.pr_url, URL);
+    assert.equal(db.getTask("task-1")?.status, "done");
+    assert.equal(db.getTask("task-1")?.outcome, "reported");
+    await capture.handleEvent({ type: "finished", address: "s1", task_id: "task-1", exit_code: 0 });
+    assert.equal(db.getTask("task-1")?.status, "done");
+    assert.equal(looked, false);
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a second done report on a held task logs no second ready event for the same commit", async () => {
+  const ready = (): PrInfo => ({ ...pr("OPEN"), head_sha: "abc", checks: { total: 1, failed: 0, pending: false } });
+  const { db, capture } = setup(ready);
+  const events = () => (db.raw.prepare("SELECT COUNT(*) AS n FROM metrics_events WHERE name = 'item.ready_for_review'").get() as { n: number }).n;
+  try {
+    await capture.createStructuredQuestion(report);
+    await until(() => events() === 1);
+    await capture.createStructuredQuestion({ ...report, title: "PR: add caching (again)" });
+    await until(() => db.listItems({ kind: "pr" })[0]?.ready === 1);
+    assert.equal(events(), 1);
+    assert.equal(db.getTask("task-1")?.status, "dispatched");
+    assert.equal(db.getTask("task-1")?.outcome ?? null, null);
   } finally { db.close(); }
 });
 

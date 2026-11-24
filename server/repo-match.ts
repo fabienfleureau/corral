@@ -74,3 +74,18 @@ export function matchRepoForPull(url: string, repos: RepoCandidate[]): RepoMatch
   if (nameMatches.length === 1) return { path: nameMatches[0].path, name: nameMatches[0].name, via: "name" };
   return null;
 }
+
+const PR_URL_IN_TEXT = /https?:\/\/[^\s<>()"'`]+?(?:\/pull\/|\/-\/merge_requests\/)\d+/g;
+
+/** The first PR/MR URL in a text whose project is one of the given git
+ *  remotes, or null. A report can cite other projects' PRs: only the task's
+ *  own repo counts. */
+export function pullUrlForRemotes(text: string, remotes: string[]): string | null {
+  const projects = remotes.map(remoteProject).filter((p): p is Project => p !== null);
+  if (projects.length === 0) return null;
+  for (const url of text.match(PR_URL_IN_TEXT) ?? []) {
+    const target = pullProject(url);
+    if (target && projects.some((p) => p.host === target.host && p.path === target.path)) return url;
+  }
+  return null;
+}

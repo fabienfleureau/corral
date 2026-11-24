@@ -599,6 +599,23 @@ interface PrMeta {
   pr?: PrSnapshot;
   /** When the agent reported done while the task stays open for its PR (ADR 0022). */
   done_reported_ms?: number;
+  /** readinessKey of the last "ready" event; cleared when the gate fails for
+   *  a lasting reason. */
+  ready_key?: string;
+}
+
+/** One "ready" event per head commit and label: the same commit passing the
+ *  gate again is not news. */
+function readinessKey(pr: PrInfo): string {
+  return `${pr.head_sha ?? ""}|${prReviewLabel(pr)}`;
+}
+
+/** Gate failures the platform reports while it recalculates (right after a
+ *  push or a failed fetch). They do not end a ready episode. */
+const TRANSIENT_REASONS = new Set(["checks still running", "mergeability unknown", "review comments unavailable"]);
+
+function transientOnly(reasons: string[]): boolean {
+  return reasons.length > 0 && reasons.every((r) => TRANSIENT_REASONS.has(r));
 }
 
 function readMeta(raw: string | null): PrMeta {
@@ -646,6 +663,7 @@ function patchMeta(db: Db, taskId: string, patch: PrMeta, touch = true): void {
   if (meta.conflict === false) delete meta.conflict;
   if (meta.checks_pushed === "") delete meta.checks_pushed;
   if (meta.checks_attempts === null) delete meta.checks_attempts;
+  if (meta.ready_key === "") delete meta.ready_key;
   db.updateTask(taskId, { pr_meta: JSON.stringify(meta) }, touch);
 }
 
@@ -884,6 +902,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
     db.insertItem(item);
     db.recordMetric("item.created", item.id, { kind: "pr", capture: "pr-sync", task_id: task.id, ready: item.ready, triage: triage.tier });
     if (ready && !shouldResolve) {
+      patchMeta(db, task.id, { ready_key: readinessKey(pr) }, false);
       logTaskEvent(db, task.id, "pr", `PR ${readyStatus}`, { pr: pr.url, checks: pr.checks, threads: pr.threads.length, triage });
     }
     hub.broadcast("item.created", item);
@@ -919,12 +938,21 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   if (Object.keys(patch).length > 0) {
     db.updateItem(existing.id, patch);
     hub.broadcast("item.updated", db.getItem(existing.id));
-    if (patch.ready === 1) {
+  }
+  // The item's ready flag also drops to 0 when the agent reports again, and
+  // forced to 1 when the PR closes: log readiness from the gate itself, once
+  // per change (see readinessKey).
+  const lastKey = readMeta(db.getTask(task.id)?.pr_meta ?? null).ready_key;
+  if (ready && !shouldResolve) {
+    const key = readinessKey(pr);
+    if (lastKey !== key) {
+      patchMeta(db, task.id, { ready_key: key }, false);
       db.recordMetric("item.ready_for_review", existing.id, { task_id: task.id });
       logTaskEvent(db, task.id, "pr", `PR ${readyStatus}`, { pr: pr.url, checks: pr.checks, threads: pr.threads.length });
-    } else if (patch.ready === 0 && existing.ready === 1) {
-      logTaskEvent(db, task.id, "pr", `PR no longer ready: ${reasons.join(", ") || "gate failing"}`, { pr: pr.url });
     }
+  } else if (!shouldResolve && lastKey && !transientOnly(reasons)) {
+    patchMeta(db, task.id, { ready_key: "" }, false);
+    logTaskEvent(db, task.id, "pr", `PR no longer ready: ${reasons.join(", ") || "gate failing"}`, { pr: pr.url });
   }
   if (merged) await resolveMergedTask(db, hub, task, opts.backend);
   else if (pr.state === "CLOSED") resolveClosedTask(db, hub, task);

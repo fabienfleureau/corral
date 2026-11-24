@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS items (
   resolved_ms INTEGER,
   snooze_until_ms INTEGER,
   elicitation TEXT,
-  triage TEXT
+  triage TEXT,
+  snooze_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_task ON items(task_id);
@@ -283,6 +284,11 @@ export class Db {
     if (!names.has("elicitation")) this.raw.exec(`ALTER TABLE items ADD COLUMN elicitation TEXT`);
     if (!names.has("handling")) this.raw.exec(`ALTER TABLE items ADD COLUMN handling INTEGER NOT NULL DEFAULT 0`);
     if (!names.has("triage")) this.raw.exec(`ALTER TABLE items ADD COLUMN triage TEXT`);
+    if (!names.has("snooze_count")) {
+      this.raw.exec(`ALTER TABLE items ADD COLUMN snooze_count INTEGER NOT NULL DEFAULT 0`);
+      // Snoozes before the column existed are in the metrics log.
+      this.raw.exec(`UPDATE items SET snooze_count = (SELECT COUNT(*) FROM metrics_events WHERE name = 'item.snoozed' AND ref = items.id)`);
+    }
     const taskCols = this.raw.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
     const taskNames = new Set(taskCols.map((c) => c.name));
     if (!taskNames.has("pr_url")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
@@ -301,6 +307,8 @@ export class Db {
     if (!taskNames.has("amendment")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN amendment TEXT`);
     if (!taskNames.has("amendment_hash")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN amendment_hash TEXT`);
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
+    if (!taskNames.has("repeat_of")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN repeat_of TEXT`);
+    if (!taskNames.has("retry_of")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN retry_of TEXT`);
     if (!taskNames.has("merged_ms")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN merged_ms INTEGER`);
     if (!taskNames.has("merge_readiness")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN merge_readiness TEXT`);
     if (!taskNames.has("outcome")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN outcome TEXT`);
@@ -378,13 +386,13 @@ export class Db {
     this.stmt(
       `INSERT INTO tasks (id, title, prompt, repo_path, target, target_state, base_branch, branch,
         worktree_path, assignee, jira_key, jira_url, jira_parent_key, jira_status, pr_url, pr_meta, handoff, status, terminal_address,
-        exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review, parent_task_id, spec, epic_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review, parent_task_id, spec, epic_id, repeat_of, retry_of)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       t.id, t.title, t.prompt, t.repo_path, t.target, t.target_state, t.base_branch, t.branch,
       t.worktree_path, t.assignee, t.jira_key, t.jira_url, t.jira_parent_key, t.jira_status ?? null, t.pr_url, t.pr_meta ?? null,
       t.handoff ?? null, t.status, t.terminal_address, t.exit_code, t.created_ms, t.updated_ms, t.model ?? null, t.reasoning ?? null, t.agent ?? null,
-      t.kind ?? "code", t.review ?? null, t.parent_task_id ?? null, t.spec ?? null, t.epic_id ?? null,
+      t.kind ?? "code", t.review ?? null, t.parent_task_id ?? null, t.spec ?? null, t.epic_id ?? null, t.repeat_of ?? null, t.retry_of ?? null,
     );
   }
 
@@ -464,6 +472,22 @@ export class Db {
       ? this.stmt(`SELECT * FROM tasks WHERE status = ? ORDER BY created_ms DESC`).all(status)
       : this.stmt(`SELECT * FROM tasks ORDER BY created_ms DESC`).all();
     return rows as unknown as Task[];
+  }
+
+  /** Done tasks of one repo, newest first: the candidates a new task may repeat. */
+  listDoneTasksInRepo(repoPath: string, limit = 500): Task[] {
+    return this.stmt(`SELECT * FROM tasks WHERE status = 'done' AND repo_path = ? ORDER BY updated_ms DESC LIMIT ?`).all(repoPath, limit) as unknown as Task[];
+  }
+
+  /** Tasks archived or failed (non-zero exit) since `since`, any repo: the
+   *  candidates a new task may retry. `ended_ms` is the last status change in
+   *  the task history: later writes (cleanup, PR sync) also move updated_ms,
+   *  so it cannot date the archive. */
+  listEndedTasksSince(since: number): (Task & { ended_ms: number })[] {
+    return this.stmt(`SELECT * FROM (
+        SELECT t.*, COALESCE((SELECT MAX(e.ts) FROM task_events e WHERE e.task_id = t.id AND e.kind = 'status'), t.updated_ms) AS ended_ms
+        FROM tasks t WHERE t.status = 'archived' OR (t.status = 'done' AND COALESCE(t.exit_code, 0) != 0)
+      ) WHERE ended_ms >= ? ORDER BY ended_ms DESC`).all(since) as unknown as (Task & { ended_ms: number })[];
   }
 
   /** Fetch a set of tasks by id without scanning the full table. */
@@ -729,6 +753,11 @@ export class Db {
     const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
     const values = keys.map((k) => patch[k] as never);
     this.stmt(`UPDATE items SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
+  }
+
+  /** Snooze an item and count it, so repeated snoozes can be flagged. */
+  snoozeItem(id: string, untilMs: number): void {
+    this.stmt(`UPDATE items SET snooze_until_ms = ?, snooze_count = snooze_count + 1, updated_ms = ? WHERE id = ?`).run(untilMs, Date.now(), id);
   }
 
   getItem(id: string): Item | null {
