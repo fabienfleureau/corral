@@ -132,7 +132,7 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   moves, PR milestones and agent questions. Open it from the inbox or the tasks
   list (`GET /api/tasks/:id/events`).
 - **Sessions** — the omnigent sessions Corral knows about, with a link out to each.
-- **Usage** — Claude Code, Codex and OpenCode Go spend from local session data,
+- **Usage** — Claude Code, Codex, OpenCode Go and Antigravity spend from local session data,
   quota for those agents and Google (from Antigravity), cost per done task, PR
   additions, and GitHub/GitLab API rate limits for the PR loop. The Over time chart splits cost or tokens by agent
   or by model; `#/usage?range=7d&group=model&metric=tokens` opens the model view.

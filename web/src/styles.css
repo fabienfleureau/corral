@@ -3213,6 +3213,9 @@ select:focus {
 .usage-seg-opencode {
   background: #8c6ac8;
 }
+.usage-seg-antigravity {
+  background: var(--warn-ink);
+}
 .usage-seg-m1 { background: var(--chart-m1); }
 .usage-seg-m2 { background: var(--chart-m2); }
 .usage-seg-m3 { background: var(--chart-m3); }

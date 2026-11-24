@@ -151,9 +151,9 @@ sync costs no Jira call. Failures are recorded as `jira.status_failed` metrics a
 a dispatch or a PR sync.
 
 ### Usage
-- `GET /api/usage?range=24h|7d|30d|all[&refresh=1]` → Claude Code, Codex and OpenCode Go usage from local session data
+- `GET /api/usage?range=24h|7d|30d|all[&refresh=1]` → Claude Code, Codex, OpenCode Go and Antigravity usage from local session data
   - `pr_additions` is an asynchronously refreshed all-time snapshot of unique task-linked PR/MR diffs, with available and total counts; it is independent of `range`.
-  (`~/.claude/projects`, `~/.codex/sessions`): `{range, since_ms, generated_ms, scanning,
+  (`~/.claude/projects`, `~/.codex/sessions`, Antigravity `brain/*/.system_generated/logs/transcript_full.jsonl` under `~/.gemini/antigravity-cli`, `~/.gemini/antigravity-acp` and `~/.omnigent/antigravity-native`): `{range, since_ms, generated_ms, scanning,
   totals, by_agent[], by_model[], timeline[], bucket: "hour"|"day", efficiency}`. Each timeline bucket has agent cost/token totals and `models[]` with `{agent, model, cost_usd, tokens}` for that bucket. Cost is an API-list-price
   estimate; models without a price count tokens only (`unpriced_calls`). Shared prices are in
   `DEFAULT_PRICES` in `server/usage.ts`, with optional overrides via `usage.prices` in config.json (`{"gpt-6*": {input, output, cacheRead?, cacheWrite5m?, cacheWrite1h?}}`, USD/MTok). Models without a reliable published price remain unpriced; a free model is priced at 0 and does not count in `unpriced_calls`.
