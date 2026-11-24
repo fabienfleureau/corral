@@ -103,6 +103,8 @@ test("epicAgentPrompt frames Jira epic data as untrusted and carries autonomy, t
   assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/epics\/epic-1\/tasks\/<taskId>\/launch"/);
   assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/tasks\/<taskId>\/dispatch"/);
   assert.match(prompt, /PATCH "http:\/\/127\.0\.0\.1:4787\/api\/tasks\/<taskId>"/);
+  assert.match(prompt, /Configure \/ assign existing open tasks/i);
+  assert.match(prompt, /"repo_path":"<repo path or name>","favorite":"<favorite name>"/);
   assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/tasks\/<taskId>\/instruct"/);
   assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/tasks\/<taskId>\/check-pr"/);
   assert.match(prompt, /POST "http:\/\/127\.0\.0\.1:4787\/api\/epics\/epic-1\/sync"/);
@@ -360,7 +362,7 @@ test("HTTP API exposes epic agent configuration, launch, and detail embedding", 
     assert.equal(createdTask.jira_parent_key, "EX-100");
     assert.match(createdTask.prompt, /Epic ticket: EX-100/);
 
-    // Duplicate jira_key is refused with 409.
+    // Duplicate jira_key is refused with 409 and points at PATCH /api/tasks/:id.
     const dup = await fetch(`${base}/api/epics/epic-1/tasks`, {
       method: "POST",
       headers,
@@ -373,6 +375,8 @@ test("HTTP API exposes epic agent configuration, launch, and detail embedding", 
       }),
     });
     assert.equal(dup.status, 409);
+    const dupBody = await dup.json() as { error: string };
+    assert.match(dupBody.error, new RegExp(`PATCH /api/tasks/${createdTask.id}`));
 
     // Direct target + agent works without a favorite, and does not mutate epic defaults.
     const direct = await fetch(`${base}/api/epics/epic-1/tasks`, {
@@ -543,6 +547,82 @@ test("epic agent task lifecycle: create, launch with saved agent, move task & Ji
     assert.equal(launches[1].harness, "codex");
     assert.equal(launches[1].agent, "frontend");
     assert.ok(broadcasts.includes("epic.updated"));
+
+    // 6. Existing open epic task with no repo, target, or agent can be assigned via PATCH /api/tasks/:id and launched.
+    db.insertTask({
+      id: "legacy-epic-task",
+      title: "EX-103 Legacy imported task",
+      prompt: "Implement legacy ticket",
+      kind: "code",
+      repo_path: "",
+      target: "",
+      target_state: "suggested",
+      agent: null,
+      model: null,
+      reasoning: null,
+      review: null,
+      base_branch: null,
+      branch: null,
+      worktree_path: null,
+      assignee: null,
+      jira_key: "EX-103",
+      jira_url: "https://jira.example/browse/EX-103",
+      jira_parent_key: "EX-100",
+      jira_status: "To Do",
+      pr_url: null,
+      pr_meta: null,
+      status: "open",
+      terminal_address: null,
+      exit_code: null,
+      created_ms: start,
+      updated_ms: start,
+      epic_id: "epic-1",
+    });
+
+    // Rejects invalid repo name, wrong-context favorite, and unknown harness with 400 (never 500).
+    for (const invalid of [
+      { repo_path: "not-a-registered-repo" },
+      { repo_path: "app", favorite: "Home" },
+      { repo_path: "app", target: "unknown-harness" },
+    ]) {
+      const bad = await fetch(`${base}/api/tasks/legacy-epic-task`, { method: "PATCH", headers, body: JSON.stringify(invalid) });
+      assert.equal(bad.status, 400, JSON.stringify(invalid));
+    }
+
+    // Assign repo by registered name + favorite (expands harness, agent, model, reasoning) with an explicit override.
+    const assigned = await fetch(`${base}/api/tasks/legacy-epic-task`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ repo: "app", favorite: "Careful", reasoning: "medium", base_branch: "main" }),
+    });
+    assert.equal(assigned.status, 200);
+    const assignedTask = await assigned.json() as {
+      repo_path: string; target: string; agent: string | null; model: string | null; reasoning: string | null; base_branch: string | null;
+    };
+    assert.equal(assignedTask.repo_path, repoDir);
+    assert.equal(assignedTask.target, "claude");
+    assert.equal(assignedTask.agent, "builder");
+    assert.equal(assignedTask.model, "opus");
+    assert.equal(assignedTask.reasoning, "medium", "explicit field overrides favorite default");
+    assert.equal(assignedTask.base_branch, "main");
+
+    // Clearing repo_path to "" remains allowed (UI repo selector).
+    const cleared = await fetch(`${base}/api/tasks/legacy-epic-task`, {
+      method: "PATCH", headers, body: JSON.stringify({ repo_path: "" }),
+    });
+    assert.equal(cleared.status, 200);
+    assert.equal((await cleared.json() as { repo_path: string }).repo_path, "");
+
+    // Re-assign repo_path + explicit target/agent and launch the formerly unassigned epic task.
+    const reassigned = await fetch(`${base}/api/tasks/legacy-epic-task`, {
+      method: "PATCH", headers, body: JSON.stringify({ repo_path: "app", target: "codex", agent: "backend" }),
+    });
+    assert.equal(reassigned.status, 200);
+    const launchLegacy = await fetch(`${base}/api/epics/epic-1/tasks/legacy-epic-task/launch`, { method: "POST", headers });
+    assert.equal(launchLegacy.status, 200);
+    assert.equal(launches[2].repoPath, repoDir);
+    assert.equal(launches[2].harness, "codex");
+    assert.equal(launches[2].agent, "backend");
   } finally {
     server.close();
     db.close();

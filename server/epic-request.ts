@@ -188,7 +188,7 @@ export function createEpicAgentTask(
   if (jiraKey) {
     const existing = db.getTaskByJiraKey(jiraKey);
     if (existing && existing.status !== "archived") {
-      throw new EpicRequestError(`a task for Jira ticket ${jiraKey} already exists`, 409);
+      throw new EpicRequestError(`a task for Jira ticket ${jiraKey} already exists (id: ${existing.id}) — update it with PATCH /api/tasks/${existing.id}`, 409);
     }
     const ticket = db.getEpicTicket(epic.id, jiraKey);
     const base = jiraBaseUrl.trim().replace(/\/+$/, "");
@@ -237,4 +237,92 @@ export function createEpicAgentTask(
     source: "epic_agent", epic: epic.jira_key, kind, repo: repoPath, target, agent, favorite: favorite?.name ?? null, jira_key: jiraKey,
   });
   return task;
+}
+
+/**
+ * Normalize and validate a PATCH /api/tasks/:id payload so callers (including
+ * the epic agent and epic request tasks) can assign a repository by registered
+ * name or absolute path and apply a favorite (expanding harness, agent, model,
+ * reasoning and review) or explicit harness/agent settings on existing tasks.
+ */
+export function resolveTaskPatch(
+  task: Task,
+  rawBody: unknown,
+  repos: Repo[],
+  favorites: Favorite[],
+  reviewers: Reviewer[],
+  configuredAgents: string[] = [],
+): Partial<Task> {
+  if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
+    throw new EpicRequestError("patch body must be an object");
+  }
+  const input = { ...(rawBody as Record<string, unknown>) };
+  delete input.id;
+  delete input.kind; // fixed at creation: dispatch and the PR loop depend on it
+
+  // Support `repo` as an alias for `repo_path` without leaking an unknown column to SQLite.
+  const hasRepoAlias = "repo" in input;
+  const repoAlias = input.repo;
+  delete input.repo;
+  if (!("repo_path" in input) && hasRepoAlias) {
+    input.repo_path = repoAlias;
+  }
+
+  if ("repo_path" in input) {
+    if (typeof input.repo_path !== "string") throw new EpicRequestError("repo_path must be a string");
+    const trimmed = input.repo_path.trim();
+    input.repo_path = trimmed ? resolveAgentRepoPath(trimmed, repos) : "";
+  }
+
+  // Extract `favorite` / `favorite_name` before building the SQL patch.
+  const hasFavorite = "favorite" in input || "favorite_name" in input;
+  const rawFavorite = "favorite" in input ? input.favorite : input.favorite_name;
+  delete input.favorite;
+  delete input.favorite_name;
+
+  let favorite: Favorite | null = null;
+  if (hasFavorite && rawFavorite !== null && rawFavorite !== undefined) {
+    if (typeof rawFavorite !== "string") throw new EpicRequestError("favorite must be a string");
+    const favoriteName = rawFavorite.trim();
+    if (favoriteName) {
+      const effectiveRepoPath = typeof input.repo_path === "string" ? input.repo_path : task.repo_path;
+      favorite = favoriteForPath(favoriteName, effectiveRepoPath, favorites, repos);
+      if (!favorite) throw new EpicRequestError(`favorite ${favoriteName} is not configured for this repository`);
+    }
+  }
+
+  if ("target" in input) {
+    if (typeof input.target !== "string") throw new EpicRequestError("target must be a string");
+    const target = input.target.trim();
+    if (target && configuredAgents.length > 0 && !configuredAgents.includes(target)) {
+      throw new EpicRequestError(`unknown harness: ${target}`);
+    }
+    input.target = target;
+  }
+
+  for (const field of ["agent", "model", "reasoning", "base_branch"] as const) {
+    if (!(field in input)) continue;
+    const val = input[field];
+    if (val === null) continue;
+    if (typeof val !== "string") throw new EpicRequestError(`${field} must be a string or null`);
+    input[field] = val.trim() || null;
+  }
+
+  if (favorite) {
+    const explicitTarget = typeof input.target === "string" ? input.target : "";
+    const resolvedTarget = explicitTarget || favorite.harness;
+    if (resolvedTarget && configuredAgents.length > 0 && !configuredAgents.includes(resolvedTarget)) {
+      throw new EpicRequestError(`unknown harness: ${resolvedTarget}`);
+    }
+    input.target = resolvedTarget;
+    if (!("agent" in input)) input.agent = favorite.agent || null;
+    if (!("model" in input)) input.model = favorite.model || null;
+    if (!("reasoning" in input)) input.reasoning = favorite.reasoning || null;
+    if (!("review" in input)) {
+      const reviewer = favorite.review ? reviewers.find((r) => r.name === favorite.review) : undefined;
+      input.review = reviewer ? reviewSummary(reviewer) : null;
+    }
+  }
+
+  return input as Partial<Task>;
 }

@@ -113,10 +113,10 @@ export function taskChanges(before: Task, patch: Partial<Task>): Change[] {
       data: { chars: (patch.prompt ?? "").length, previous_chars: (before.prompt ?? "").length },
     });
   }
-  for (const field of ["model", "reasoning", "agent", "assignee", "base_branch"] as const) {
+  for (const field of ["repo_path", "target", "model", "reasoning", "agent", "assignee", "base_branch"] as const) {
     if (!(field in patch) || (patch[field] ?? null) === (before[field] ?? null)) continue;
     const next = patch[field] ? String(patch[field]) : null;
-    const label = { model: "Model", reasoning: "Reasoning", agent: "Agent", assignee: "Assignee", base_branch: "Base branch" }[field];
+    const label = { repo_path: "Repository", target: "Harness", model: "Model", reasoning: "Reasoning", agent: "Agent", assignee: "Assignee", base_branch: "Base branch" }[field];
     out.push({
       kind: "updated",
       message: next ? `${label}: ${oneLine(next, 80)}` : `${label} cleared`,

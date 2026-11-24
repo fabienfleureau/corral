@@ -16,7 +16,7 @@ import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncJiraStage } from "./jira-status.ts";
 import { syncEpic } from "./epic.ts";
 import { EpicAgentRunner } from "./epic-agent.ts";
-import { createEpicAgentTask, createEpicRequestTask, EpicRequestError, saveEpicRequestSettings, type EpicAgentTaskInput, type EpicRequestSettings } from "./epic-request.ts";
+import { createEpicAgentTask, createEpicRequestTask, EpicRequestError, resolveTaskPatch, saveEpicRequestSettings, type EpicAgentTaskInput, type EpicRequestSettings } from "./epic-request.ts";
 import { orchestrationPrompt } from "./epic-orchestration.ts";
 import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "./epic-graph.ts";
 import { applyAmendment, impactedTaskIds, proposeAmendments, rejectAmendment, reviseDesign } from "./epic-design.ts";
@@ -571,9 +571,19 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("PATCH", "/api/tasks/:id", async (req, res, { body, params }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
-    const patch = body as Partial<Task>;
-    delete patch.id;
-    delete patch.kind; // fixed at creation: dispatch and the PR loop depend on it
+    let patch: Partial<Task>;
+    try {
+      patch = resolveTaskPatch(
+        task,
+        body ?? {},
+        state.db.listRepos(),
+        state.cfg.favorites ?? [],
+        state.cfg.reviewers ?? [],
+        Object.keys(state.cfg.agents ?? {}),
+      );
+    } catch (err) {
+      return epicRequestFailure(res, err);
+    }
     const status = patch.status;
     state.db.updateTask(task.id, patch);
     const updated = state.db.getTask(task.id)!;

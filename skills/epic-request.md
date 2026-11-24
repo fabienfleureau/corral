@@ -22,7 +22,7 @@ Authenticate every request with `-H "Authorization: Bearer {corral_token}"` and 
 - Launch a ready epic ticket task: `POST {corral_url}/api/epics/{epic_id}/tasks/<taskId>/launch`
 - List classic and epic tasks, or read a task's history: `GET {corral_url}/api/tasks` · `GET {corral_url}/api/tasks/<taskId>/events`
 - Create a **classic task** (`{title, prompt, repo_path, kind?, target?, agent?, model?, reasoning?, base_branch?}`): `POST {corral_url}/api/tasks`
-- Update, instruct or dispatch a task: `PATCH {corral_url}/api/tasks/<taskId>` · `POST {corral_url}/api/tasks/<taskId>/instruct` · `POST {corral_url}/api/tasks/<taskId>/dispatch`
+- Update or assign a task (`repo_path` as registered repo name or absolute path, `favorite` or `target`/`agent`/`model`/`reasoning`, `base_branch`, `title`, `prompt`, `status`), instruct, or dispatch it: `PATCH {corral_url}/api/tasks/<taskId>` · `POST {corral_url}/api/tasks/<taskId>/instruct` · `POST {corral_url}/api/tasks/<taskId>/dispatch`
 - List registered repos and configured favorites/harnesses: `GET {corral_url}/api/repos` · `GET {corral_url}/api/config`
 
 If the request is ambiguous or asks for a destructive or irreversible action, report a `question` and wait instead of guessing.
