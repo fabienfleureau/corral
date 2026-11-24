@@ -55,6 +55,33 @@ export function seedScreenshotData(db: Db): void {
   seedKpis(db, now);
   seedAgentRuns(db, now);
   seedStoppedRuns(db);
+  seedPrWaits(db);
+}
+
+/** Dispatch, ready-for-review and resolution times for the Improve page's PR
+ *  wait table. Its window ends at the real now, so these follow Date.now();
+ *  merged PRs are archived items, which no other view lists. */
+function seedPrWaits(db: Db): void {
+  const now = Date.now();
+  const hour = 3_600_000;
+  const insert = db.raw.prepare("INSERT INTO metrics_events (ts, name, ref, data) VALUES (?, ?, ?, ?)");
+  const waits: { task: string; item: string; dispatched: number; ready: number; merged: number | null }[] = [
+    { task: "sample-running", item: "fixture-pr-merged-1", dispatched: 80, ready: 74, merged: 50 },
+    { task: "sample-epic-EX-104", item: "fixture-pr-merged-2", dispatched: 60, ready: 58, merged: 20 },
+    { task: "sample-epic-EX-103", item: "fixture-pr-merged-3", dispatched: 40, ready: 31, merged: 29 },
+    { task: "sample-epic-EX-102", item: "sample-epic-pr-EX-102", dispatched: 30, ready: 26, merged: null },
+  ];
+  for (const w of waits) {
+    if (w.merged !== null) {
+      db.insertItem({
+        id: w.item, kind: "pr", status: "archived", title: "PR merged", summary: "", body: "", context: "", options: null,
+        ready: 1, handling: 0, source_ref: null, task_id: w.task, structured: 1, created_ms: now - w.ready * hour,
+        updated_ms: now - w.merged * hour, resolved_ms: now - w.merged * hour, snooze_until_ms: null,
+      });
+    }
+    insert.run(now - w.dispatched * hour, "task.dispatched", w.task, JSON.stringify({ target: "claude" }));
+    insert.run(now - w.ready * hour, "item.ready_for_review", w.item, JSON.stringify({ task_id: w.task }));
+  }
 }
 
 /** Dispatches and stopped-run escalations around the default pivot, so the

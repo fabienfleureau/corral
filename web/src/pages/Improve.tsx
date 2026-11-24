@@ -5,7 +5,7 @@
 import { useEffect, useId, useState } from "react";
 import { api } from "../api";
 import type { AnalysisStatus } from "../api";
-import type { RateCounts, StoppedRunRate } from "../../../shared/improvement-metrics";
+import type { PrWaitSplit, RateCounts, StoppedRunRate, WaitStats } from "../../../shared/improvement-metrics";
 import type { Repo } from "../types";
 import { errText } from "../util";
 
@@ -137,6 +137,76 @@ function StoppedRunsPanel() {
   </section>;
 }
 
+function duration(ms: number | null): string {
+  if (ms === null) return "–";
+  const hours = ms / 3_600_000;
+  return hours < 48 ? `${hours < 10 ? hours.toFixed(1) : Math.round(hours)} h` : `${(hours / 24).toFixed(1)} d`;
+}
+
+function waitCell(w: WaitStats) {
+  if (!w.count) return <span className="muted">–</span>;
+  return <>{duration(w.p50_ms)} <span className="muted">/ {duration(w.p90_ms)}</span></>;
+}
+
+function repoName(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? path;
+}
+
+/** Where a PR-backed task waits: on the agent (to the first ready for review)
+ *  or on the human reviewer (from ready to merge or close). */
+function PrWaitPanel() {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState<PrWaitSplit | null>(null);
+  const [error, setError] = useState("");
+  const daysId = useId();
+  const captionId = useId();
+
+  useEffect(() => {
+    let live = true;
+    api.improvementMetrics({ waitDays: days })
+      .then((m) => { if (live) { setData(m.pr_wait); setError(""); } })
+      .catch((e: unknown) => { if (live) setError(errText(e)); });
+    return () => { live = false; };
+  }, [days]);
+
+  return <section className="panel-form">
+    <h2 className="panel-title">Agent time and reviewer time on PRs</h2>
+    <p className="muted">For PRs that became ready for review in the window: agent time runs from the first dispatch to the first ready for review (CI and automated reviews included), reviewer time from there to merge or close (snoozes included). Median / p90.</p>
+    <div className="improve-metric-controls">
+      <div className="field"><label htmlFor={daysId}>Window</label>
+        <select id={daysId} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={14}>14 days</option><option value={30}>30 days</option><option value={90}>90 days</option>
+        </select>
+      </div>
+    </div>
+    {error ? <div className="inline-error" role="alert">{error}</div> : null}
+    {data ? <>
+      <div className="improve-table-wrap" tabIndex={0} role="region" aria-labelledby={captionId}>
+        <table className="usage-table">
+          <caption id={captionId} className="visually-hidden">Agent and reviewer time per repository, median and p90</caption>
+          <thead><tr>
+            <th scope="col">Repository</th>
+            <th scope="col" className="num">PRs</th>
+            <th scope="col" className="num">Agent time</th>
+            <th scope="col" className="num">Reviewer time</th>
+            <th scope="col" className="num">Awaiting review</th>
+          </tr></thead>
+          <tbody>
+            {[...data.by_repo, data.total].map((r) => <tr key={r.repo}>
+              <th scope="row" title={r.repo}>{r.repo === "all" ? "All" : repoName(r.repo)}</th>
+              <td className="num">{r.prs}</td>
+              <td className="num">{waitCell(r.agent)}</td>
+              <td className="num">{waitCell(r.reviewer)}</td>
+              <td className="num">{r.awaiting_review}</td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted">{data.never_ready} PR{data.never_ready === 1 ? "" : "s"} opened in the window never became ready. Review tasks are left out.</p>
+    </> : null}
+  </section>;
+}
+
 export function ImprovePage() {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [repo, setRepo] = useState("");
@@ -158,6 +228,7 @@ export function ImprovePage() {
         {repoError ? <div className="inline-error" role="alert">{repoError}</div> : null}
       </section>
       <StoppedRunsPanel />
+      <PrWaitPanel />
       <div className="settings-grid">
         <AnalysisPanel
           title="Engineering improvement analysis"

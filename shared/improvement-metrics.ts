@@ -19,6 +19,36 @@ export interface StoppedRunRate {
   sources: { marker: number; capture_event: number; title: number };
 }
 
+
+export interface WaitStats {
+  count: number;
+  /** Nearest-rank percentiles, null without samples. */
+  p50_ms: number | null;
+  p90_ms: number | null;
+}
+
+/** Agent time (first dispatch → first ready for review) and reviewer time
+ *  (first ready → resolved) of PR-backed tasks. */
+export interface PrWaitRow {
+  repo: string;
+  prs: number;
+  agent: WaitStats;
+  reviewer: WaitStats;
+  /** Ready but not resolved yet: not in the reviewer stats. */
+  awaiting_review: number;
+}
+
+export interface PrWaitSplit {
+  since_ms: number;
+  until_ms: number;
+  days: number;
+  total: PrWaitRow;
+  by_repo: PrWaitRow[];
+  /** PR items created in the window that never became ready. */
+  never_ready: number;
+}
+
 export interface ImprovementMetrics {
   stopped_runs: StoppedRunRate;
+  pr_wait: PrWaitSplit;
 }
