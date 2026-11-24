@@ -486,10 +486,205 @@ function readOpenCode(dir?: string): UsageRecord[] {
 
 // ---- quota ----
 
+export type QuotaPredictionStatus = "hit" | "will_hit" | "close" | "safe";
+
+export interface QuotaPrediction {
+  will_hit: boolean;
+  status: QuotaPredictionStatus;
+  projected_percent: number;
+  hits_in_ms: number | null;
+  hits_at_ms: number | null;
+  rate_per_day: number;
+  basis: "curve" | "pace";
+}
+
 export interface QuotaWindow {
   label: string;
   used_percent: number;
   resets_ms: number | null;
+  window_ms?: number | null;
+  prediction?: QuotaPrediction | null;
+}
+
+const DAY_MS = 86_400_000;
+export const HIGHER_QUOTA_MIN_MS = 7 * DAY_MS;
+
+/** UTC calendar month duration ending at `resetsMs`, clamping day-of-month to avoid overflow. */
+export function monthWindowMs(resetsMs: number): number {
+  const end = new Date(resetsMs);
+  const year = end.getUTCFullYear();
+  const month = end.getUTCMonth();
+  const prevYear = month === 0 ? year - 1 : year;
+  const prevMonth = month === 0 ? 11 : month - 1;
+  const daysInPrevMonth = new Date(Date.UTC(prevYear, prevMonth + 1, 0)).getUTCDate();
+  const day = Math.min(end.getUTCDate(), daysInPrevMonth);
+  const startMs = Date.UTC(
+    prevYear,
+    prevMonth,
+    day,
+    end.getUTCHours(),
+    end.getUTCMinutes(),
+    end.getUTCSeconds(),
+    end.getUTCMilliseconds(),
+  );
+  const diff = resetsMs - startMs;
+  return diff > 0 ? diff : 30 * DAY_MS;
+}
+
+/** Infer quota window duration in milliseconds from a label (and optional reset time). */
+export function inferWindowMs(label: string, resetsMs: number | null): number | null {
+  if (/\bmonth(?:ly)?\b|\b30[- ]?day\b|\b30d\b/i.test(label)) {
+    return resetsMs !== null ? monthWindowMs(resetsMs) : 30 * DAY_MS;
+  }
+  const weekN = label.match(/\b(\d+)[- ]?week\b/i);
+  if (weekN) return Number(weekN[1]) * 7 * DAY_MS;
+  if (/\bweek(?:ly)?\b|\b7[- ]?day\b|\b7d\b/i.test(label)) return 7 * DAY_MS;
+  const dayN = label.match(/\b(\d+)[- ]?day\b/i);
+  if (dayN) return Number(dayN[1]) * DAY_MS;
+  if (/\bdaily\b|\b24[- ]?h(?:our)?\b/i.test(label)) return DAY_MS;
+  if (/five[- ]?hour|\b5[- ]?h(?:our)?\b/i.test(label)) return 5 * 3_600_000;
+  const hourN = label.match(/\b(\d+)[- ]?h(?:our)?\b/i);
+  if (hourN) return Number(hourN[1]) * 3_600_000;
+  const minN = label.match(/\b(\d+)[- ]?min(?:ute)?\b/i);
+  if (minN) return Number(minN[1]) * 60_000;
+  return null;
+}
+
+function modelFilterForWindow(agent: QuotaAgent, label: string): RegExp | null {
+  if (agent === "claude") {
+    if (/\bopus\b/i.test(label)) return /opus/i;
+    if (/\bsonnet\b/i.test(label)) return /sonnet/i;
+    if (/\bhaiku\b/i.test(label)) return /haiku/i;
+    return null;
+  }
+  if (agent === "google") {
+    if (/\bargon\b/i.test(label)) return /argon/i;
+    if (/\bgemini\b/i.test(label)) return /gemini/i;
+    if (/\bclaude\b|\bgpt\b/i.test(label)) return /claude|gpt/i;
+    return null;
+  }
+  return null;
+}
+
+/** Predict whether a higher (weekly/monthly) quota window will hit 100% before reset. */
+export function predictQuotaWindow(input: {
+  agent: QuotaAgent;
+  window: QuotaWindow;
+  records: UsageRecord[];
+  prices: Record<string, ModelPrice>;
+  now?: number;
+}): QuotaPrediction | null {
+  const { agent, window, records, prices } = input;
+  const windowMs = window.window_ms ?? inferWindowMs(window.label, window.resets_ms);
+  if (!windowMs || windowMs < HIGHER_QUOTA_MIN_MS || window.resets_ms === null || !Number.isFinite(window.used_percent)) {
+    return null;
+  }
+  const now = input.now ?? Date.now();
+  const remaining = window.resets_ms - now;
+  if (remaining <= 0) return null;
+
+  const used = Math.max(0, Math.min(100, window.used_percent));
+  const startMs = window.resets_ms - windowMs;
+  const elapsed = now - startMs;
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+
+  if (used >= 100) {
+    return {
+      will_hit: true,
+      status: "hit",
+      projected_percent: 100,
+      hits_in_ms: 0,
+      hits_at_ms: now,
+      rate_per_day: elapsed > 0 ? round1((used / elapsed) * DAY_MS) : 0,
+      basis: "pace",
+    };
+  }
+  if (elapsed <= 0) return null;
+
+  const minElapsed = Math.min(DAY_MS, Math.round(windowMs * 0.035));
+  if (elapsed < minElapsed && used < 20) return null;
+
+  if (used <= 0) {
+    return {
+      will_hit: false,
+      status: "safe",
+      projected_percent: 0,
+      hits_in_ms: null,
+      hits_at_ms: null,
+      rate_per_day: 0,
+      basis: "pace",
+    };
+  }
+
+  const pacePerMs = used / elapsed;
+  let ratePerMs = pacePerMs;
+  let basis: "curve" | "pace" = "pace";
+
+  const usageAgent: UsageAgent = agent === "google" ? "antigravity" : agent;
+  const modelFilter = modelFilterForWindow(agent, window.label);
+  const matching = records.filter(
+    (r) =>
+      r.agent === usageAgent &&
+      r.ts >= startMs &&
+      r.ts <= now &&
+      (!modelFilter || modelFilter.test(r.model)),
+  );
+
+  if (used >= 2 && elapsed >= minElapsed * 2 && matching.length > 0) {
+    const costs = matching.map((r) => recordCost(r, prices));
+    const costSum = costs.reduce<number>((sum, c) => sum + (c !== null && c > 0 ? c : 0), 0);
+    const useCost = costSum > 0;
+    const weights = useCost
+      ? costs.map((c) => (c !== null && c > 0 ? c : 0))
+      : matching.map((r) => tokensOf(r));
+    const totalWeight = useCost ? costSum : weights.reduce((sum, w) => sum + w, 0);
+
+    if (totalWeight > 0) {
+      const halfLifeMs = Math.max(2 * DAY_MS, windowMs * 0.25);
+      const lambda = Math.LN2 / halfLifeMs;
+      let weightedSum = 0;
+      for (let i = 0; i < matching.length; i++) {
+        weightedSum += weights[i] * Math.exp(-lambda * (now - matching[i].ts));
+      }
+      const effectiveSpan = (1 - Math.exp(-lambda * elapsed)) / lambda;
+      const ewmaRate = weightedSum / effectiveSpan;
+      const avgRate = totalWeight / elapsed;
+      ratePerMs = pacePerMs * (ewmaRate / avgRate);
+      basis = "curve";
+    }
+  }
+
+  const projected = used + ratePerMs * remaining;
+  const willHit = projected >= 100 && ratePerMs > 0;
+  const hitsInMs = willHit ? Math.min(remaining, Math.max(0, Math.round((100 - used) / ratePerMs))) : null;
+  const hitsAtMs = hitsInMs !== null ? now + hitsInMs : null;
+  const status: QuotaPredictionStatus = willHit ? "will_hit" : projected >= 85 ? "close" : "safe";
+
+  return {
+    will_hit: willHit,
+    status,
+    projected_percent: round1(projected),
+    hits_in_ms: hitsInMs,
+    hits_at_ms: hitsAtMs,
+    rate_per_day: round1(ratePerMs * DAY_MS),
+    basis,
+  };
+}
+
+/** Return cloned quota snapshots with per-window exhaustion predictions attached. */
+export function attachQuotaPredictions(
+  quotas: AgentQuota[],
+  records: UsageRecord[],
+  prices: Record<string, ModelPrice>,
+  now = Date.now(),
+): AgentQuota[] {
+  return quotas.map((q) => ({
+    ...q,
+    windows: q.windows.map((w) => ({
+      ...w,
+      prediction: predictQuotaWindow({ agent: q.agent, window: w, records, prices, now }),
+    })),
+  }));
 }
 /** Antigravity draws on the Google quota; it has no quota of its own. */
 export type QuotaAgent = Exclude<UsageAgent, "antigravity"> | "google";
@@ -581,11 +776,12 @@ export async function opencodeGoQuota(dir = process.env.OPENCODE_DATA_DIR || joi
     if (!response.ok) return empty(`OpenCode Go quota unavailable (HTTP ${response.status}).`);
     const data = await response.json() as any;
     const windows: QuotaWindow[] = [];
-    for (const [name, label] of [["rolling", "5-hour session"], ["weekly", "Weekly"], ["monthly", "Monthly"]]) {
+    for (const [name, label] of [["rolling", "5-hour session"], ["weekly", "Weekly"], ["monthly", "Monthly"]] as const) {
       const w = data?.usage?.[name];
       const reset = typeof w?.resetsAt === "string" ? Date.parse(w.resetsAt) : NaN;
       if (!w || !["ok", "rate-limited"].includes(w.status) || typeof w.percent !== "number" || !Number.isFinite(w.percent) || !Number.isFinite(reset)) return empty("OpenCode Go returned an invalid quota response.");
-      windows.push({ label, used_percent: Math.max(0, Math.min(100, w.percent)), resets_ms: reset });
+      const window_ms = name === "rolling" ? 5 * 3_600_000 : name === "weekly" ? 7 * DAY_MS : monthWindowMs(reset);
+      windows.push({ label, used_percent: Math.max(0, Math.min(100, w.percent)), resets_ms: reset, window_ms });
     }
     return { agent: "opencode-go", source: "OpenCode Go", as_of_ms: now, stale: windows.some(w => w.resets_ms !== null && w.resets_ms < now), plan: null, windows, note: null };
   } catch { return empty("Could not reach OpenCode Go quota service."); }
@@ -619,10 +815,10 @@ export function claudeQuota(dir: string, now = Date.now()): AgentQuota {
   }
   const windows: QuotaWindow[] = [];
   const reset = (v: unknown) => (typeof v === "string" ? Date.parse(v) || null : null);
-  if (typeof d.sessionUsage === "number") windows.push({ label: "5-hour session", used_percent: d.sessionUsage, resets_ms: reset(d.sessionResetAt) });
-  if (typeof d.weeklyUsage === "number") windows.push({ label: "Weekly (all models)", used_percent: d.weeklyUsage, resets_ms: reset(d.weeklyResetAt) });
-  if (num(d.weeklyOpusUsage) > 0) windows.push({ label: "Weekly Opus", used_percent: d.weeklyOpusUsage, resets_ms: reset(d.weeklyResetAt) });
-  if (num(d.weeklySonnetUsage) > 0) windows.push({ label: "Weekly Sonnet", used_percent: d.weeklySonnetUsage, resets_ms: reset(d.weeklyResetAt) });
+  if (typeof d.sessionUsage === "number") windows.push({ label: "5-hour session", used_percent: d.sessionUsage, resets_ms: reset(d.sessionResetAt), window_ms: 5 * 3_600_000 });
+  if (typeof d.weeklyUsage === "number") windows.push({ label: "Weekly (all models)", used_percent: d.weeklyUsage, resets_ms: reset(d.weeklyResetAt), window_ms: 7 * DAY_MS });
+  if (num(d.weeklyOpusUsage) > 0) windows.push({ label: "Weekly Opus", used_percent: d.weeklyOpusUsage, resets_ms: reset(d.weeklyResetAt), window_ms: 7 * DAY_MS });
+  if (num(d.weeklySonnetUsage) > 0) windows.push({ label: "Weekly Sonnet", used_percent: d.weeklySonnetUsage, resets_ms: reset(d.weeklyResetAt), window_ms: 7 * DAY_MS });
   const stale = windows.some((w) => w.resets_ms !== null && w.resets_ms < now);
   const extra = d.extraUsageEnabled ? "Extra usage enabled: requests continue past the limits, billed separately." : null;
   return { agent: "claude", source: "ccstatusline cache", as_of_ms: best.mtime, stale, plan: null, windows, note: extra };
@@ -641,7 +837,7 @@ export function codexQuota(rl: CodexRateLimits | null, now = Date.now()): AgentQ
   }
   const windows: QuotaWindow[] = [];
   for (const w of [rl.primary, rl.secondary]) {
-    if (w) windows.push({ label: windowLabel(w.window_minutes), used_percent: w.used_percent, resets_ms: w.resets_at });
+    if (w) windows.push({ label: windowLabel(w.window_minutes), used_percent: w.used_percent, resets_ms: w.resets_at, window_ms: w.window_minutes > 0 ? w.window_minutes * 60_000 : null });
   }
   const stale = windows.some((w) => w.resets_ms !== null && w.resets_ms < now);
   return { agent: "codex", source: "Codex session logs", as_of_ms: rl.ts, stale, plan: rl.plan, windows, note: null };

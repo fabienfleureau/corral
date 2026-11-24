@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppState } from "../api.ts";
@@ -69,6 +69,54 @@ test("GET /api/usage/quota returns a card for every agent, with notes when sourc
     assert.equal(body.quota[3].note, "Antigravity is not running.");
     assert.ok(body.quota.every((q) => Array.isArray(q.windows)));
     assert.ok(body.fetched_ms > 0);
+  });
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("GET /api/usage/quota attaches predictions to weekly/monthly windows and omits them on 5h windows", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "corral-quota-pred-"));
+  const now = Date.now();
+  const DAY = 86_400_000;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "usage.json"),
+    JSON.stringify({
+      sessionUsage: 60,
+      sessionResetAt: new Date(now + 2 * 3_600_000).toISOString(),
+      weeklyUsage: 70,
+      weeklyResetAt: new Date(now + 3 * DAY).toISOString(),
+    }),
+  );
+  const state = stateWith(
+    dir,
+    new GoQuotaCache({
+      fetchQuota: async () => ({
+        agent: "opencode-go",
+        source: "OpenCode Go",
+        as_of_ms: now,
+        stale: false,
+        plan: null,
+        windows: [
+          { label: "5-hour session", used_percent: 25, resets_ms: now + 2 * 3_600_000, window_ms: 5 * 3_600_000 },
+          { label: "Monthly", used_percent: 15, resets_ms: now + 15 * DAY, window_ms: 30 * DAY },
+        ],
+        note: null,
+      }),
+    }),
+    new GoogleQuotaCache({ fetchQuota: async () => emptyGoogleQuota("none") }),
+  );
+  await withServer(state, async (base) => {
+    const response = await fetch(`${base}/api/usage/quota`, { headers: { Authorization: "Bearer test" } });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { quota: { agent: string; windows: { label: string; prediction?: { status: string; will_hit: boolean } | null }[] }[] };
+    const claude = body.quota.find((q) => q.agent === "claude");
+    const go = body.quota.find((q) => q.agent === "opencode-go");
+    assert.equal(claude?.windows[0].prediction, null);
+    assert.equal(claude?.windows[1].prediction?.will_hit, true);
+    assert.equal(claude?.windows[1].prediction?.status, "will_hit");
+    assert.equal(go?.windows[0].prediction, null);
+    assert.equal(go?.windows[1].prediction?.will_hit, false);
+    assert.equal(go?.windows[1].prediction?.status, "safe");
   });
   rmSync(dir, { recursive: true, force: true });
 });

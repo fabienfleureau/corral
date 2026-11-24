@@ -1,6 +1,6 @@
 // Pure view-model helpers for the sidebar quota rings.
 
-import type { AgentQuota } from "./types.ts";
+import type { AgentQuota, QuotaPrediction } from "./types.ts";
 
 export const QUOTA_AGENT_ORDER: readonly AgentQuota["agent"][] = [
   "claude",
@@ -24,6 +24,7 @@ export type SidebarQuotaRing = {
   remainingPercent: number;
   tone: QuotaRingTone;
   resetsMs: number | null;
+  prediction: QuotaPrediction | null;
 };
 
 export type SidebarQuotaGauge = {
@@ -31,6 +32,8 @@ export type SidebarQuotaGauge = {
   label: string;
   plan: string | null;
   stale: boolean;
+  /** True when any higher quota window is projected to hit 100% before reset. */
+  willHit: boolean;
   /** Up to 2 rings rendered concentrically: [outer] or [outer, inner]. The two
    *  most-used windows, so a spent third window (OpenCode Go monthly) still shows. */
   rings: SidebarQuotaRing[];
@@ -67,6 +70,41 @@ export function formatResetIn(ms: number | null, now = Date.now()): string {
   return `resets in ${Math.ceil(diff / 60_000)}m`;
 }
 
+export function formatDurationShort(ms: number): string {
+  if (ms <= 0) return "now";
+  const totalMinutes = Math.max(1, Math.ceil(ms / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  if (hours >= 48) return `~${Math.round(hours / 24)}d`;
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    return remHours > 0 ? `~${days}d ${remHours}h` : `~${days}d`;
+  }
+  if (hours >= 12) return `~${Math.round(totalMinutes / 60)}h`;
+  if (hours >= 1) {
+    const mins = totalMinutes % 60;
+    return mins > 0 ? `~${hours}h ${mins}m` : `~${hours}h`;
+  }
+  return `~${totalMinutes}m`;
+}
+
+export function formatQuotaPrediction(prediction: QuotaPrediction): string {
+  if (prediction.status === "hit") return "Limit hit (100%)";
+  const pctText = prediction.projected_percent > 300 ? ">300%" : `~${Math.round(prediction.projected_percent)}%`;
+  if (prediction.status === "will_hit") {
+    const when = prediction.hits_in_ms !== null ? formatDurationShort(prediction.hits_in_ms) : "before reset";
+    return `Hits in ${when} (${pctText} pace)`;
+  }
+  if (prediction.status === "close") return `Close · ${pctText} by reset`;
+  return `On track · ${pctText} by reset`;
+}
+
+export function quotaPredictionDetail(prediction: QuotaPrediction): string {
+  if (prediction.status === "hit") return "Quota exhausted (100% used)";
+  const basisLabel = prediction.basis === "curve" ? "current usage curve" : "window pace";
+  return `Projected ~${Math.round(prediction.projected_percent)}% by reset at ${prediction.rate_per_day.toFixed(1)}%/day (based on ${basisLabel})`;
+}
+
 /** The `count` most-used windows, kept in provider order. Ties keep the earlier window. */
 function mostUsed(windows: SidebarQuotaRing[], count: number): SidebarQuotaRing[] {
   const keep = new Set(
@@ -95,6 +133,7 @@ export function buildSidebarQuotaGauges(quotas: AgentQuota[] | null | undefined)
         remainingPercent: remainingPercent(used),
         tone: quotaTone(used),
         resetsMs: w.resets_ms,
+        prediction: w.prediction ?? null,
       };
     });
     gauges.push({
@@ -102,6 +141,7 @@ export function buildSidebarQuotaGauges(quotas: AgentQuota[] | null | undefined)
       label: QUOTA_AGENT_LABELS[agent],
       plan: q.plan,
       stale: q.stale,
+      willHit: windows.some((w) => w.prediction?.status === "will_hit"),
       rings: mostUsed(windows, 2),
       windows,
       asOfMs: q.as_of_ms,
@@ -113,7 +153,10 @@ export function buildSidebarQuotaGauges(quotas: AgentQuota[] | null | undefined)
 
 export function quotaAriaLabel(gauge: SidebarQuotaGauge): string {
   const summary = gauge.windows
-    .map((w) => `${w.label} ${Math.round(w.remainingPercent)}% left`)
+    .map((w) => {
+      const base = `${w.label} ${Math.round(w.remainingPercent)}% left`;
+      return w.prediction ? `${base} (${formatQuotaPrediction(w.prediction)})` : base;
+    })
     .join(", ");
   const staleNote = gauge.stale ? " (stale)" : "";
   return `${gauge.label} quota${staleNote}: ${summary}. Open Usage`;

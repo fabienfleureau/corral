@@ -587,6 +587,24 @@ button {
   font-size: 11px;
 }
 
+.sidebar-quota-tooltip-forecast {
+  font-size: 11px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-quota-alert {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sig-red);
+  box-shadow: 0 0 0 1.5px var(--bg);
+  pointer-events: none;
+}
+
 .sidebar-quota-tooltip-foot {
   margin-top: 8px;
   padding-top: 6px;
@@ -2918,6 +2936,7 @@ select:focus {
   font-size: 12px;
 }
 .usage-bar {
+  position: relative;
   height: 6px;
   border-radius: 999px;
   background: var(--chip-bg);
@@ -2926,6 +2945,42 @@ select:focus {
 .usage-bar-fill {
   height: 100%;
   background: var(--accent);
+}
+.usage-bar-projected {
+  --projected-color: var(--sig-green);
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--projected-color) 55%, transparent) 0 3px,
+    color-mix(in srgb, var(--projected-color) 16%, transparent) 3px 6px
+  );
+}
+.usage-bar-projected-close {
+  --projected-color: var(--tier-orange);
+}
+.usage-bar-projected-will_hit,
+.usage-bar-projected-hit {
+  --projected-color: var(--danger-ink);
+}
+.usage-quota-forecast {
+  font-size: 11px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.quota-forecast-safe {
+  color: var(--muted);
+}
+.quota-forecast-close {
+  color: var(--tier-orange);
+  font-weight: 500;
+}
+.quota-forecast-will_hit,
+.quota-forecast-hit {
+  color: var(--danger-ink);
+  font-weight: 600;
 }
 .usage-bar-caution {
   background: var(--tier-yellow);

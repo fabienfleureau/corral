@@ -118,6 +118,10 @@ test("parseQuotaSummary reads model-family buckets with disambiguated labels", (
     ],
   );
   assert.equal(quota.windows[0].resets_ms, now + 86_400_000);
+  assert.equal(quota.windows[0].window_ms, 7 * 86_400_000);
+  assert.equal(quota.windows[1].window_ms, 5 * 3_600_000);
+  assert.equal(quota.windows[2].window_ms, 7 * 86_400_000);
+  assert.equal(quota.windows[3].window_ms, 7 * 86_400_000);
   assert.equal(quota.note, null);
 });
 
