@@ -52,15 +52,20 @@ import { SessionFacts } from "./session-facts.ts";
 import type { SessionFact } from "./session-facts.ts";
 import { handleMcp, instructTask, InstructError } from "./agent-control.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
-import { findRepeatOf } from "./repeat.ts";
+import { findRepeatOf, findRetryOf, RETRY_WINDOW_MS } from "./repeat.ts";
 
 /** The skills prompt carries more evidence than a summary: allow a longer assistant call. */
 export const SKILLS_ANALYSIS_TIMEOUT_MS = 300_000;
 
-/** History suffix naming the done task a new task probably repeats. */
-function repeatNote(db: Db, repeatOf: string | null | undefined): string {
+/** History suffix naming the task a new task retries or probably repeats. */
+function repeatNote(db: Db, repeatOf: string | null | undefined, retryOf: string | null | undefined = null): string {
+  const retried = retryOf ? db.getTask(retryOf) : null;
   const done = repeatOf ? db.getTask(repeatOf) : null;
-  return done ? ` (probable repeat of "${taskLabel(done)}")` : "";
+  const notes = [
+    retried ? `retry of "${taskLabel(retried)}", ${retried.status === "archived" ? "archived" : "failed"}` : null,
+    done ? `probable repeat of "${taskLabel(done)}"` : null,
+  ].filter(Boolean);
+  return notes.length ? ` (${notes.join("; ")})` : "";
 }
 
 function dailyInterval(startText: string | null, endText: string | null): { start: number; end: number } | null {
@@ -556,10 +561,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       updated_ms: now,
     };
     task.repeat_of = findRepeatOf(task, state.db.listDoneTasksInRepo(task.repo_path));
+    task.retry_of = findRetryOf(task, state.db.listEndedTasksSince(now - RETRY_WINDOW_MS), now);
     state.db.insertTaskWithAttachments(task, attached.files);
     state.db.reward("task", task.id);
     state.db.recordMetric("task.created", task.id, { source: b.jira_key ? "jira" : "manual" });
-    logTaskEvent(state.db, task.id, "created", `${kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : kind === "ops" ? "Action task created" : "Task created"}${repeatNote(state.db, task.repeat_of)}`, {
+    logTaskEvent(state.db, task.id, "created", `${kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : kind === "ops" ? "Action task created" : "Task created"}${repeatNote(state.db, task.repeat_of, task.retry_of)}`, {
       source: b.jira_key ? "jira" : "manual",
       kind,
       repo: task.repo_path || null,
@@ -567,6 +573,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       pr: task.pr_url,
       attachments: attached.files.length || undefined,
       repeat_of: task.repeat_of,
+      retry_of: task.retry_of,
     });
     state.hub.broadcast("task.updated", task);
     json(res, 200, task);

@@ -17,6 +17,11 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   A new task whose label nearly matches a done task in the same repo is tagged
   a **probable repeat**: the row links to the earlier task, its history says so,
   and the improvement analysis counts repeats (`data_quality.probable_repeats`).
+  A task created with the same label as one archived or failed in the last
+  24 hours, in any repo or harness, is linked as a **retry** of it
+  (`data_quality.retries`). The new-task form warns, without blocking, when a
+  code prompt names another registered repo or uses words only that repo's
+  past tasks use; **Use <repo>** switches the selection.
 - **Agent control (MCP)** — an agent can create an open task, ask what waits
   next, and give an instruction on a task by id or title. Three tools are served
   over the authenticated HTTP API, with one-line answers so a voice agent can

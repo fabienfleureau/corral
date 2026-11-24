@@ -5,18 +5,9 @@
 // Deterministic token overlap, no LLM: it only has to catch near-identical labels.
 
 import { taskLabel, type Task } from "./types.ts";
+import { labelKey, labelTokens } from "../shared/label-tokens.ts";
 
-// English and French: prompts are written in both. Conventional-commit types
-// are noise too: a done title "fix(kpi): ..." must match a prompt without it.
-const STOP_WORDS = new Set([
-  "a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "at", "for", "from", "by", "with", "without",
-  "is", "are", "was", "were", "be", "been", "it", "its", "this", "that", "these", "those", "as", "into", "when",
-  "not", "no", "do", "does", "should", "must", "can", "still", "after", "before", "so", "we", "i", "you", "our", "my",
-  "le", "la", "les", "l", "un", "une", "des", "du", "de", "d", "et", "ou", "en", "dans", "sur", "pour", "par", "avec",
-  "sans", "au", "aux", "ce", "cet", "cette", "ces", "est", "sont", "pas", "ne", "plus", "qui", "que", "qu", "il", "elle",
-  "ils", "on", "se", "s", "y", "je", "nous", "vous", "mon", "ma", "mes", "son", "sa", "ses", "quand", "apres", "avant",
-  "fix", "feat", "chore", "refactor", "docs", "style", "perf",
-]);
+export { labelTokens };
 
 /** A label needs this many meaningful tokens before it can match: short
  *  labels ("fix tests") share too much by chance. */
@@ -24,20 +15,6 @@ export const MIN_TOKENS = 3;
 
 /** Share of shared tokens (Jaccard) from which two labels count as the same work. */
 export const REPEAT_THRESHOLD = 0.6;
-
-/** Normalized tokens of a label: lowercase, accents and punctuation stripped,
- *  Jira keys and stop words dropped, a trailing plural "s" removed. */
-export function labelTokens(text: string): Set<string> {
-  const tokens = text
-    .replace(/\b[A-Z][A-Z0-9]+-\d+\b/g, " ")
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length > 1 && !STOP_WORDS.has(t))
-    .map((t) => (t.length > 3 && t.endsWith("s") && !t.endsWith("ss") ? t.slice(0, -1) : t));
-  return new Set(tokens);
-}
 
 /** Jaccard overlap of two labels' tokens; 0 when either is too short to judge. */
 export function labelSimilarity(a: string, b: string): number {
@@ -49,7 +26,16 @@ export function labelSimilarity(a: string, b: string): number {
   return shared / (ta.size + tb.size - shared);
 }
 
-type Candidate = Pick<Task, "id" | "title" | "prompt" | "status" | "repo_path"> & Pick<Partial<Task>, "kind">;
+type Candidate = Pick<Task, "id" | "title" | "prompt" | "status" | "repo_path"> & Pick<Partial<Task>, "kind" | "exit_code" | "updated_ms">;
+
+/** A run that ended badly: the session exited with a non-zero code. */
+function failed(c: Candidate): boolean {
+  return c.status === "done" && c.exit_code !== null && c.exit_code !== undefined && c.exit_code !== 0;
+}
+
+function firstLine(text: string): string {
+  return text.trim().split("\n")[0] ?? "";
+}
 
 /** Kinds that never change code: a second review of the same PR is not a repeat. */
 function comparable(kind: Task["kind"]): boolean {
@@ -67,10 +53,33 @@ export function findRepeatOf(task: Candidate, candidates: Candidate[]): string |
   const label = taskLabel(task);
   let best: { id: string; score: number } | null = null;
   for (const c of candidates) {
-    if (c.id === task.id || c.status !== "done" || c.repo_path !== task.repo_path || !comparable(c.kind)) continue;
-    const firstLine = c.prompt.trim().split("\n")[0] ?? "";
-    const score = Math.max(labelSimilarity(label, c.title), labelSimilarity(label, firstLine));
+    if (c.id === task.id || c.status !== "done" || failed(c) || c.repo_path !== task.repo_path || !comparable(c.kind)) continue;
+    const score = Math.max(labelSimilarity(label, c.title), labelSimilarity(label, firstLine(c.prompt)));
     if (score >= REPEAT_THRESHOLD && (!best || score > best.score)) best = { id: c.id, score };
+  }
+  return best?.id ?? null;
+}
+
+/** How far back a retry looks: a task given up and recreated the same day. */
+export const RETRY_WINDOW_MS = 24 * 3_600_000;
+
+/**
+ * The task the new one retries, or null: same normalized label as a task
+ * archived or failed in the last 24 hours, in any repo and on any harness.
+ * Both seen cases switched one of them (wrong repo, then another harness), so
+ * neither is part of the match. Not the automatic stopped-agent retry of
+ * ADR 0016: this is the human recreating the task.
+ */
+export function findRetryOf(task: Candidate, candidates: Candidate[], now: number): string | null {
+  if (!comparable(task.kind)) return null;
+  const key = labelKey(taskLabel(task));
+  if (!key) return null;
+  let best: Candidate | null = null;
+  for (const c of candidates) {
+    if (c.id === task.id || !comparable(c.kind) || (c.status !== "archived" && !failed(c))) continue;
+    if ((c.updated_ms ?? 0) < now - RETRY_WINDOW_MS) continue;
+    if (labelKey(c.title) !== key && labelKey(firstLine(c.prompt)) !== key) continue;
+    if (!best || (c.updated_ms ?? 0) > (best.updated_ms ?? 0)) best = c;
   }
   return best?.id ?? null;
 }
