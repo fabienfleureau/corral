@@ -356,10 +356,11 @@ export const api = {
   improvementStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/improvement"),
   setImprovementSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/improvement", { intervalDays }),
   runImprovement: (): Promise<Task> => post<Task>("/api/improvement/run"),
-  improvementMetrics: (opts: { days?: number; pivot?: string } = {}): Promise<ImprovementMetrics> => {
+  improvementMetrics: (opts: { days?: number; pivot?: string; waitDays?: number } = {}): Promise<ImprovementMetrics> => {
     const q = new URLSearchParams();
     if (opts.days) q.set("days", String(opts.days));
     if (opts.pivot) q.set("pivot", opts.pivot);
+    if (opts.waitDays) q.set("wait_days", String(opts.waitDays));
     const qs = q.toString();
     return get<ImprovementMetrics>(`/api/improvement/metrics${qs ? `?${qs}` : ""}`);
   },

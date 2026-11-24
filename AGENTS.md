@@ -52,7 +52,7 @@ colleagues' PRs and a draft MR). It seeds a defined KPI with a report and a
 second defined KPI so the KPI page shows both columns. It also writes
 synthetic Claude session logs so the Usage chart has data. It seeds dispatch and
 stopped-run escalation metrics around the ADR 0016 pivot so the Improve page's
-stopped-run table has rows.
+stopped-run table has rows, and PR ready and merge times for its PR wait table.
 The script cleans up its server and temporary data on exit. Do not dispatch tasks
 or connect the fixture to real services.
 

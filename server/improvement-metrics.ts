@@ -5,9 +5,9 @@
 
 import type { Db } from "./db.ts";
 import { STOPPED_ESCALATED_METRIC } from "./stopped-retry.ts";
-import type { RateCounts, StoppedRunRate } from "../shared/improvement-metrics.ts";
+import type { PrWaitRow, PrWaitSplit, RateCounts, StoppedRunRate, WaitStats } from "../shared/improvement-metrics.ts";
 
-export type { StoppedRunRate } from "../shared/improvement-metrics.ts";
+export type { PrWaitSplit, StoppedRunRate } from "../shared/improvement-metrics.ts";
 
 const DAY = 86_400_000;
 
@@ -145,4 +145,117 @@ function collectEscalations(db: Db, since: number): Escalation[] {
     out.push({ ts: i.created_ms, task_id: i.task_id, item_id: i.id, source: "title" });
   }
   return out;
+}
+
+export const DEFAULT_WAIT_DAYS = 30;
+/** pr.ts sets ready = 1 when it resolves a PR, so a PR merged or closed before it
+ *  passed the gate gets its first ready event at the resolution itself. */
+const READY_AT_RESOLUTION_MS = 5000;
+
+/** Nearest-rank percentile of sorted samples. */
+function percentile(sorted: number[], p: number): number | null {
+  if (!sorted.length) return null;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))];
+}
+
+function waitStats(samples: number[]): WaitStats {
+  const sorted = [...samples].sort((a, b) => a - b);
+  return { count: sorted.length, p50_ms: percentile(sorted, 0.5), p90_ms: percentile(sorted, 0.9) };
+}
+
+interface PrSample { repo: string; agent: number | null; reviewer: number | null; awaiting: boolean }
+
+function waitRow(repo: string, samples: PrSample[]): PrWaitRow {
+  return {
+    repo,
+    prs: samples.length,
+    agent: waitStats(samples.flatMap((s) => (s.agent === null ? [] : [s.agent]))),
+    reviewer: waitStats(samples.flatMap((s) => (s.reviewer === null ? [] : [s.reviewer]))),
+    awaiting_review: samples.filter((s) => s.awaiting).length,
+  };
+}
+
+/** Splits the wait of each PR-backed task into agent time (first dispatch →
+ *  first ready for review on its PR item) and reviewer time (first ready →
+ *  the PR item's resolution), for PRs that became ready in the last `days`.
+ *  Agent time includes CI and automated reviews: a PR is not ready before they
+ *  pass. Review tasks are left out (the PR is not theirs); a task with several
+ *  PR items keeps its earliest; a PR resolved without being ready first is only
+ *  counted in `resolved_without_ready`. */
+export function prWaitSplit(db: Db, opts: { now?: number; days?: number } = {}): PrWaitSplit {
+  const now = opts.now ?? Date.now();
+  const days = opts.days ?? DEFAULT_WAIT_DAYS;
+  const since = now - days * DAY;
+
+  // Grouped by event name, which is indexed; metrics_events has no ref index.
+  const byRef = (sql: string): Map<string, number> =>
+    new Map((db.raw.prepare(sql).all() as { ref: string; ts: number }[]).map((r) => [r.ref, r.ts]));
+  const dispatchedAt = byRef("SELECT ref, MIN(ts) AS ts FROM metrics_events WHERE name = 'task.dispatched' AND ref IS NOT NULL GROUP BY ref");
+  const readyAt = byRef("SELECT ref, MIN(ts) AS ts FROM metrics_events WHERE name = 'item.ready_for_review' AND ref IS NOT NULL GROUP BY ref");
+  // A PR found already ready gets no ready_for_review event, only item.created with ready = 1.
+  const createdReady = byRef(
+    `SELECT ref, MIN(ts) AS ts FROM metrics_events WHERE name = 'item.created' AND ref IS NOT NULL
+       AND json_valid(data) AND json_extract(data, '$.kind') = 'pr' AND json_extract(data, '$.ready') = 1 GROUP BY ref`,
+  );
+  const resolvedEvent = byRef("SELECT ref, MAX(ts) AS ts FROM metrics_events WHERE name = 'item.resolved' AND ref IS NOT NULL GROUP BY ref");
+
+  const items = db.raw
+    .prepare(
+      `SELECT i.id, i.task_id, i.status, i.created_ms, i.resolved_ms, t.repo_path
+       FROM items i JOIN tasks t ON t.id = i.task_id
+       WHERE i.kind = 'pr' AND COALESCE(t.kind, 'code') != 'review'
+       ORDER BY i.created_ms ASC`,
+    )
+    .all() as unknown as { id: string; task_id: string; status: string; created_ms: number; resolved_ms: number | null; repo_path: string }[];
+
+  const seen = new Set<string>();
+  const samples: PrSample[] = [];
+  let neverReady = 0;
+  let resolvedWithoutReady = 0;
+  for (const item of items) {
+    if (seen.has(item.task_id)) continue;
+    seen.add(item.task_id);
+    const ready = [readyAt.get(item.id), createdReady.get(item.id)].filter((v): v is number => v !== undefined);
+    const r = {
+      ...item,
+      dispatched_ms: dispatchedAt.get(item.task_id) ?? null,
+      ready_ms: ready.length ? Math.min(...ready) : null,
+      resolved_event_ms: resolvedEvent.get(item.id) ?? null,
+    };
+    if (r.ready_ms === null) {
+      if (r.created_ms >= since && r.created_ms <= now) neverReady++;
+      continue;
+    }
+    if (r.ready_ms < since || r.ready_ms > now) continue;
+    const closed = r.status === "resolved" || r.status === "archived";
+    const resolvedAt = r.resolved_ms ?? (closed ? r.resolved_event_ms : null);
+    // Never ready before it was merged or closed (or found that way): the split
+    // would call the whole wait agent time.
+    if (resolvedAt !== null && r.ready_ms >= resolvedAt - READY_AT_RESOLUTION_MS) {
+      resolvedWithoutReady++;
+      continue;
+    }
+    samples.push({
+      repo: r.repo_path,
+      agent: r.dispatched_ms !== null && r.dispatched_ms <= r.ready_ms ? r.ready_ms - r.dispatched_ms : null,
+      reviewer: resolvedAt !== null && resolvedAt >= r.ready_ms ? resolvedAt - r.ready_ms : null,
+      awaiting: resolvedAt === null,
+    });
+  }
+
+  const byRepo = new Map<string, PrSample[]>();
+  for (const s of samples) {
+    const list = byRepo.get(s.repo);
+    if (list) list.push(s);
+    else byRepo.set(s.repo, [s]);
+  }
+  return {
+    since_ms: since,
+    until_ms: now,
+    days,
+    total: waitRow("all", samples),
+    by_repo: [...byRepo.entries()].map(([repo, list]) => waitRow(repo, list)).sort((a, b) => b.prs - a.prs || a.repo.localeCompare(b.repo)),
+    never_ready: neverReady,
+    resolved_without_ready: resolvedWithoutReady,
+  };
 }
