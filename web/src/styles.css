@@ -2762,7 +2762,22 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 18px 0 8px;
+}
+.usage-section-head .usage-h {
+  margin: 0;
+}
+.usage-section-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-inline-size: 0;
+}
+.usage-window {
+  font-variant-numeric: tabular-nums;
 }
 .usage-chart-controls {
   display: flex;
@@ -2796,7 +2811,14 @@ select:focus {
   }
 }
 .usage-stats {
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.usage-stats > .usage-card {
+  grid-row: span 3;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  grid-template-rows: subgrid;
+  row-gap: 6px;
 }
 .usage-card {
   border: 1px solid var(--border);
@@ -2813,6 +2835,18 @@ select:focus {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+.usage-stat-head {
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 6px;
+}
+.usage-stat-head > :first-child {
+  min-inline-size: 0;
+}
+.usage-stat-head .badge {
+  flex: none;
 }
 .usage-big {
   font-size: 22px;
