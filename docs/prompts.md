@@ -52,7 +52,7 @@ Review this PR/MR: <pr url>      # only for a review task
 | `skills/ops.md` | ops tasks (an Epic page request without a PR), replacing the PR convention | `{corral_url}`, `{corral_token}`, `{task_id}` | do the work in the folder, no branch or PR, report what was done |
 | `skills/spec.md` | **replaces** `question-report.md` and `pr-loop.md` when `task.kind === "spec"` (multi-repo step one) — a spec reads the sub-projects, reports a `plan` and never commits | `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Write the contract between the sub-projects and report it as a plan. Do not change code."* |
 | `skills/epic-task.md` | a `code` or Jira-backed task of an epic (`epic_id`), in the task text before the conventions: check the ticket's Preconditions, report a question and stop if one is unmet | — | one-line fallback: *"Before changing anything, check the ticket's Preconditions section. If one is not met, report a question and stop."* |
-| `skills/epic-request.md` | an `ops` request task created from the Epic page (`epic_id` set, no `jira_key`), in the task text before the conventions: determine user intent (question, epic change, action on an existing task, or creating epic/classic tasks) and interact with Corral via its HTTP API | `{epic_id}`, `{corral_url}`, `{corral_token}`, `{task_id}` | two-line fallback pointing to `{epic_id}` and `{corral_url}` |
+| `skills/epic-request.md` | an `ops` request task created from the Epic page (`epic_id` set, no `jira_key`), in the task text before the conventions: determine user intent (question, epic change, action on an existing task, or creating epic/classic tasks) and interact with Corral via its HTTP API (including assigning the epic's favorite or omitting `favorite`/`target` to inherit it) | `{epic_id}`, `{corral_url}`, `{corral_token}`, `{task_id}` | two-line fallback pointing to `{epic_id}` and `{corral_url}` |
 | `skills/pr-loop.md` | same tasks, right after `question-report.md` | — | dropped (empty string is filtered out) |
 | `skills/pre-pr-review.md` | non-review task dispatched **with a reviewer** (`review` in the dispatch options) | `{review_command}` | dropped |
 | `skills/pre-pr-delegate-review.md` | **replaces** `pre-pr-review.md` when the reviewer is a delegate (`delegate` instead of `command`) | `{review_agent}`, `{base_branch}` | one-line fallback: send the changes to the `{review_agent}` sub-agent with `sys_session_send`, fix or decline each finding |
@@ -262,7 +262,7 @@ Without one it asks for both to be null.
 ## Epic autonomous implementation
 
 `epicAgentPrompt()` in `server/epic-agent.ts` wraps the epic's Jira title,
-design, synced Jira child tickets (`jiraTickets`), existing Corral epic tasks
+epic-level `favorite` (when assigned), design, synced Jira child tickets (`jiraTickets`), existing Corral epic tasks
 (including Corral `status`, Epic board `state` and `jiraStatus`),
 previous report and workspace memory file (`.corral/epic-<jira-key>-memory.md`)
 with `DATA_NOT_INSTRUCTIONS`, and supplies the registered repositories,

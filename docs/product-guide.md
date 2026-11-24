@@ -72,7 +72,7 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   `Repo:` line in the ticket picks the repo. The page shows what is blocked, ready to
   launch, running, PR-ready or merged, and a summary such as "3/7 merged · 2 testable".
   A task whose prerequisites are ready waits on the Epics page: nothing is added to the
-  inbox and nothing runs until you click **Launch** there. In the same repo it stacks on
+  inbox and nothing runs until you click **Launch** there. Assign a **Task favorite** at the top of the epic to run its tasks with that designated conf (harness, agent, model, reasoning, and pre-PR reviewer): applying a favorite updates compatible open tasks and supplies the default conf when new epic tasks are created or launched (per-task overrides remain possible). In the same repo it stacks on
   its prerequisite's branch only when launched. Decision: [ADR 0002](adr/0002-epic-tasks-start-from-epic-page.md).
   The **Ask about this epic** input takes any free-form request — a question, a change to the epic or its design, an action on an existing task, or creating epic or classic Corral tasks — and creates an open `ops` task tracked on the Tasks page, outside the Jira board.
   Its prompt starts with the epic's Jira ticket, summary and link, and at dispatch it receives `skills/epic-request.md` so the agent can determine your intent and interact with the epic and Corral tasks through the Corral API.
