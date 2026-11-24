@@ -1,6 +1,6 @@
 // App shell — sidebar navigation, auth gate, live SSE updates + notifications.
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { ApiError, api, setCacheStateHandler, setUnauthorizedHandler, subscribeEvents } from "./api";
 import { errText } from "./util";
@@ -8,6 +8,7 @@ import { createNotificationTracker, sendDesktopNotification } from "./notificati
 import type { AgentQuota, Item } from "./types";
 import { useVisibleInboxItems } from "./use-visible-inbox-items";
 import { Spinner } from "./ui";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { SidebarQuotas } from "./SidebarQuotas";
 import { SelectionToTask } from "./SelectionToTask";
 import { MarkdownFileProvider } from "./MarkdownFileDialog";
@@ -19,16 +20,18 @@ import { ResizeHandle } from "./ResizeHandle";
 import { usePaneFlag, usePaneWidth } from "./use-pane-size";
 import type { PaneLimits } from "./pane-size";
 import { InboxPage } from "./pages/Inbox";
-import { TasksPage } from "./pages/Tasks";
-import { SessionsPage } from "./pages/Sessions";
-import { EpicsPage } from "./pages/Epics";
-import { PullsPage } from "./pages/Pulls";
-import { SettingsPage } from "./pages/Settings";
-import { UsagePage } from "./pages/Usage";
-import { DailyPage } from "./pages/Daily";
-import { ProgressPage, ProgressCelebration } from "./pages/Progress";
-import { KpisPage } from "./pages/Kpis";
-import { ImprovePage } from "./pages/Improve";
+import { ProgressCelebration } from "./ProgressCelebration";
+
+const TasksPage = lazy(() => import("./pages/Tasks").then((m) => ({ default: m.TasksPage })));
+const SessionsPage = lazy(() => import("./pages/Sessions").then((m) => ({ default: m.SessionsPage })));
+const EpicsPage = lazy(() => import("./pages/Epics").then((m) => ({ default: m.EpicsPage })));
+const PullsPage = lazy(() => import("./pages/Pulls").then((m) => ({ default: m.PullsPage })));
+const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
+const UsagePage = lazy(() => import("./pages/Usage").then((m) => ({ default: m.UsagePage })));
+const DailyPage = lazy(() => import("./pages/Daily").then((m) => ({ default: m.DailyPage })));
+const ProgressPage = lazy(() => import("./pages/Progress").then((m) => ({ default: m.ProgressPage })));
+const KpisPage = lazy(() => import("./pages/Kpis").then((m) => ({ default: m.KpisPage })));
+const ImprovePage = lazy(() => import("./pages/Improve").then((m) => ({ default: m.ImprovePage })));
 
 type Tab = "progress" | "daily" | "inbox" | "tasks" | "epics" | "pulls" | "sessions" | "usage" | "improve" | "kpis" | "settings" | "errors";
 
@@ -305,17 +308,21 @@ export function App() {
         ) : null}
         <InboxPage active={tab === "inbox"} eventVersion={eventVersion} refresh={refresh} onSeen={markInboxSeen} />
         <ProgressCelebration eventVersion={eventVersion} onView={() => selectTab("progress")} />
-        {tab === "progress" ? <ProgressPage eventVersion={eventVersion} /> : null}
-        {tab === "daily" ? <DailyPage eventVersion={eventVersion} /> : null}
-        {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
-        {tab === "epics" ? <EpicsPage eventVersion={eventVersion} refresh={refresh} /> : null}
-        {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
-        {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
-        {tab === "usage" ? <UsagePage /> : null}
-        {tab === "kpis" ? <KpisPage /> : null}
-        {tab === "improve" ? <ImprovePage /> : null}
-        {tab === "settings" ? <SettingsPage /> : null}
-        {tab === "errors" ? <section><h1>Error center</h1><p className="muted">Current background synchronization errors. Errors clear after a successful refresh.</p>{errors.length === 0 ? <p>No current errors.</p> : errors.map((error) => <div className="inline-error" key={error.source}><strong>{error.source}</strong><p>{error.message}</p><small>{new Date(error.updated_ms).toLocaleString()}</small></div>)}</section> : null}
+        <ErrorBoundary key={tab}>
+          <Suspense fallback={<div className="page-loading" role="status"><Spinner label="Loading…" /></div>}>
+            {tab === "progress" ? <ProgressPage eventVersion={eventVersion} /> : null}
+            {tab === "daily" ? <DailyPage eventVersion={eventVersion} /> : null}
+            {tab === "tasks" ? <TasksPage eventVersion={eventVersion} refresh={refresh} /> : null}
+            {tab === "epics" ? <EpicsPage eventVersion={eventVersion} refresh={refresh} /> : null}
+            {tab === "pulls" ? <PullsPage eventVersion={eventVersion} /> : null}
+            {tab === "sessions" ? <SessionsPage eventVersion={eventVersion} /> : null}
+            {tab === "usage" ? <UsagePage /> : null}
+            {tab === "kpis" ? <KpisPage /> : null}
+            {tab === "improve" ? <ImprovePage /> : null}
+            {tab === "settings" ? <SettingsPage /> : null}
+            {tab === "errors" ? <section><h1>Error center</h1><p className="muted">Current background synchronization errors. Errors clear after a successful refresh.</p>{errors.length === 0 ? <p>No current errors.</p> : errors.map((error) => <div className="inline-error" key={error.source}><strong>{error.source}</strong><p>{error.message}</p><small>{new Date(error.updated_ms).toLocaleString()}</small></div>)}</section> : null}
+          </Suspense>
+        </ErrorBoundary>
       </main>
       <SelectionToTask />
     </div>

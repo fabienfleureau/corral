@@ -1812,6 +1812,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         return;
       }
       if (!existsSync(file) || statSync(file).isDirectory()) {
+        // Missing hashed assets (e.g. a stale lazy chunk after a rebuild) must
+        // 404 instead of receiving the SPA shell with immutable cache headers.
+        if (path.startsWith("/assets/")) {
+          json(res, 404, { error: "not found" });
+          return;
+        }
         file = join(distDir, "index.html"); // SPA fallback
       }
       if (existsSync(file)) {

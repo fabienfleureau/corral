@@ -89,3 +89,28 @@ test('a page path still falls back to the SPA shell', async (t) => {
     db.close();
   }
 });
+
+test('a missing /assets/ file returns 404 instead of the SPA shell', async (t) => {
+  const { existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  if (!existsSync(join(process.cwd(), 'web', 'dist', 'index.html'))) {
+    t.skip('web/dist not built');
+    return;
+  }
+  const { createHttpServer } = await import('../../server/api.ts');
+  const { Db } = await import('../../server/db.ts');
+  const db = new Db(':memory:');
+  const server = createHttpServer({ db, cfg: { token: 'test' }, hub: { broadcast() {}, clients: new Set() } } as never);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = (server.address() as { port: number }).port;
+    const response = await fetch(`http://127.0.0.1:${port}/assets/nonexistent-chunk.js`, { headers: { Authorization: 'Bearer test' } });
+    assert.equal(response.status, 404);
+    assert.match(response.headers.get('content-type') ?? '', /application\/json/);
+    assert.doesNotMatch(response.headers.get('cache-control') ?? '', /immutable/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
+});
