@@ -156,7 +156,7 @@ a dispatch or a PR sync.
   (`~/.claude/projects`, `~/.codex/sessions`): `{range, since_ms, generated_ms, scanning,
   totals, by_agent[], by_model[], timeline[], bucket: "hour"|"day", efficiency}`. Each timeline bucket has agent cost/token totals and `models[]` with `{agent, model, cost_usd, tokens}` for that bucket. Cost is an API-list-price
   estimate; models without a price count tokens only (`unpriced_calls`). Shared prices are in
-  `DEFAULT_PRICES` in `server/usage.ts`, with optional overrides via `usage.prices` in config.json (`{"gpt-6*": {input, output, cacheRead?, cacheWrite5m?, cacheWrite1h?}}`, USD/MTok). Models without a reliable published price remain unpriced.
+  `DEFAULT_PRICES` in `server/usage.ts`, with optional overrides via `usage.prices` in config.json (`{"gpt-6*": {input, output, cacheRead?, cacheWrite5m?, cacheWrite1h?}}`, USD/MTok). Models without a reliable published price remain unpriced; a free model is priced at 0 and does not count in `unpriced_calls`.
   PR additions include all-time current diff totals and `by_project`, `by_model` (configured task model; empty means unpinned), and `by_task` groups. Each group deduplicates linked PR URLs; shared PRs can appear in multiple groups. Availability counts identify incomplete data.
   The report answers from the records parsed so far and never waits for a log scan or an external quota service.
   `scanning: true` while a first or forced log scan runs (poll). Spend is attributed to a task when the session

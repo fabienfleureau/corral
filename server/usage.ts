@@ -46,7 +46,9 @@ export interface ModelPrice {
 }
 
 // API list prices in USD per million tokens. Config prices can override these.
-// Anthropic: as of 2026-10-06; OpenAI, Xiaomi and OpenCode: as of 2026-11-05.
+// Anthropic: as of 2026-10-06; Xiaomi: as of 2026-11-05; OpenAI, Tencent and
+// OpenCode: as of 2026-11-24. A free model is priced at 0, so it counts as
+// priced, not as an unpriced call.
 export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   "claude-fable-5*": { input: 10, output: 50, cacheRead: 0.25 },
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
@@ -59,10 +61,16 @@ export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   // Standard short-context rates: https://developers.openai.com/api/docs/pricing
   "gpt-6.1-terra": { input: 1, output: 5, cacheRead: 0.05 },
   "gpt-6.1-sol": { input: 2, output: 10, cacheRead: 0.1 },
+  "gpt-6.2-sol": { input: 2, output: 10, cacheRead: 0.1 },
+  "gpt-6-luna": { input: 0.1, output: 0.5, cacheRead: 0.01 },
   // https://mimo.mi.com/docs/price
   "mimo-v2.6-pro": { input: 0.435, output: 0.87, cacheRead: 0.0036 },
+  // List price; the page's single "Cache" column is taken as cache read.
+  // https://www.tencentcloud.com/document/product/1300/78937
+  "hy4": { input: 0.834, output: 2.501, cacheRead: 0.042 },
   // https://dev.opencode.ai/v2/docs/console/models
   "beam-free": { input: 0, output: 0 },
+  "hy4-flash-free": { input: 0, output: 0 },
 };
 
 export function priceFor(model: string, prices: Record<string, ModelPrice>): ModelPrice | null {
