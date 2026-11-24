@@ -8,14 +8,15 @@
 //  - session leaves blocked -> its captured question auto-resolves, but an
 //    agent-reported question posted during the block stays open
 //  - session finished -> linked task marked done, open questions resolve
-//  - a `kind=done` report marks the task done and stores its handoff document
+//  - a `kind=done` report stores the handoff document and marks the task done,
+//    or, for a task with a PR, leaves it to the PR sync (ADR 0022)
 
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { JiraTransitionGateway } from "./jira-status.ts";
 import type { WorkerBackend, WorkerElicitation, WorkerEvent, WorkerRunOutcome } from "./worker.ts";
-import { clearItemHandling, syncTaskPr } from "./pr.ts";
+import { clearItemHandling, completeTask, doneReported, isPrSyncedTask, noteDoneReport, syncTaskPr, type SyncOptions } from "./pr.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { PlanConflictError, planMarkdown, readSpec } from "./multi-repo.ts";
@@ -43,6 +44,8 @@ export interface CaptureEngineOptions {
   stoppedRetry?: Partial<StoppedRetryConfig>;
   /** How long a session may stay stopped after an auto-retry send before another poll treats it as stopped again. */
   retryStallMs?: number;
+  /** PR lookup used by the PR syncs capture starts (injected for tests). */
+  prFinder?: SyncOptions["finder"];
 }
 
 export class CaptureEngine {
@@ -54,6 +57,7 @@ export class CaptureEngine {
   private jira: JiraTransitionGateway | null;
   private retryPolicy: StoppedRetryConfig;
   private retryStallMs: number;
+  private prFinder: SyncOptions["finder"];
   private retrying = new Set<string>();
   /** Sessions that stopped but whose last run could not be read: retried on the next idle poll. */
   private unreadStops = new Set<string>();
@@ -79,6 +83,11 @@ export class CaptureEngine {
     this.jira = jira;
     this.retryPolicy = resolveStoppedRetryConfig(opts.stoppedRetry ?? cfg?.stoppedRetry);
     this.retryStallMs = opts.retryStallMs ?? DEFAULT_RETRY_STALL_MS;
+    this.prFinder = opts.prFinder;
+  }
+
+  private prSyncOptions(): SyncOptions {
+    return { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira, ...(this.prFinder ? { finder: this.prFinder } : {}) };
   }
 
   /** Cancel any pending retry timer and start a fresh retry episode for this session
@@ -515,21 +524,32 @@ export class CaptureEngine {
       // The session is gone: whatever it was handling is the human's again.
       clearItemHandling(this.db, this.hub, taskId);
       if (task && (task.status === "dispatched" || task.status === "open")) {
-        this.db.updateTask(task.id, { status: "done", exit_code: e.exit_code ?? null });
         this.db.recordMetric("task.finished", task.id, { exit_code: e.exit_code ?? null });
-        logTaskEvent(this.db, task.id, "session", "Agent session finished", {
+        // A task with a PR of its own stays in its status while the PR is
+        // open (ADR 0022): look the PR up before deciding.
+        const pr = isPrSyncedTask(task) && (task.pr_url || task.branch)
+          ? await syncTaskPr(this.db, this.hub, task, this.prSyncOptions()).catch(() => null)
+          : null;
+        const current = this.db.getTask(task.id);
+        const held = pr?.state === "OPEN" && (current?.status === "dispatched" || current?.status === "open");
+        if (current && (current.status === "dispatched" || current.status === "open") && !held) {
+          this.db.updateTask(task.id, {
+            status: "done",
+            exit_code: e.exit_code ?? null,
+            ...(pr?.state === "CLOSED" ? { outcome: "closed" as const } : doneReported(current) && !pr ? { outcome: "reported" as const } : {}),
+          });
+        } else if (current && held) {
+          this.db.updateTask(task.id, { exit_code: e.exit_code ?? null });
+        }
+        logTaskEvent(this.db, task.id, "session", held ? "Agent session finished — task stays open until its PR merges or closes" : "Agent session finished", {
           exit_code: e.exit_code ?? null,
           session: e.address,
+          ...(held ? { pr: pr?.url } : {}),
         });
-        const updated = this.db.getTask(task.id);
-        this.hub.broadcast("task.updated", updated);
-        if (updated) {
-          // PR discovery is best effort. Release the worktree only after it
-          // has had a chance to attach an open PR item to the task.
-          void syncTaskPr(this.db, this.hub, updated, { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira })
-            .catch(() => undefined)
-            .finally(() => void cleanupFinishedTask(this.db, this.backend, task.id, { hub: this.hub, reason: "session-finished" }));
-        }
+        this.hub.broadcast("task.updated", this.db.getTask(task.id));
+        // Release the worktree only after the PR lookup had a chance to
+        // attach an open PR item to the task.
+        void cleanupFinishedTask(this.db, this.backend, task.id, { hub: this.hub, reason: "session-finished" });
       }
     }
   }
@@ -576,8 +596,14 @@ export class CaptureEngine {
         const handoff = /##\s*handoff/i.test(opts.body)
           ? opts.body.split(/##\s*handoff/i).slice(1).join("## Handoff").trim()
           : opts.body.trim();
-        // A merged PR already archived the task: keep it archived.
-        this.db.updateTask(task.id, task.status === "archived" ? { handoff } : { status: "done", handoff });
+        // A task with a PR of its own stays in its status until the PR merges
+        // or closes; the PR sync below settles it (ADR 0022). A merged PR
+        // already archived the task: keep it archived.
+        const hold = itemKind === "pr" && task.status !== "done" && task.status !== "archived";
+        this.db.updateTask(task.id, task.status === "archived" || hold
+          ? { handoff }
+          : { status: "done", handoff, ...(task.status === "done" ? {} : { outcome: "reported" as const }) });
+        if (hold) noteDoneReport(this.db, task.id);
         this.resolveOpenQuestions({
           taskId: task.id,
           address: address && address === task.terminal_address ? address : null,
@@ -585,6 +611,7 @@ export class CaptureEngine {
         logTaskEvent(this.db, task.id, "session", `Agent reported done: ${oneLine(opts.title, 100)}`, {
           report: opts.kind ?? "done",
           item_kind: itemKind,
+          ...(hold ? { held: "until the PR merges or closes" } : {}),
         });
         this.hub.broadcast("task.updated", this.db.getTask(task.id));
       }
@@ -776,13 +803,29 @@ export class CaptureEngine {
     return item;
   }
 
-  /** Verify the PR gate right after a completion report (best effort). */
+  /** Verify the PR gate right after a completion report (best effort). An
+   *  open PR keeps the task in its status; a merged or closed one completes it
+   *  in the sync; no PR at all completes it as reported. */
   private syncPrSoon(taskId: string): void {
     const task = this.db.getTask(taskId);
     if (!task) return;
-    void syncTaskPr(this.db, this.hub, task, { backend: this.backend, cfg: this.cfg ?? undefined, jira: this.jira })
-      .catch(() => undefined)
+    void syncTaskPr(this.db, this.hub, task, this.prSyncOptions())
+      .catch(() => null)
+      .then((pr) => {
+        if (!pr) this.completeReported(taskId);
+      })
       .finally(() => void cleanupFinishedTask(this.db, this.backend, taskId, { hub: this.hub, reason: "done-report" }));
+  }
+
+  /** A held done report whose task has no PR to wait for. */
+  private completeReported(taskId: string): void {
+    try {
+      const task = this.db.getTask(taskId);
+      if (!task || !doneReported(task)) return;
+      completeTask(this.db, this.hub, taskId, "reported", "done-report", "No PR found for the done report — task done");
+    } catch {
+      /* best effort (e.g. shutting down): the session's end completes it */
+    }
   }
 }
 

@@ -943,6 +943,21 @@ html.is-resizing * {
   color: var(--faint);
 }
 
+.outcome-merged {
+  background: var(--ok-soft);
+  color: var(--ok-ink);
+}
+
+.outcome-closed {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+
+.outcome-reported {
+  background: var(--chip-bg);
+  color: var(--faint);
+}
+
 .badge-warn {
   background: var(--warn-soft);
   color: var(--warn-ink);
