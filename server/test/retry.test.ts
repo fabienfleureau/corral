@@ -98,3 +98,20 @@ test("repoMismatch: words only another repo's tasks use warn when the selected r
   assert.equal(repoMismatch("Droplets are broken", "/repos/corral", repos, history), null, "one word is not enough");
   assert.equal(repoMismatch("", "/repos/corral", repos, history), null);
 });
+
+test("repoMismatch: an archived task, often the wrong-repo attempt, does not count", () => {
+  const withMistake = [...history, { repo_path: "/repos/corral", title: "Les droplets manquent sur la map", prompt: "", status: "archived" }];
+  assert.equal(repoMismatch("Les droplets manquent sur la map", "/repos/corral", repos, withMistake)?.name, "crpg");
+});
+
+test("db: a retry candidate is dated by its archive, not by a later write", () => {
+  const db = new Db(":memory:");
+  try {
+    db.insertTask(makeTask({ id: "late-touch", status: "open" }));
+    db.updateTask("late-touch", { status: "archived" });
+    db.raw.prepare("UPDATE task_events SET ts = ? WHERE task_id = ? AND kind = 'status'").run(Date.now() - 2 * RETRY_WINDOW_MS, "late-touch");
+    // A cleanup pass writes the task long after the archive and moves updated_ms.
+    db.updateTask("late-touch", { branch: null });
+    assert.equal(db.listEndedTasksSince(Date.now() - RETRY_WINDOW_MS).length, 0);
+  } finally { db.close(); }
+});

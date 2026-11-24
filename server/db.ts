@@ -447,9 +447,14 @@ export class Db {
   }
 
   /** Tasks archived or failed (non-zero exit) since `since`, any repo: the
-   *  candidates a new task may retry. */
-  listEndedTasksSince(since: number): Task[] {
-    return this.stmt(`SELECT * FROM tasks WHERE updated_ms >= ? AND (status = 'archived' OR (status = 'done' AND COALESCE(exit_code, 0) != 0)) ORDER BY updated_ms DESC`).all(since) as unknown as Task[];
+   *  candidates a new task may retry. `ended_ms` is the last status change in
+   *  the task history: later writes (cleanup, PR sync) also move updated_ms,
+   *  so it cannot date the archive. */
+  listEndedTasksSince(since: number): (Task & { ended_ms: number })[] {
+    return this.stmt(`SELECT * FROM (
+        SELECT t.*, COALESCE((SELECT MAX(e.ts) FROM task_events e WHERE e.task_id = t.id AND e.kind = 'status'), t.updated_ms) AS ended_ms
+        FROM tasks t WHERE t.status = 'archived' OR (t.status = 'done' AND COALESCE(t.exit_code, 0) != 0)
+      ) WHERE ended_ms >= ? ORDER BY ended_ms DESC`).all(since) as unknown as (Task & { ended_ms: number })[];
   }
 
   /** Events for tasks in registered professional repositories, in chronological order. */

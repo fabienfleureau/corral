@@ -26,7 +26,12 @@ export function labelSimilarity(a: string, b: string): number {
   return shared / (ta.size + tb.size - shared);
 }
 
-type Candidate = Pick<Task, "id" | "title" | "prompt" | "status" | "repo_path"> & Pick<Partial<Task>, "kind" | "exit_code" | "updated_ms">;
+type Candidate = Pick<Task, "id" | "title" | "prompt" | "status" | "repo_path"> & Pick<Partial<Task>, "kind" | "exit_code" | "updated_ms"> & { ended_ms?: number };
+
+/** When the run was archived or failed: the history's status change, else the last update. */
+function endedAt(c: Candidate): number {
+  return c.ended_ms ?? c.updated_ms ?? 0;
+}
 
 /** A run that ended badly: the session exited with a non-zero code. */
 function failed(c: Candidate): boolean {
@@ -77,9 +82,9 @@ export function findRetryOf(task: Candidate, candidates: Candidate[], now: numbe
   let best: Candidate | null = null;
   for (const c of candidates) {
     if (c.id === task.id || !comparable(c.kind) || (c.status !== "archived" && !failed(c))) continue;
-    if ((c.updated_ms ?? 0) < now - RETRY_WINDOW_MS) continue;
+    if (endedAt(c) < now - RETRY_WINDOW_MS) continue;
     if (labelKey(c.title) !== key && labelKey(firstLine(c.prompt)) !== key) continue;
-    if (!best || (c.updated_ms ?? 0) > (best.updated_ms ?? 0)) best = c;
+    if (!best || endedAt(c) > endedAt(best)) best = c;
   }
   return best?.id ?? null;
 }

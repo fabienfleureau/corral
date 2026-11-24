@@ -7,7 +7,7 @@
 import { labelTokens } from "../../shared/label-tokens.ts";
 
 export interface MismatchRepo { path: string; name: string }
-export interface MismatchTask { repo_path: string; title: string; prompt: string }
+export interface MismatchTask { repo_path: string; title: string; prompt: string; status?: string }
 
 export interface RepoMismatch {
   path: string;
@@ -51,7 +51,9 @@ export function repoMismatch(prompt: string, selectedPath: string, repos: Mismat
   // 2. Its words belong to one other repo's past tasks, and to none of the selected repo's.
   const vocab = new Map<string, Set<string>>();
   for (const task of tasks) {
-    if (!repos.some((r) => r.path === task.repo_path)) continue;
+    // An archived task was abandoned, often because it ran in the wrong repo:
+    // its words would credit that repo and silence the next warning.
+    if (task.status === "archived" || !repos.some((r) => r.path === task.repo_path)) continue;
     const words = vocab.get(task.repo_path) ?? new Set<string>();
     for (const w of vocabulary(task)) words.add(w);
     vocab.set(task.repo_path, words);
