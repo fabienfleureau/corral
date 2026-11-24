@@ -261,13 +261,18 @@ export class KpiMonitor {
     this.worker = worker;
     this.deps = deps;
     this.clock = clock;
+    const insert = db.stmt("INSERT OR IGNORE INTO kpi_monitors (id, settings) VALUES (?, ?)");
+    const defaults = JSON.stringify(DEFAULT_SETTINGS);
     for (const id of KPI_IDS) {
-      db.raw.prepare("INSERT OR IGNORE INTO kpi_monitors (id, settings) VALUES (?, ?)").run(id, JSON.stringify(DEFAULT_SETTINGS));
+      insert.run(id, defaults);
     }
   }
 
   view(id: KpiId): KpiView {
-    const row = this.row(id);
+    return this.viewFromRow(id, this.row(id));
+  }
+
+  private viewFromRow(id: KpiId, row: Row): KpiView {
     const settings = storedSettings(row.settings);
     const lastMeasurement: KpiMeasurement | null = row.last_measurement ? JSON.parse(row.last_measurement) : null;
     return {
@@ -283,7 +288,7 @@ export class KpiMonitor {
   }
 
   private history(id: KpiId): KpiMeasurement[] {
-    const rows = this.db.raw.prepare(`SELECT value, from_day, to_day, sources FROM kpi_measurements
+    const rows = this.db.stmt(`SELECT value, from_day, to_day, sources FROM kpi_measurements
       WHERE kpi_id = ? ORDER BY to_day DESC, from_day DESC LIMIT ?`).all(id, VIEW_HISTORY) as { value: number; from_day: string; to_day: string; sources: string }[];
     return rows.reverse().map((row) => ({ value: row.value, from: row.from_day, to: row.to_day, sources: JSON.parse(row.sources) }));
   }
@@ -320,19 +325,20 @@ export class KpiMonitor {
       : previous.goal ? row.goal_baseline
       : last ? JSON.stringify({ value: last.value, to: last.to } satisfies KpiBaseline) : null;
     if (redefined) {
-      this.db.raw.prepare(`UPDATE kpi_monitors SET settings = ?, goal_baseline = NULL, run_state = NULL, address = NULL, started_ms = NULL,
+      this.db.stmt(`UPDATE kpi_monitors SET settings = ?, goal_baseline = NULL, run_state = NULL, address = NULL, started_ms = NULL,
            finished_ms = NULL, error = NULL, report = NULL, report_ms = NULL, last_measurement = NULL WHERE id = ?`).run(JSON.stringify(settings), id);
-      this.db.raw.prepare("DELETE FROM kpi_measurements WHERE kpi_id = ?").run(id);
+      this.db.stmt("DELETE FROM kpi_measurements WHERE kpi_id = ?").run(id);
     } else {
-      this.db.raw.prepare("UPDATE kpi_monitors SET settings = ?, goal_baseline = ? WHERE id = ?").run(JSON.stringify(settings), baseline, id);
+      this.db.stmt("UPDATE kpi_monitors SET settings = ?, goal_baseline = ? WHERE id = ?").run(JSON.stringify(settings), baseline, id);
     }
     return this.view(id);
   }
 
   runNow(id: KpiId, instruction = ""): KpiView {
     const note = text(instruction, "one-time instruction", 6000, true);
-    if (this.busy.has(id) || this.row(id).run_name) throw new Error("An analysis cycle is already active");
-    const view = this.view(id);
+    const row = this.row(id);
+    if (this.busy.has(id) || row.run_name) throw new Error("An analysis cycle is already active");
+    const view = this.viewFromRow(id, row);
     this.validateRunnable(view.settings);
     void this.launch(view, note);
     return this.view(id);
@@ -349,13 +355,13 @@ export class KpiMonitor {
         finally { this.busy.delete(id); }
         return;
       }
-      const view = this.view(id);
+      const view = this.viewFromRow(id, row);
       if (view.nextRunMs !== null && this.clock() >= view.nextRunMs) await this.launch(view);
     }));
   }
 
   private row(id: KpiId): Row {
-    return this.db.raw.prepare("SELECT * FROM kpi_monitors WHERE id = ?").get(id) as unknown as Row;
+    return this.db.stmt("SELECT * FROM kpi_monitors WHERE id = ?").get(id) as unknown as Row;
   }
 
   private favoriteFor(settings: KpiSettings): Favorite {
@@ -375,7 +381,7 @@ export class KpiMonitor {
     const favorite = this.favoriteFor(settings);
     const name = `KPI: ${settings.name} · ${randomUUID().slice(0, 8)}`;
     const startedMs = this.clock();
-    const claim = this.db.raw.prepare(`
+    const claim = this.db.stmt(`
       UPDATE kpi_monitors SET run_name = ?, run_state = 'starting', started_ms = ?, address = NULL, error = NULL
       WHERE id = ? AND run_name IS NULL`).run(name, startedMs, id);
     if (!claim.changes) return;
@@ -396,7 +402,7 @@ export class KpiMonitor {
         harness: favorite.harness, model: favorite.model || null, reasoning: favorite.reasoning || null,
         prompt: kpiPrompt(settings, report, startedMs, memory.path, memory.excerpt, { progress: goalProgress, history }, instruction),
       });
-      this.db.raw.prepare("UPDATE kpi_monitors SET address = ?, run_state = 'running' WHERE id = ? AND run_name = ?")
+      this.db.stmt("UPDATE kpi_monitors SET address = ?, run_state = 'running' WHERE id = ? AND run_name = ?")
         .run(session.address, id, name);
     } catch (error) {
       // A lost response can hide a successful launch. Look for its session before retrying.
@@ -419,14 +425,14 @@ export class KpiMonitor {
     if (active && (session.status === "working" || session.status === "blocked" || session.status === null ||
         (session.status === "idle" && !session.turn && withinGrace))) {
       const unknown = session.status === null && !withinGrace;
-      this.db.raw.prepare("UPDATE kpi_monitors SET address = ?, run_state = ?, error = ? WHERE id = ? AND run_name = ?")
+      this.db.stmt("UPDATE kpi_monitors SET address = ?, run_state = ?, error = ? WHERE id = ? AND run_name = ?")
         .run(session.address, session.status === "blocked" || unknown ? "blocked" : "running",
           unknown ? "Omnigent did not report the session state. Inspect the session before starting another cycle." : null, id, row.run_name);
       return;
     }
     const outcome = await this.worker.lastRunOutcome?.(session.address);
     if (!outcome && withinGrace && active && session.status !== "error") return;
-    this.db.raw.prepare("UPDATE kpi_monitors SET address = ? WHERE id = ? AND run_name = ?").run(session.address, id, row.run_name);
+    this.db.stmt("UPDATE kpi_monitors SET address = ? WHERE id = ? AND run_name = ?").run(session.address, id, row.run_name);
     if (session.status === "error" || outcome?.kind !== "message") {
       this.finish(id, row.run_name, outcome?.text.slice(0, 400) ?? "The analysis ended without a report");
       return;
@@ -446,28 +452,28 @@ export class KpiMonitor {
       return;
     }
     const now = this.clock();
-    const saved = this.db.raw.prepare(`
+    const saved = this.db.stmt(`
       UPDATE kpi_monitors SET run_name = NULL, run_state = 'complete', finished_ms = ?, error = NULL,
         report = ?, report_ms = ?, last_measurement = COALESCE(?, last_measurement)
       WHERE id = ? AND run_name = ?`).run(now, JSON.stringify({ ...report, memory }), now, report.measurement ? JSON.stringify(report.measurement) : null, id, row.run_name);
     const measured = report.measurement;
     if (!measured || !saved.changes) return;
     // A re-measured window replaces the earlier value.
-    this.db.raw.prepare(`INSERT INTO kpi_measurements (kpi_id, from_day, to_day, value, sources, recorded_ms) VALUES (?, ?, ?, ?, ?, ?)
+    this.db.stmt(`INSERT INTO kpi_measurements (kpi_id, from_day, to_day, value, sources, recorded_ms) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT (kpi_id, from_day, to_day) DO UPDATE SET value = excluded.value, sources = excluded.sources, recorded_ms = excluded.recorded_ms`)
       .run(id, measured.from, measured.to, measured.value, JSON.stringify(measured.sources), now);
     if (settings.goal) {
-      this.db.raw.prepare("UPDATE kpi_monitors SET goal_baseline = ? WHERE id = ? AND goal_baseline IS NULL")
+      this.db.stmt("UPDATE kpi_monitors SET goal_baseline = ? WHERE id = ? AND goal_baseline IS NULL")
         .run(JSON.stringify({ value: measured.value, to: measured.to } satisfies KpiBaseline), id);
     }
   }
 
   private finish(id: KpiId, name: string | null, error: string): void {
-    this.db.raw.prepare("UPDATE kpi_monitors SET run_name = NULL, run_state = 'failed', finished_ms = ?, error = ? WHERE id = ? AND run_name = ?")
+    this.db.stmt("UPDATE kpi_monitors SET run_name = NULL, run_state = 'failed', finished_ms = ?, error = ? WHERE id = ? AND run_name = ?")
       .run(this.clock(), error, id, name);
   }
 
   private setError(id: KpiId, name: string | null, error: string): void {
-    this.db.raw.prepare("UPDATE kpi_monitors SET error = ? WHERE id = ? AND run_name = ?").run(error, id, name);
+    this.db.stmt("UPDATE kpi_monitors SET error = ? WHERE id = ? AND run_name = ?").run(error, id, name);
   }
 }

@@ -11,7 +11,7 @@ import { archiveEpicLaunchItems } from "./epic-graph.ts";
 import type { Db } from "./db.ts";
 import type { WorkerBackend } from "./worker.ts";
 import type { Hub } from "./capture.ts";
-import type { Item, Task } from "./types.ts";
+import type { Item, MergeReadiness, Task } from "./types.ts";
 import { DATA_NOT_INSTRUCTIONS, questionConvention, slugify } from "./dispatch.ts";
 import { JiraClient } from "./jira.ts";
 import { syncJiraStage, type JiraStage, type JiraTransitionGateway } from "./jira-status.ts";
@@ -57,6 +57,8 @@ export interface PrInfo {
   failed_checks?: PrCheckFailure[];
   /** Unresolved review threads — the "comments to manage". */
   threads: PrThread[];
+  /** Merge time reported by the platform (ms), when merged and known. */
+  merged_ms?: number | null;
   /** False when thread data could not be fetched: readiness stays pending. */
   threads_known?: boolean;
 }
@@ -127,6 +129,13 @@ async function repoSlug(repoPath: string): Promise<string | null> {
   }
 }
 
+/** ISO timestamp from gh/glab -> ms, or null when absent or unparsable. */
+function platformTime(value: unknown): number | null {
+  if (typeof value !== "string" || !value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
 function summarizeChecks(rollup: unknown[]): { checks: PrInfo["checks"]; failedChecks: PrCheckFailure[] } {
   let failed = 0;
   let pending = 0;
@@ -161,7 +170,7 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
     "gh",
     [
       "pr", "view", branch,
-      "--json", "url,title,state,number,body,additions,deletions,changedFiles,files,headRefOid,mergeable,baseRefName,reviewDecision,statusCheckRollup",
+      "--json", "url,title,state,number,body,additions,deletions,changedFiles,files,headRefOid,mergedAt,mergeable,baseRefName,reviewDecision,statusCheckRollup",
     ],
     repoPath,
   );
@@ -246,6 +255,7 @@ async function findPrGitHub(repoPath: string, branch: string): Promise<PrInfo | 
     ...(failedChecks.length > 0 ? { failed_checks: failedChecks } : {}),
     threads,
     threads_known: threadsKnown,
+    merged_ms: platformTime(d.mergedAt),
   };
 }
 
@@ -346,6 +356,7 @@ async function findPrGitLab(repoPath: string, branch: string): Promise<PrInfo | 
     ...(failedChecks.length > 0 ? { failed_checks: failedChecks } : {}),
     threads,
     threads_known: state !== "OPEN" || discussions !== null,
+    merged_ms: platformTime(mr.merged_at),
   };
 }
 
@@ -642,7 +653,7 @@ function snapshotPr(pr: PrInfo, ready: boolean, reasons: string[], triage: PrTri
  *  "In progress" instead of asking the human for something nobody can act on
  *  yet. Cleared when the run ends or the gate passes. */
 function setItemHandling(db: Db, hub: Hub, taskId: string, handling: boolean, opts: { unsnooze?: boolean } = {}): void {
-  const item = db.listItems({ kind: "pr" }).find((i) => i.task_id === taskId && i.status !== "archived");
+  const item = db.findPrItemForTask(taskId);
   const value = handling ? 1 : 0;
   if (!item) return;
   const patch: Partial<Item> = {};
@@ -694,7 +705,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   // the agent, and its merge does not complete the review.
   if (staleTask.kind === "review" || staleTask.kind === "spec" || staleTask.kind === "analysis" || staleTask.kind === "ops" || staleTask.kind === "grill") return null;
   const finder = opts.finder ?? findPr;
-  const item = db.listItems({ kind: "pr" }).find((i) => i.task_id === staleTask.id && i.status !== "archived");
+  const item = db.findPrItemForTask(staleTask.id);
   const reportedUrl = item?.body.match(/https?:\/\/[^\s<>)]+(?:\/pull\/|(?:\/-)?\/merge_requests\/)\d+/)?.[0];
   const ref = staleTask.pr_url || reportedUrl || staleTask.branch || "";
   const pr = await finder(staleTask.repo_path, ref);
@@ -713,11 +724,12 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   // left the queue. Its status still needs following, but no agent should be
   // respawned for work on a task nobody is running.
   const agentTask = task.status === "dispatched" || task.status === "done";
-  const taskPrItems = db.listItems({ kind: "pr" }).filter((i) => i.task_id === task.id);
-  const existing = taskPrItems.find((i) => i.status !== "archived") ?? taskPrItems[0] ?? null;
+  const existing = db.findPrItemForTask(task.id, { includeArchived: true });
   const shouldResolve = pr.state !== "OPEN";
   const merged = pr.state === "MERGED";
   syncJiraPrStage(db, hub, task, pr, ready, merged, opts);
+  // Before the snapshot below replaces it: the last state seen while open.
+  if (merged) recordMerge(db, hub, task, pr, readMeta(task.pr_meta).pr ?? null);
   if (merged && task.terminal_address && opts.backend?.archive) {
     await opts.backend.archive(task.terminal_address).catch(() => undefined);
   }
@@ -941,11 +953,44 @@ function syncJiraPrStage(
   );
 }
 
+/** The readiness gate's state from the last snapshot taken while the PR was
+ *  open, or null when there was none (first seen already merged). */
+export function mergeReadiness(prev: PrSnapshot | null): MergeReadiness | null {
+  if (!prev || prev.state !== "OPEN") return null;
+  return {
+    ready: prev.ready,
+    reasons: prev.reasons,
+    failing_checks: prev.checks.failed,
+    pending_checks: prev.checks.pending,
+    unresolved_threads: prev.threads.unresolved,
+    review_decision: prev.review_decision,
+    checked_ms: prev.checked_ms,
+  };
+}
+
+/** Record the merge once: when it happened and how ready the PR looked just
+ *  before. Written whatever the task status: most tasks are already done
+ *  (reported) when their PR merges. */
+function recordMerge(db: Db, hub: Hub, task: Task, pr: PrInfo, prev: PrSnapshot | null): void {
+  const current = db.getTask(task.id);
+  if (!current || current.merged_ms != null) return;
+  const readiness = mergeReadiness(prev);
+  const mergedMs = pr.merged_ms ?? Date.now();
+  db.updateTask(task.id, { merged_ms: mergedMs, merge_readiness: readiness ? JSON.stringify(readiness) : null }, false);
+  db.recordMetric("pr.merged", task.id, {
+    pr: pr.url,
+    merged_ms: mergedMs,
+    merged_at_known: pr.merged_ms != null,
+    ready: readiness ? readiness.ready : null,
+    reasons: readiness?.reasons ?? null,
+  });
+  hub.broadcast("task.updated", db.getTask(task.id));
+}
+
 /** A merged or closed PR completes the task, archives its items and frees its worktree. */
 async function resolveMergedTask(db: Db, hub: Hub, task: Task, backend: WorkerBackend | undefined): Promise<void> {
   const now = Date.now();
-  for (const item of db.listItems()) {
-    if (item.task_id !== task.id || item.status === "archived") continue;
+  for (const item of db.listUnarchivedItemsForTask(task.id)) {
     db.updateItem(item.id, { status: "archived", resolved_ms: item.resolved_ms ?? now });
     hub.broadcast("item.updated", db.getItem(item.id));
   }
@@ -989,13 +1034,14 @@ export function startSyncAllPrs(
   syncAllRunning = true;
   return (async () => {
     try {
-      const reportedTasks = new Set(db.listItems({ kind: "pr" }).filter((i) => i.status !== "archived").map((i) => i.task_id));
+      const reportedTasks = new Set(db.listTaskIdsWithActivePrItem());
       const candidates = prCandidateTasks(db);
       const known = new Set(candidates.map((t) => t.id));
       // A task with a live PR item must keep following it even after its
       // session was archived or its branch was cleared. Otherwise a merge
       // leaves an open "ready for review" item nobody checks again.
-      const followed = db.listTasks().filter((t) => reportedTasks.has(t.id) && !known.has(t.id));
+      const followedIds = [...reportedTasks].filter((id) => !known.has(id));
+      const followed = db.getTasksByIds(followedIds);
       const tasks = [...candidates, ...followed].filter((t) => !opts.knownPrsOnly || t.pr_url || reportedTasks.has(t.id));
       // An open PR item promises a current answer. Check it before the rest of
       // the queue: a slow sweep over hundreds of PRs must not keep a merged
@@ -1020,11 +1066,6 @@ export function startSyncAllPrs(
  *  followed separately by startSyncAllPrs. */
 export function prCandidateTasks(db: Db): Task[] {
   return db
-    .listTasks()
-    .filter((t) =>
-      t.kind !== "review" && t.kind !== "spec" && t.kind !== "analysis" && t.kind !== "ops" && t.kind !== "grill"
-      && (t.status === "dispatched" || t.status === "done")
-      && t.branch && t.repo_path
-      && !(t.status === "done" && readMeta(t.pr_meta).pr?.state === "MERGED"),
-    );
+    .listPrCandidateTasks()
+    .filter((t) => !(t.status === "done" && readMeta(t.pr_meta).pr?.state === "MERGED"));
 }

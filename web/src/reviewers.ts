@@ -36,6 +36,17 @@ export function reviewerSummary(r: Reviewer): string {
   return isDelegate(r) ? `Hands the review to a ${r.delegate === "claude" ? "Claude" : "Codex"} sub-agent` : r.command;
 }
 
+/** Match a saved task review string (name or frozen summary) back to a configured reviewer. */
+export function reviewerBySummary(review: string | null | undefined, reviewers: Reviewer[]): Reviewer | null {
+  const trimmed = review?.trim() ?? "";
+  if (!trimmed) return null;
+  return reviewers.find((r) => {
+    if (r.name === trimmed) return true;
+    const frozen = isDelegate(r) ? `sub-agent ocr_${r.delegate}` : r.command;
+    return frozen === trimmed;
+  }) ?? null;
+}
+
 /** A delegate review needs the Claude harness and no explicit agent. */
 export function reviewerBlocked(r: Reviewer, harness: string, agent: string): boolean {
   return isDelegate(r) && (harness !== "claude" || agent !== "");

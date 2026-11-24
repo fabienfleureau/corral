@@ -18,10 +18,10 @@ export class AnalysisAgent {
   private hub: Pick<Hub, "broadcast">;
   private cfg: Config;
   private backend: WorkerBackend;
-  repo(): string { return (this.db.raw.prepare("SELECT repo FROM analysis_agent_settings WHERE id = 1").get() as { repo: string }).repo; }
+  repo(): string { return (this.db.stmt("SELECT repo FROM analysis_agent_settings WHERE id = 1").get() as { repo: string }).repo; }
   setRepo(repo: string): void {
     if (repo) gitToplevel(repo);
-    this.db.raw.prepare("UPDATE analysis_agent_settings SET repo = ? WHERE id = 1").run(repo);
+    this.db.stmt("UPDATE analysis_agent_settings SET repo = ? WHERE id = 1").run(repo);
   }
   /** `repo` and harness settings override the Improve defaults for one analysis. */
   /** `ops` runs in any folder and reports back; `analysis` is the default. */

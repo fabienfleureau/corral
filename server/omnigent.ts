@@ -443,7 +443,7 @@ export class OmnigentBackend implements WorkerBackend {
       harness: str(labels["corral.harness"]) ?? null,
       status: normalizeStatus(live, pendingCount > 0 || elicitations.length > 0),
       blocked_kind: elicitations[0]?.kind ?? (pendingCount > 0 ? "question" : null),
-      state: raw.archived === true ? "finished" : "live",
+      state: raw.archived === true || Boolean(raw.archived_at) ? "finished" : "live",
       turn: num(raw.turn) ?? num(raw.response_count) ?? 0,
       cwd: str(raw.workspace) ?? str(raw.cwd) ?? "",
       created_ms: epochMs(raw.created_ms) ?? epochMs(raw.created_at) ?? Date.now(),
@@ -981,7 +981,8 @@ export class OmnigentBackend implements WorkerBackend {
     } catch {
       return; // server unreachable — keep polling
     }
-    for (const s of sessions) {
+    const liveSessions = sessions.filter((s) => s.state !== "finished");
+    for (const s of liveSessions) {
       // Enrich blocked sessions with their elicitation payloads.
       let elicitations: WorkerElicitation[] = [];
       if (s.status === "blocked") {
@@ -1012,7 +1013,7 @@ export class OmnigentBackend implements WorkerBackend {
       }
     }
     // Sessions we track that vanished (archived/deleted) count as finished.
-    const seen = new Set(sessions.map((s) => s.address));
+    const seen = new Set(liveSessions.map((s) => s.address));
     for (const address of [...this.last.keys()]) {
       if (!seen.has(address)) {
         this.last.delete(address);

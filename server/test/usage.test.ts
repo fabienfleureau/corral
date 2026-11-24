@@ -74,8 +74,26 @@ test("shared prices estimate MiMo and free Beam usage", () => {
   assert.equal(recordCost(rec({ model: "beam-free", input: 1_000_000, output: 1_000_000 }), DEFAULT_PRICES), 0);
 });
 
+test("free models count as priced, not as unpriced calls", () => {
+  const report = buildReport({
+    records: [rec({ agent: "opencode-go", model: "hy4-flash-free", input: 1_000_000, output: 1_000_000 })],
+    tasks: [],
+    prices: DEFAULT_PRICES,
+    range: "all",
+    scanning: false,
+  });
+  assert.equal(report.totals.unpriced_calls, 0);
+  assert.equal(report.totals.cost_usd, 0);
+  assert.equal(report.by_model[0].priced, true);
+});
+
+test("shared Tencent price estimates Hy4 at list price", () => {
+  const cost = recordCost(rec({ agent: "opencode-go", model: "hy4", input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }), DEFAULT_PRICES);
+  assert.ok(cost !== null && Math.abs(cost - 3.377) < 1e-9);
+});
+
 test("shared OpenAI prices include discounted cached input", () => {
-  for (const [model, expected] of [["gpt-6.1-terra", 6.05], ["gpt-6.1-sol", 12.1]] as const) {
+  for (const [model, expected] of [["gpt-6.1-terra", 6.05], ["gpt-6.1-sol", 12.1], ["gpt-6.2-sol", 12.1], ["gpt-6-luna", 0.61]] as const) {
     assert.equal(recordCost(rec({ model, agent: "codex", input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000 }), DEFAULT_PRICES), expected);
   }
 });

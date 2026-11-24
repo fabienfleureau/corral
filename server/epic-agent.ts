@@ -178,7 +178,7 @@ export function parseEpicAgentReport(message: string): EpicAgentReport {
 }
 
 export interface EpicPromptContext {
-  epic: Pick<Epic, "jira_key" | "title" | "description">;
+  epic: Pick<Epic, "jira_key" | "title" | "description" | "favorite_name">;
   design: { version: number; body: string } | null;
   jiraTickets?: {
     key: string;
@@ -230,7 +230,7 @@ export function epicAgentPrompt(ctx: EpicPromptContext): string {
         "Operating Corral tasks (act like a human using Corral):",
         "- Importing a Jira epic does NOT automatically create Corral tasks for its tickets. Whenever you work on an epic task (from `jiraTickets`, existing `tasks`, or a discovered step), ALWAYS operate through a real Corral task and move its status — never silently implement epic task code on the side outside Corral.",
         "- Before creating a task, check `tasks` in the data below and never create a duplicate for work (or a `jira_key`) that already has a Corral task.",
-        "- **Create a real Corral task** in the right repository with the right agent: pick `repo_path` from `repos` (registered repo path or name) or an absolute folder path, pick `favorite` (from `favorites`, matching the repository's `context`) or explicit `target` (from `harnesses`) and `agent`, and include `jira_key` when the task corresponds to one of `jiraTickets` so Corral links the ticket metadata, dependency graph and Jira status sync:",
+        "- **Create a real Corral task** in the right repository with the right agent: pick `repo_path` from `repos` (registered repo path or name) or an absolute folder path, pick `favorite` (from `favorites`, matching the repository's `context`) or explicit `target` (from `harnesses`) and `agent`, and include `jira_key` when the task corresponds to one of `jiraTickets` so Corral links the ticket metadata, dependency graph and Jira status sync. If `epic.favorite` is set, tasks created with both `favorite` and `target` omitted automatically inherit that favorite (use the epic's designated favorite unless a task requires a different repository context or conf):",
         `\`\`\`sh\ncurl -s -X POST "${ctx.corral.url}/api/epics/${ctx.corral.epicId}/tasks" \\\n  -H "Authorization: Bearer ${ctx.corral.token}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"title":"<short title>","prompt":"<clear, self-contained instructions>","repo_path":"<repo path or name>","favorite":"<favorite name>","jira_key":"<optional EX-101>"}'\n\`\`\``,
         "  (Optional fields: `target`, `agent`, `model`, `reasoning`, `kind` (`code` or `ops`), `base_branch`.)",
         "- **Configure / assign existing open tasks** (e.g. when an existing task in `tasks` has no `repo`, `target`, or `agent` set, or needs a different repository, favorite, harness, agent, model, reasoning, or `base_branch` before launch) — update it directly via `PATCH /api/tasks/<taskId>` instead of calling the create endpoint or asking a human to assign it:",
@@ -287,6 +287,7 @@ export function epicAgentPrompt(ctx: EpicPromptContext): string {
       epic: {
         key: ctx.epic.jira_key,
         title: ctx.epic.title,
+        favorite: ctx.epic.favorite_name ?? null,
         designVersion: ctx.design?.version ?? 1,
         design: (ctx.design?.body ?? ctx.epic.description).slice(0, 12_000),
       },
@@ -312,13 +313,24 @@ export class EpicAgentRunner {
     this.clock = clock;
   }
 
-  view(epicId: string): EpicAgentView | null {
-    const epic = this.db.getEpic(epicId);
+  view(epicId: string, preloadedEpic?: Epic): EpicAgentView | null {
+    const epic = preloadedEpic ?? this.db.getEpic(epicId);
     if (!epic) return null;
-    const row = this.row(epicId);
+    return this.viewFromRow(epic, this.row(epicId));
+  }
+
+  runStates(): Map<string, EpicAgentRunState | null> {
+    const rows = this.db.stmt("SELECT epic_id, run_state FROM epic_agents").all() as unknown as {
+      epic_id: string;
+      run_state: EpicAgentRunState | null;
+    }[];
+    return new Map(rows.map((r) => [r.epic_id, r.run_state]));
+  }
+
+  private viewFromRow(epic: Epic, row: Row | null): EpicAgentView {
     const settings = row ? storedSettings(row.settings, epic) : defaultSettings(epic);
     return {
-      epicId,
+      epicId: epic.id,
       settings,
       runState: row?.run_state ?? null,
       address: row?.address ?? null,
@@ -350,12 +362,12 @@ export class EpicAgentRunner {
       throw new Error(`Favorite ${settings.favorite} is not configured for this working directory`);
     }
     if (intervalHours) this.favoriteFor(settings);
-    this.db.raw.prepare(`
+    this.db.stmt(`
       INSERT INTO epic_agents (epic_id, settings) VALUES (?, ?)
       ON CONFLICT(epic_id) DO UPDATE SET settings = excluded.settings
     `).run(epicId, JSON.stringify(settings));
     this.deps.onUpdate?.(epicId);
-    return this.view(epicId)!;
+    return this.view(epicId, epic)!;
   }
 
   runNow(epicId: string, instruction = ""): EpicAgentView {
@@ -364,17 +376,17 @@ export class EpicAgentRunner {
     if (!epic) throw new Error("Epic not found");
     const row = this.row(epicId);
     if (this.busy.has(epicId) || row?.run_name) throw new Error("An epic agent cycle is already active");
-    const view = this.view(epicId)!;
+    const view = this.viewFromRow(epic, row);
     this.favoriteFor(view.settings);
     if (!row) {
-      this.db.raw.prepare("INSERT OR IGNORE INTO epic_agents (epic_id, settings) VALUES (?, ?)").run(epicId, JSON.stringify(view.settings));
+      this.db.stmt("INSERT OR IGNORE INTO epic_agents (epic_id, settings) VALUES (?, ?)").run(epicId, JSON.stringify(view.settings));
     }
     void this.launch(epic, view, note);
-    return this.view(epicId)!;
+    return this.view(epicId, epic)!;
   }
 
   async tick(): Promise<void> {
-    const rows = this.db.raw.prepare("SELECT * FROM epic_agents").all() as unknown as Row[];
+    const rows = this.db.stmt("SELECT * FROM epic_agents").all() as unknown as Row[];
     await Promise.all(rows.map(async (row) => {
       const epicId = row.epic_id;
       if (this.busy.has(epicId)) return;
@@ -387,15 +399,15 @@ export class EpicAgentRunner {
         finally { this.busy.delete(epicId); }
         return;
       }
-      const view = this.view(epicId);
-      if (view && view.nextRunMs !== null && this.clock() >= view.nextRunMs) {
+      const view = this.viewFromRow(epic, row);
+      if (view.nextRunMs !== null && this.clock() >= view.nextRunMs) {
         await this.launch(epic, view);
       }
     }));
   }
 
   private row(epicId: string): Row | null {
-    return (this.db.raw.prepare("SELECT * FROM epic_agents WHERE epic_id = ?").get(epicId) as unknown as Row | undefined) ?? null;
+    return (this.db.stmt("SELECT * FROM epic_agents WHERE epic_id = ?").get(epicId) as unknown as Row | undefined) ?? null;
   }
 
   private favoriteFor(settings: EpicAgentSettings): Favorite {
@@ -410,7 +422,7 @@ export class EpicAgentRunner {
     const favorite = this.favoriteFor(view.settings);
     const name = `Epic ${epic.jira_key} · ${randomUUID().slice(0, 8)}`;
     const startedMs = this.clock();
-    const claim = this.db.raw.prepare(`
+    const claim = this.db.stmt(`
       UPDATE epic_agents SET run_name = ?, run_state = 'starting', started_ms = ?, address = NULL, error = NULL
       WHERE epic_id = ? AND run_name IS NULL
     `).run(name, startedMs, epic.id);
@@ -424,7 +436,7 @@ export class EpicAgentRunner {
     const design = this.db.latestDesign(epic.id);
     const epicTasks = this.db.listEpicTasks(epic.id);
     const links = this.db.listEpicLinks(epic.id);
-    const viewById = new Map(epicViews(epicTasks, links, this.db.listItems()).map((v) => [v.task.id, v]));
+    const viewById = new Map(epicViews(epicTasks, links, this.db.listActivePrItems()).map((v) => [v.task.id, v]));
     const tasks = epicTasks.map((task) => {
       const v = viewById.get(task.id);
       return {
@@ -493,7 +505,7 @@ export class EpicAgentRunner {
         reasoning: favorite.reasoning || null,
         prompt,
       });
-      this.db.raw.prepare("UPDATE epic_agents SET address = ?, run_state = 'running' WHERE epic_id = ? AND run_name = ?")
+      this.db.stmt("UPDATE epic_agents SET address = ?, run_state = 'running' WHERE epic_id = ? AND run_name = ?")
         .run(session.address, epic.id, name);
       this.deps.onUpdate?.(epic.id);
     } catch (error) {
@@ -516,7 +528,7 @@ export class EpicAgentRunner {
     if (active && (session.status === "working" || session.status === "blocked" || session.status === null ||
         (session.status === "idle" && !session.turn && withinGrace))) {
       const unknown = session.status === null && !withinGrace;
-      this.db.raw.prepare("UPDATE epic_agents SET address = ?, run_state = ?, error = ? WHERE epic_id = ? AND run_name = ?")
+      this.db.stmt("UPDATE epic_agents SET address = ?, run_state = ?, error = ? WHERE epic_id = ? AND run_name = ?")
         .run(
           session.address,
           session.status === "blocked" || unknown ? "blocked" : "running",
@@ -528,7 +540,7 @@ export class EpicAgentRunner {
     }
     const outcome = await this.worker.lastRunOutcome?.(session.address);
     if (!outcome && withinGrace && active && session.status !== "error") return;
-    this.db.raw.prepare("UPDATE epic_agents SET address = ? WHERE epic_id = ? AND run_name = ?").run(session.address, epic.id, row.run_name);
+    this.db.stmt("UPDATE epic_agents SET address = ? WHERE epic_id = ? AND run_name = ?").run(session.address, epic.id, row.run_name);
     if (session.status === "error" || outcome?.kind !== "message") {
       this.finish(epic.id, row.run_name, outcome?.text.slice(0, 400) ?? "The epic agent cycle ended without a report");
       return;
@@ -539,6 +551,7 @@ export class EpicAgentRunner {
       this.finish(epic.id, row.run_name, "The agent returned an invalid epic report. Inspect the session for its output.");
       return;
     }
+    if (!this.db.getEpic(epic.id)) return;
     const settings = storedSettings(row.settings, epic);
     let memory: string;
     try { memory = persistEpicMemory(epic.jira_key, settings.repoPath, report.memory); }
@@ -547,7 +560,7 @@ export class EpicAgentRunner {
       return;
     }
     const now = this.clock();
-    this.db.raw.prepare(`
+    this.db.stmt(`
       UPDATE epic_agents SET run_name = NULL, run_state = 'complete', finished_ms = ?, error = NULL,
         report = ?, report_ms = ?
       WHERE epic_id = ? AND run_name = ?
@@ -556,13 +569,13 @@ export class EpicAgentRunner {
   }
 
   private finish(epicId: string, name: string | null, error: string): void {
-    this.db.raw.prepare("UPDATE epic_agents SET run_name = NULL, run_state = 'failed', finished_ms = ?, error = ? WHERE epic_id = ? AND run_name = ?")
+    this.db.stmt("UPDATE epic_agents SET run_name = NULL, run_state = 'failed', finished_ms = ?, error = ? WHERE epic_id = ? AND run_name = ?")
       .run(this.clock(), error, epicId, name);
     this.deps.onUpdate?.(epicId);
   }
 
   private setError(epicId: string, name: string | null, error: string): void {
-    this.db.raw.prepare("UPDATE epic_agents SET error = ? WHERE epic_id = ? AND run_name = ?").run(error, epicId, name);
+    this.db.stmt("UPDATE epic_agents SET error = ? WHERE epic_id = ? AND run_name = ?").run(error, epicId, name);
     this.deps.onUpdate?.(epicId);
   }
 }
