@@ -189,6 +189,12 @@ export interface Task {
   /** The amendment written into the Jira ticket (current one only) and the hash of that block. */
   amendment?: string | null;
   amendment_hash?: string | null;
+  /** A done task in the same repo with a near-identical label: this task
+   *  probably repeats it (see server/repeat.ts). Set once, at creation. */
+  repeat_of?: string | null;
+  /** A task archived or failed in the 24 h before this one was created, with
+   *  the same normalized label: the human gave up on it and started over. */
+  retry_of?: string | null;
   status: TaskStatus;
   terminal_address: string | null;
   exit_code: number | null;
@@ -260,6 +266,8 @@ export interface Item {
   updated_ms: number;
   resolved_ms: number | null;
   snooze_until_ms: number | null;
+  /** How many times the human snoozed this item; 2+ is flagged in the inbox. */
+  snooze_count?: number;
 }
 
 export interface TrackedTerminal {

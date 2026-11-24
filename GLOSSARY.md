@@ -22,3 +22,9 @@ A change to one task after a Design revision, proposed by an agent, validated by
 
 **Impacted task**
 A task not yet merged that was started on an older Design version than the current one.
+
+**Retry**
+A task the human created with the same label as one archived or failed in the previous 24 hours, in any repo or harness (`retry_of`). Distinct from the automatic stopped-agent retry of ADR 0016, which retries a stopped run on the same task.
+
+**Probable repeat**
+A new task whose label nearly matches a task already done in the same repo (`repeat_of`): the same symptom is probably back.

@@ -54,9 +54,21 @@ import { SessionFacts } from "./session-facts.ts";
 import type { SessionFact } from "./session-facts.ts";
 import { handleMcp, instructTask, InstructError } from "./agent-control.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
+import { findRepeatOf, findRetryOf, RETRY_WINDOW_MS } from "./repeat.ts";
 
 /** The skills prompt carries more evidence than a summary: allow a longer assistant call. */
 export const SKILLS_ANALYSIS_TIMEOUT_MS = 300_000;
+
+/** History suffix naming the task a new task retries or probably repeats. */
+function repeatNote(db: Db, repeatOf: string | null | undefined, retryOf: string | null | undefined = null): string {
+  const retried = retryOf ? db.getTask(retryOf) : null;
+  const done = repeatOf ? db.getTask(repeatOf) : null;
+  const notes = [
+    retried ? `retry of "${taskLabel(retried)}", ${retried.status === "archived" ? "archived" : "failed"}` : null,
+    done ? `probable repeat of "${taskLabel(done)}"` : null,
+  ].filter(Boolean);
+  return notes.length ? ` (${notes.join("; ")})` : "";
+}
 
 function dailyInterval(startText: string | null, endText: string | null): { start: number; end: number } | null {
   const start = Number(startText), end = Number(endText);
@@ -469,7 +481,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   on("POST", "/api/items/:id/snooze", (req, res, { body, params }) => {
     const until = Number((body as { until_ms?: number })?.until_ms ?? Date.now() + 3600_000);
-    state.db.updateItem(params.id, { snooze_until_ms: until });
+    state.db.snoozeItem(params.id, until);
     state.db.recordMetric("item.snoozed", params.id, { until_ms: until });
     const updated = state.db.getItem(params.id);
     state.hub.broadcast("item.updated", updated);
@@ -578,16 +590,20 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       created_ms: now,
       updated_ms: now,
     };
+    task.repeat_of = findRepeatOf(task, state.db.listDoneTasksInRepo(task.repo_path));
+    task.retry_of = findRetryOf(task, state.db.listEndedTasksSince(now - RETRY_WINDOW_MS), now);
     state.db.insertTaskWithAttachments(task, attached.files);
     state.db.reward("task", task.id);
     state.db.recordMetric("task.created", task.id, { source: b.jira_key ? "jira" : "manual" });
-    logTaskEvent(state.db, task.id, "created", kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : kind === "ops" ? "Action task created" : "Task created", {
+    logTaskEvent(state.db, task.id, "created", `${kind === "review" ? "Review task created" : kind === "spec" ? "Multi-repo spec task created" : kind === "ops" ? "Action task created" : "Task created"}${repeatNote(state.db, task.repeat_of, task.retry_of)}`, {
       source: b.jira_key ? "jira" : "manual",
       kind,
       repo: task.repo_path || null,
       target: task.target || null,
       pr: task.pr_url,
       attachments: attached.files.length || undefined,
+      repeat_of: task.repeat_of,
+      retry_of: task.retry_of,
     });
     // Untitled: a short title now, a better one from the assistant later.
     void ensureTaskTitle(state.db, state.hub, task.id, titleCompleter(state));
@@ -1545,13 +1561,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
           created_ms: now,
           updated_ms: now,
         };
+        task.repeat_of = findRepeatOf(task, state.db.listDoneTasksInRepo(task.repo_path));
         state.db.insertTask(task);
         state.db.recordMetric("jira.imported", task.id, { key });
-        logTaskEvent(state.db, task.id, "created", `Imported from Jira ${f.jira_key}`, {
+        logTaskEvent(state.db, task.id, "created", `Imported from Jira ${f.jira_key}${repeatNote(state.db, task.repeat_of)}`, {
           source: "jira",
           key: f.jira_key,
           jira_status: f.jira_status,
           repo: task.repo_path || null,
+          repeat_of: task.repeat_of,
         });
         state.hub.broadcast("task.updated", task);
         out.created.push(task);

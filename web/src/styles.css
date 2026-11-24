@@ -799,6 +799,19 @@ html.is-resizing * {
   font-size: 12px;
 }
 
+.inline-warn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-size: 12px;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -3212,6 +3225,9 @@ select:focus {
 
 .usage-seg-opencode {
   background: #8c6ac8;
+}
+.usage-seg-antigravity {
+  background: var(--warn-ink);
 }
 .usage-seg-m1 { background: var(--chart-m1); }
 .usage-seg-m2 { background: var(--chart-m2); }
