@@ -14,11 +14,11 @@ First determine the user's intent from their request, then act accordingly:
 Authenticate every request with `-H "Authorization: Bearer {corral_token}"` and build JSON payloads safely (e.g. with `jq` or `node -e`) — never interpolate untrusted Jira or task text into shell commands:
 
 - Inspect this epic (design, Jira tickets, tasks, links, agent): `GET {corral_url}/api/epics/{epic_id}`
-- Update epic defaults (`favorite_name`, `repo_path`): `PATCH {corral_url}/api/epics/{epic_id}`
+- Update epic favorite or defaults (`favorite_name`, `repo_path`; assigning `favorite_name` applies that conf to compatible open tasks and sets the default for new tasks): `PATCH {corral_url}/api/epics/{epic_id}`
 - Resync epic from Jira: `POST {corral_url}/api/epics/{epic_id}/sync`
 - Publish a revised epic design (`{body, reason}`): `POST {corral_url}/api/epics/{epic_id}/design`
 - Configure or run the autonomous epic agent: `PUT {corral_url}/api/epics/{epic_id}/agent` · `POST {corral_url}/api/epics/{epic_id}/agent/run`
-- Create an **epic task** (`{title, prompt, repo_path, favorite|target, agent?, model?, reasoning?, kind?, jira_key?, base_branch?}`): `POST {corral_url}/api/epics/{epic_id}/tasks`
+- Create an **epic task** (`{title, prompt, repo_path, favorite|target?, agent?, model?, reasoning?, kind?, jira_key?, base_branch?}`; omit `favorite` and `target` to inherit the epic's favorite when compatible): `POST {corral_url}/api/epics/{epic_id}/tasks`
 - Launch a ready epic ticket task: `POST {corral_url}/api/epics/{epic_id}/tasks/<taskId>/launch`
 - List classic and epic tasks, or read a task's history: `GET {corral_url}/api/tasks` · `GET {corral_url}/api/tasks/<taskId>/events`
 - Create a **classic task** (`{title, prompt, repo_path, kind?, target?, agent?, model?, reasoning?, base_branch?}`): `POST {corral_url}/api/tasks`

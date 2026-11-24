@@ -9,7 +9,7 @@ Prompt families:
 |---|---|---|---|
 | **Agent conventions** | `skills/*.md` | the dispatched coding agent (Claude Code, Codex, …) | every dispatch, and every PR-loop respawn |
 | **PR-loop messages** | string builders in `server/pr.ts` | a live agent session, or a fresh respawn | when the PR loop has work for the agent |
-| **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts` | the `assistant` command | when the human clicks Summarize, or a digest runs |
+| **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts`, `server/task-title.ts` | the `assistant` command | when the human clicks Summarize, a digest runs, or a task is created without a title |
 | **KPI analysis** | `kpiPrompt()` in `server/kpi.ts` | the Omnigent agent from the selected favorite | every manual or scheduled KPI cycle |
 | **KPI status artifacts** | `kpiArtifactPrompt()` in `server/kpi-artifact.ts` | a Claude `ops` task from a configured favorite | when the human builds an artifact from the KPI page |
 | **Epic autonomous agent** | `epicAgentPrompt()` in `server/epic-agent.ts` | the Omnigent agent from the epic's selected favorite | every manual or scheduled epic implementation cycle |
@@ -52,7 +52,7 @@ Review this PR/MR: <pr url>      # only for a review task
 | `skills/ops.md` | ops tasks (an Epic page request without a PR), replacing the PR convention | `{corral_url}`, `{corral_token}`, `{task_id}` | do the work in the folder, no branch or PR, report what was done |
 | `skills/spec.md` | **replaces** `question-report.md` and `pr-loop.md` when `task.kind === "spec"` (multi-repo step one) — a spec reads the sub-projects, reports a `plan` and never commits | `{corral_url}`, `{corral_token}`, `{task_id}` | fallback: *"Write the contract between the sub-projects and report it as a plan. Do not change code."* |
 | `skills/epic-task.md` | a `code` or Jira-backed task of an epic (`epic_id`), in the task text before the conventions: check the ticket's Preconditions, report a question and stop if one is unmet | — | one-line fallback: *"Before changing anything, check the ticket's Preconditions section. If one is not met, report a question and stop."* |
-| `skills/epic-request.md` | an `ops` request task created from the Epic page (`epic_id` set, no `jira_key`), in the task text before the conventions: determine user intent (question, epic change, action on an existing task, or creating epic/classic tasks) and interact with Corral via its HTTP API | `{epic_id}`, `{corral_url}`, `{corral_token}`, `{task_id}` | two-line fallback pointing to `{epic_id}` and `{corral_url}` |
+| `skills/epic-request.md` | an `ops` request task created from the Epic page (`epic_id` set, no `jira_key`), in the task text before the conventions: determine user intent (question, epic change, action on an existing task, or creating epic/classic tasks) and interact with Corral via its HTTP API (including assigning the epic's favorite or omitting `favorite`/`target` to inherit it) | `{epic_id}`, `{corral_url}`, `{corral_token}`, `{task_id}` | two-line fallback pointing to `{epic_id}` and `{corral_url}` |
 | `skills/pr-loop.md` | same tasks, right after `question-report.md` | — | dropped (empty string is filtered out) |
 | `skills/pre-pr-review.md` | non-review task dispatched **with a reviewer** (`review` in the dispatch options) | `{review_command}` | dropped |
 | `skills/pre-pr-delegate-review.md` | **replaces** `pre-pr-review.md` when the reviewer is a delegate (`delegate` instead of `command`) | `{review_agent}`, `{base_branch}` | one-line fallback: send the changes to the `{review_agent}` sub-agent with `sys_session_send`, fix or decline each finding |
@@ -93,14 +93,18 @@ What each one is for:
   sub-agent (`ocr_claude` or `ocr_codex`) in the same working directory, ends its
   turn, and is woken when the sub-agent answers. Two rounds max (a new title per
   round), the outcome goes in the PR body, and it must never run `ocr` itself.
-- **`ocr-delegate.md`** — what the review sub-agent does: `ocr delegate preview`
-  twice (a range for committed changes, none for uncommitted ones), `ocr delegate
-  rule`, read each diff, adversarially verify candidate findings against
-  surrounding callers/types/tests, then answer with one JSON object
-  `{findings, coverage}`. Read-only: it never edits, commits or pushes. The text
-  is hashed into the name of the registered omnigent agent, so editing it
-  registers a new agent at the next dispatch instead of running the old one; the
-  old agent stays in the registry.
+- **`ocr-delegate.md`** — what the review sub-agent does: resolve `<base>` to
+  `origin/<base>` when it exists (avoiding a stale local branch), run
+  `ocr delegate preview` twice (a range for committed changes, none for
+  uncommitted ones), run `ocr delegate rule` on `reviewable_files` (skipping
+  when empty), include changed Markdown and other plain-text docs that `ocr`
+  marks `unsupported_ext` (while keeping binary, generated, and `default_path`
+  exclusions in `skipped_files`), read each diff, adversarially verify
+  candidate findings against surrounding callers/types/tests/docs, then answer
+  with one JSON object `{findings, coverage}`. Read-only: it never edits,
+  commits or pushes. The text is hashed into the name of the registered omnigent
+  agent, so editing it registers a new agent at the next dispatch instead of
+  running the old one; the old agent stays in the registry.
 - **`review.md`** — reviewing someone else's PR/MR on any harness: read-only,
   follow `fabien-reviewer` by name or from its skill file when the harness does
   not list it, adversarially verify every candidate finding against surrounding
@@ -180,6 +184,7 @@ substituted — see `llmComplete()` in `server/llm.ts`).
 
 | Builder | Purpose | Rules it carries |
 |---|---|---|
+| `taskTitlePrompt()` — `server/task-title.ts` | a task created without a title (`POST /api/tasks`), after its derived title is stored | task description framed as data (first 4000 chars); reply is the title only, one line, ≤60 characters, imperative, no quotes; replaces the derived title only if nobody changed it meanwhile; any failure keeps the derived title |
 | `summarizeText()` — `server/llm.ts` | the inbox **Summarize** button on a raw captured output tail | one-sentence question + 2–4 sentences of context, no preamble, last 8000 chars of output |
 | `orchestrationPrompt()` — `server/epic-orchestration.ts` | on an epic orchestration request | asks for a reviewable plan using the current design, task states and blockers; makes no changes |
 | `amendmentPrompt()` — `server/epic-design.ts` | after an epic's design is revised: which unstarted tasks change and how | ticket text framed as data; reply is JSON only (`[{key, amendment}]`, `[]` when nothing changes); unknown keys and empty amendments are dropped; nothing is written to Jira until the human applies each one in the inbox |
@@ -208,7 +213,7 @@ substituted — see `llmComplete()` in `server/llm.ts`).
 | `{pr_url}` | the task's PR/MR URL (empty for a code task without one) | every convention |
 | `{review_command}` | the reviewer command, `{base_branch}` already resolved | `skills/pre-pr-review.md` |
 | `{review_agent}` | the delegate reviewer's sub-agent name (`ocr_claude` or `ocr_codex`) | `skills/pre-pr-delegate-review.md` |
-| `{base_branch}` | the task's base branch, else the remote default branch name (empty when there is no remote) | `reviewers[].command`, `skills/pre-pr-delegate-review.md` |
+| `{base_branch}` | the task's base branch, else the remote default branch name (empty when there is no remote); for `skills/pre-pr-delegate-review.md`, Corral qualifies it as `origin/<branch>` when that branch exists on `origin` | `reviewers[].command`, `skills/pre-pr-delegate-review.md` |
 | `{prompt}` | the prompt text | `assistant` argv |
 
 A convention left with an unsubstituted `{placeholder}` is a bug: the agent will
@@ -262,7 +267,7 @@ Without one it asks for both to be null.
 ## Epic autonomous implementation
 
 `epicAgentPrompt()` in `server/epic-agent.ts` wraps the epic's Jira title,
-design, synced Jira child tickets (`jiraTickets`), existing Corral epic tasks
+epic-level `favorite` (when assigned), design, synced Jira child tickets (`jiraTickets`), existing Corral epic tasks
 (including Corral `status`, Epic board `state` and `jiraStatus`),
 previous report and workspace memory file (`.corral/epic-<jira-key>-memory.md`)
 with `DATA_NOT_INSTRUCTIONS`, and supplies the registered repositories,

@@ -15,7 +15,7 @@ const inFlight = new Set<string>();
 export function canCleanup(db: Db, task: Task | null | undefined): task is Task {
   if (!task || (task.status !== "done" && task.status !== "archived")) return false;
   if (!task.worktree_path || !task.terminal_address) return false;
-  return !db.listItems({ kind: "pr" }).some((item) => item.task_id === task.id && item.status === "open");
+  return !db.hasOpenPrItem(task.id);
 }
 
 /** Remove the worktree and its local branch. Returns true only on success. */
@@ -65,7 +65,7 @@ export async function cleanupTerminalWorktrees(
   opts: { hub?: Hub } = {},
 ): Promise<number> {
   if (!backend.cleanup) return 0;
-  const tasks = db.listTasks().filter((task) => canCleanup(db, task));
+  const tasks = db.listCleanupCandidateTasks();
   const results = await mapLimit(tasks, 4, (task) => cleanupFinishedTask(db, backend, task.id, {
     hub: opts.hub,
     reason: "sweep",

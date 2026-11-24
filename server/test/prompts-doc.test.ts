@@ -40,6 +40,7 @@ test("prompts doc: the inline prompt builders are documented", () => {
     ["planRevisionPrompt", "server/multi-repo.ts"],
     ["stoppedRetryPrompt", "server/stopped-retry.ts"],
     ["summarizeText", "server/llm.ts"],
+    ["taskTitlePrompt", "server/task-title.ts"],
     ["dailySummaryPrompt", "server/daily-summary.ts"],
     ["ImprovementAnalysis", "server/improvement.ts"],
     ["SkillsAnalysis", "server/skills-analysis.ts"],

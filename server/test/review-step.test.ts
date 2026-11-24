@@ -297,3 +297,77 @@ test("api: a delegate reviewer on another harness or an explicit agent is a 400,
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 }));
+
+test("dispatch: delegate reviewer diffs against freshly fetched origin/<base> when origin exists", withDb(async (db, dir) => {
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const remote = join(dir, "remote.git"), source = join(dir, "source"), clone = join(dir, "clone");
+  execFileSync("git", ["init", "--bare", "--initial-branch=main", remote], { stdio: "ignore" });
+  execFileSync("git", ["clone", remote, source], { stdio: "ignore" });
+  for (const repo of [source]) {
+    git(repo, "config", "user.email", "test@example.com");
+    git(repo, "config", "user.name", "Test");
+    git(repo, "config", "commit.gpgsign", "false");
+  }
+  git(source, "commit", "--allow-empty", "-m", "initial");
+  git(source, "push", "-u", "origin", "main");
+  execFileSync("git", ["clone", remote, clone], { stdio: "ignore" });
+  const staleMain = git(clone, "rev-parse", "main");
+  git(source, "commit", "--allow-empty", "-m", "newer on origin");
+  git(source, "push", "origin", "main");
+  const latestMain = git(source, "rev-parse", "HEAD");
+  assert.notEqual(staleMain, latestMain);
+
+  const { backend, started } = fakeBackend();
+  const unset = makeTask({ id: "unset", repo_path: clone, base_branch: null });
+  const pinnedBare = makeTask({ id: "bare", repo_path: clone, base_branch: "main" });
+  const pinnedRemote = makeTask({ id: "remote", repo_path: clone, base_branch: "origin/main" });
+  for (const task of [unset, pinnedBare, pinnedRemote]) {
+    db.insertTask(task);
+    await dispatchTask(db, cfgDelegate(dir), backend, task, "claude", { review: "ocr-codex" });
+  }
+  assert.match(started[0].prompt, /Base ref: origin\/main/);
+  assert.match(started[1].prompt, /Base ref: origin\/main/);
+  assert.match(started[2].prompt, /Base ref: origin\/main/);
+  assert.doesNotMatch(started[2].prompt, /origin\/origin\/main/);
+  assert.equal(git(clone, "rev-parse", "origin/main"), latestMain);
+  assert.equal(git(clone, "rev-parse", "main"), staleMain);
+}));
+
+test("dispatch: delegate reviewer fetches custom base branch in single-branch clone and keeps local-only refs", withDb(async (db, dir) => {
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const remote = join(dir, "remote.git"), source = join(dir, "source"), clone = join(dir, "clone");
+  execFileSync("git", ["init", "--bare", "--initial-branch=main", remote], { stdio: "ignore" });
+  execFileSync("git", ["clone", remote, source], { stdio: "ignore" });
+  git(source, "config", "user.email", "test@example.com");
+  git(source, "config", "user.name", "Test");
+  git(source, "config", "commit.gpgsign", "false");
+  git(source, "commit", "--allow-empty", "-m", "initial");
+  git(source, "push", "origin", "main");
+  execFileSync("git", ["clone", "--single-branch", remote, clone], { stdio: "ignore" });
+  git(source, "checkout", "-b", "feature/custom");
+  git(source, "commit", "--allow-empty", "-m", "custom base");
+  git(source, "push", "origin", "feature/custom");
+  const expected = git(source, "rev-parse", "HEAD");
+  git(clone, "branch", "local-wip");
+
+  const { backend, started } = fakeBackend();
+  const customTask = makeTask({ id: "custom", repo_path: clone, base_branch: "feature/custom" });
+  db.insertTask(customTask);
+  await dispatchTask(db, cfgDelegate(dir), backend, customTask, "claude", { review: "ocr-codex" });
+  assert.match(started[0].prompt, /Base ref: origin\/feature\/custom/);
+  assert.equal(git(clone, "rev-parse", "--verify", "refs/remotes/origin/feature/custom"), expected);
+  assert.equal(started[0].git?.base, expected);
+
+  const localTask = makeTask({ id: "local", repo_path: clone, base_branch: "local-wip" });
+  db.insertTask(localTask);
+  await dispatchTask(db, cfgDelegate(dir), backend, localTask, "claude", { useWorktree: false, review: "ocr-codex" });
+  assert.match(started[1].prompt, /Base ref: local-wip/);
+}));
+
+test("ocr-delegate skill prefers origin/<base>, reviews unsupported_ext docs, and skips rule when empty", () => {
+  const ocrSkill = readFileSync(join(process.cwd(), "skills", "ocr-delegate.md"), "utf8");
+  assert.match(ocrSkill, /origin\/<base>/);
+  assert.match(ocrSkill, /unsupported_ext/);
+  assert.match(ocrSkill, /Markdown/i);
+  assert.match(ocrSkill, /skip this command when `reviewable_files` is empty/i);
+});

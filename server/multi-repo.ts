@@ -220,7 +220,7 @@ export async function requestPlanChanges(
       currentVersion,
     });
   }
-  const openItem = db.listItems({ kind: "plan" }).find((i) => i.task_id === parent.id && i.status === "open") ?? null;
+  const openItem = db.findOpenItemForTask(parent.id, "plan");
   const address = parent.terminal_address || openItem?.source_ref || null;
   if (!address) {
     throw new PlanConflictError("No active agent session for this spec task.", { currentRevisionId, currentVersion });
@@ -321,11 +321,9 @@ export function approvePlan(db: Db, hub: Hub, parent: Task, revisionId?: string)
     ...(spec.revision_id ? { revision_id: spec.revision_id } : {}),
     ...(spec.version ? { version: spec.version } : {}),
   });
-  for (const item of db.listItems({ kind: "plan" })) {
-    if (item.task_id === parent.id && item.status === "open") {
-      db.updateItem(item.id, { status: "resolved", resolved_ms: now });
-      hub.broadcast("item.updated", db.getItem(item.id));
-    }
+  for (const item of db.listOpenItemsForTask(parent.id, "plan")) {
+    db.updateItem(item.id, { status: "resolved", resolved_ms: now });
+    hub.broadcast("item.updated", db.getItem(item.id));
   }
   hub.broadcast("task.updated", db.getTask(parent.id));
   return children;

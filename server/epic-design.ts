@@ -29,9 +29,10 @@ const isFinished = (t: Task) => t.status === "done" || isJiraDone(t.jira_status)
 const isStarted = (t: Task) => t.status !== "open" || Boolean(t.terminal_address);
 
 /** Started, unmerged tasks that were dispatched on an older design than the current one. */
-export function impactedTaskIds(db: Db, epicId: string): Set<string> {
-  const latest = db.latestDesign(epicId)?.version ?? 1;
-  return new Set(db.listEpicTasks(epicId)
+export function impactedTaskIds(db: Db, epicId: string, preloaded?: { tasks?: Task[]; latestVersion?: number }): Set<string> {
+  const latest = preloaded?.latestVersion ?? db.latestDesign(epicId)?.version ?? 1;
+  const tasks = preloaded?.tasks ?? db.listEpicTasks(epicId);
+  return new Set(tasks
     .filter((t) => t.epic_out !== 1 && isStarted(t) && !isFinished(t) && t.design_version != null && t.design_version < latest)
     .map((t) => t.id));
 }

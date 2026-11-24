@@ -1,5 +1,5 @@
-import { isContext, parseFavorites } from "./favorites.ts";
-import { delegateConflict, parseReviewers, type Reviewer } from "./reviewers.ts";
+import { favoriteForPath, isContext, parseFavorites } from "./favorites.ts";
+import { delegateConflict, parseReviewers, reviewerBySummary, type Reviewer } from "./reviewers.ts";
 import { errors } from "./errors.ts";
 // HTTP API + static hosting. Token auth middleware (token-ready for LAN/team),
 // SSE hub for live inbox updates.
@@ -16,12 +16,13 @@ import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncJiraStage } from "./jira-status.ts";
 import { syncEpic } from "./epic.ts";
 import { EpicAgentRunner } from "./epic-agent.ts";
-import { createEpicAgentTask, createEpicRequestTask, EpicRequestError, resolveTaskPatch, saveEpicRequestSettings, type EpicAgentTaskInput, type EpicRequestSettings } from "./epic-request.ts";
+import { applyEpicFavoriteToOpenTasks, createEpicAgentTask, createEpicRequestTask, EpicRequestError, resolveEpicFavorite, resolveTaskPatch, saveEpicRequestSettings, type EpicAgentTaskInput, type EpicRequestSettings } from "./epic-request.ts";
 import { orchestrationPrompt } from "./epic-orchestration.ts";
 import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "./epic-graph.ts";
 import { applyAmendment, impactedTaskIds, proposeAmendments, rejectAmendment, reviseDesign } from "./epic-design.ts";
 import { BlockConflict } from "./jira-blocks.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
+import { ensureTaskTitle, type TitleCompleter } from "./task-title.ts";
 import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
@@ -39,7 +40,7 @@ import { addRepo, gitRemoteUrls, gitToplevel, importFingerprint, importPreview, 
 import { matchRepoForPull } from "./repo-match.ts";
 import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
 import { cachedPulls, platformRateLimits, refreshPulls } from "./pulls.ts";
-import type { Item, Repo, Task } from "./types.ts";
+import type { EpicLink, Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { PlanConflictError, PlanDeliveryError, PlanError, approvePlan, isDirectory, listTaskPlanRevisions, requestPlanChanges, validatePlanReviewInput, validateSubtasks } from "./multi-repo.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type AgentQuota, type UsageRange } from "./usage.ts";
@@ -84,6 +85,15 @@ export interface AppState {
   /** Model/reasoning per task session: finished sessions are read once. */
   sessionFacts?: SessionFacts;
   prAdditions?: PrAdditionsCache;
+  /** Names untitled tasks (see titleCompleter); null disables it. */
+  titleAssistant?: TitleCompleter | null;
+}
+
+/** The assistant call that names untitled tasks: injected in tests, null to
+ *  disable, else the configured assistant command when there is one. */
+function titleCompleter(state: AppState): TitleCompleter | null {
+  if (state.titleAssistant !== undefined) return state.titleAssistant;
+  return state.cfg.assistant?.[0] ? (prompt) => llmComplete(state.cfg, prompt, 60_000) : null;
 }
 
 /** A Jira issue as the import would create it, plus the fingerprint of those fields. */
@@ -415,8 +425,9 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     try {
       const summary = await summarizeText(state.cfg, text, item.title);
       state.db.updateItem(item.id, { summary });
-      state.hub.broadcast("item.updated", state.db.getItem(item.id));
-      json(res, 200, state.db.getItem(item.id));
+      const updated = state.db.getItem(item.id);
+      state.hub.broadcast("item.updated", updated);
+      json(res, 200, updated);
     } catch (err) {
       json(res, 502, { error: String(err) });
     }
@@ -426,24 +437,32 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const item = state.db.getItem(params.id);
     if (!item) return json(res, 404, { error: "item not found" });
     state.db.updateItem(params.id, { status: "resolved", resolved_ms: Date.now(), snooze_until_ms: null });
+    const address = item.source_ref ?? (item.task_id ? state.db.getTask(item.task_id)?.terminal_address ?? null : null);
+    if (address) state.capture?.cancelStoppedRetries?.(address);
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.resolved", params.id, { how: "manual" });
-    state.hub.broadcast("item.updated", state.db.getItem(params.id));
-    json(res, 200, state.db.getItem(params.id));
+    const updated = state.db.getItem(params.id);
+    state.hub.broadcast("item.updated", updated);
+    json(res, 200, updated);
   });
 
   on("POST", "/api/items/:id/archive", (_req, res, { params }) => {
+    const existing = state.db.getItem(params.id);
     state.db.updateItem(params.id, { status: "archived", snooze_until_ms: null });
-    state.hub.broadcast("item.updated", state.db.getItem(params.id));
-    json(res, 200, state.db.getItem(params.id));
+    const address = existing?.source_ref ?? (existing?.task_id ? state.db.getTask(existing.task_id)?.terminal_address ?? null : null);
+    if (address) state.capture?.cancelStoppedRetries?.(address);
+    const updated = state.db.getItem(params.id);
+    state.hub.broadcast("item.updated", updated);
+    json(res, 200, updated);
   });
 
   on("POST", "/api/items/:id/snooze", (req, res, { body, params }) => {
     const until = Number((body as { until_ms?: number })?.until_ms ?? Date.now() + 3600_000);
     state.db.snoozeItem(params.id, until);
     state.db.recordMetric("item.snoozed", params.id, { until_ms: until });
-    state.hub.broadcast("item.updated", state.db.getItem(params.id));
-    json(res, 200, state.db.getItem(params.id));
+    const updated = state.db.getItem(params.id);
+    state.hub.broadcast("item.updated", updated);
+    json(res, 200, updated);
   });
 
   on("GET", "/api/progression", (_req, res) => json(res, 200, state.db.progression()));
@@ -524,7 +543,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const now = Date.now();
     const task: Task = {
       id: randomUUID(),
-      // Empty title = adopt omnigent's session title once dispatched.
+      // Empty title = derived from the prompt below (ensureTaskTitle).
       title: b.title?.trim() || (kind === "review" ? `Review ${prUrl}` : ""),
       prompt: b.prompt ?? "",
       kind,
@@ -559,8 +578,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       pr: task.pr_url,
       attachments: attached.files.length || undefined,
     });
-    state.hub.broadcast("task.updated", task);
-    json(res, 200, task);
+    // Untitled: a short title now, a better one from the assistant later.
+    void ensureTaskTitle(state.db, state.hub, task.id, titleCompleter(state));
+    const created = state.db.getTask(task.id) ?? task;
+    state.hub.broadcast("task.updated", created);
+    json(res, 200, created);
   }, MAX_TASK_BODY_BYTES);
 
   on("GET", "/api/tasks/:id/attachments", (_req, res, { params }) => {
@@ -573,6 +595,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!task) return json(res, 404, { error: "task not found" });
     let patch: Partial<Task>;
     try {
+      const epicFavoriteName = task.epic_id ? state.db.getEpic(task.epic_id)?.favorite_name ?? null : null;
       patch = resolveTaskPatch(
         task,
         body ?? {},
@@ -580,6 +603,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         state.cfg.favorites ?? [],
         state.cfg.reviewers ?? [],
         Object.keys(state.cfg.agents ?? {}),
+        epicFavoriteName,
       );
     } catch (err) {
       return epicRequestFailure(res, err);
@@ -600,6 +624,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       state.hub.broadcast("epic.updated", state.db.getEpic(updated.epic_id));
     }
     if (status === "done" || status === "archived") {
+      const address = updated.terminal_address ?? task.terminal_address;
+      if (address) state.capture?.cancelStoppedRetries?.(address);
       await cleanupFinishedTask(state.db, state.backend, task.id, { hub: state.hub, reason: `status-${status}` });
     }
     json(res, 200, state.db.getTask(task.id));
@@ -655,6 +681,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!task) return json(res, 404, { error: "task not found" });
     if (task.status !== "dispatched" || !task.terminal_address) return json(res, 400, { error: "task has no active session" });
     if (!state.backend.archive) return json(res, 501, { error: "this backend cannot archive sessions" });
+    state.capture?.beginArchiving?.(task.terminal_address);
     try {
       await state.backend.archive(task.terminal_address);
       state.db.updateTask(task.id, { status: "archived" });
@@ -663,6 +690,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       json(res, 200, state.db.getTask(task.id));
     } catch (err) {
       json(res, 500, { error: String(err) });
+    } finally {
+      state.capture?.endArchiving?.(task.terminal_address);
     }
   });
 
@@ -696,24 +725,51 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       agent?: string | null;
       review?: string | null;
     };
-    const target = b.target ?? task.target;
-    if (!target) return json(res, 400, { error: "target required (claude|codex|opencode)" });
+    const epic = task.epic_id ? state.db.getEpic(task.epic_id) : null;
+    const epicFavorite = epic && task.repo_path?.trim()
+      ? resolveEpicFavorite(epic, task.repo_path, state.cfg.favorites ?? [], state.db.listRepos())
+      : null;
+    const useEpicFallback = b.target === undefined && !task.target && Boolean(epicFavorite);
+    const target = b.target ?? (task.target || epicFavorite?.harness || "");
+    if (!target) {
+      if (epic?.favorite_name?.trim() && task.repo_path?.trim()) {
+        return json(res, 400, { error: `epic favorite "${epic.favorite_name}" is not configured for this task's repository — pick a harness or assign a compatible favorite` });
+      }
+      return json(res, 400, { error: "target required (claude|codex|opencode)" });
+    }
     if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — assign one before dispatching" });
-    const agent = b.agent === undefined ? task.agent ?? null : b.agent;
-    // A delegate reviewer needs the claude harness and no explicit agent: say so
-    // as a bad request, not as a failed dispatch.
-    if (b.review && task.kind !== "review" && task.kind !== "spec") {
-      const reviewer = (state.cfg.reviewers ?? []).find((r) => r.name === b.review);
-      const conflict = reviewer ? delegateConflict(reviewer, target, agent) : null;
-      if (conflict) return json(res, 400, { error: conflict });
+    const agent = b.agent !== undefined ? b.agent : (task.agent ?? (useEpicFallback ? epicFavorite!.agent || null : null));
+    const model = b.model !== undefined ? b.model : (task.model ?? (useEpicFallback ? epicFavorite!.model || null : null));
+    const reasoning = b.reasoning !== undefined ? b.reasoning : (task.reasoning ?? (useEpicFallback ? epicFavorite!.reasoning || null : null));
+    const reviewers = state.cfg.reviewers ?? [];
+    let review: string | null = null;
+    if (b.review !== undefined) {
+      review = b.review;
+      // A delegate reviewer needs the claude harness and no explicit agent: say so
+      // as a bad request, not as a failed dispatch.
+      if (review && task.kind !== "review" && task.kind !== "spec") {
+        const reviewer = reviewers.find((r) => r.name === review);
+        const conflict = reviewer ? delegateConflict(reviewer, target, agent) : null;
+        if (conflict) return json(res, 400, { error: conflict });
+      }
+    } else if (useEpicFallback) {
+      review = epicFavorite!.review || null;
+      if (review && task.kind !== "review" && task.kind !== "spec") {
+        const reviewer = reviewers.find((r) => r.name === review);
+        const conflict = reviewer ? delegateConflict(reviewer, target, agent) : null;
+        if (conflict) return json(res, 400, { error: conflict });
+      }
+    } else {
+      const savedReviewer = reviewerBySummary(task.review, reviewers);
+      review = savedReviewer && !delegateConflict(savedReviewer, target, agent) ? savedReviewer.name : null;
     }
     try {
       const result = await dispatchTask(state.db, state.cfg, state.backend, task, target, {
         useWorktree: b.use_worktree,
-        model: b.model === undefined ? task.model : b.model,
-        reasoning: b.reasoning === undefined ? task.reasoning : b.reasoning,
+        model,
+        reasoning,
         agent,
-        review: b.review ?? null,
+        review,
         jira: state.jira ?? null,
       });
       state.hub.broadcast("task.updated", state.db.getTask(task.id));
@@ -808,7 +864,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (task.kind === "spec") return json(res, 400, { error: "spec tasks have no PR of their own" });
     if (task.kind === "grill") return json(res, 400, { error: "interview tasks have no PR of their own" });
     if (task.kind === "ops") return json(res, 400, { error: "ops tasks have no PR of their own" });
-    const hasPrItem = state.db.listItems({ kind: "pr" }).some((i) => i.task_id === task.id && i.status !== "archived");
+    const hasPrItem = Boolean(state.db.findPrItemForTask(task.id));
     if (!task.branch && !task.pr_url && !hasPrItem) return json(res, 400, { error: "task has no branch or PR URL (dispatch it first)" });
     const force = (body as { force?: unknown } | undefined)?.force === true;
     const report: { delivered: PrDelivery | null } = { delivered: null };
@@ -880,15 +936,21 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   // ---- sessions (live agent sessions) ----
   on("GET", "/api/sessions", async (_req, res) => {
-    const tasks = new Map(state.db.listTasks().map((t) => [t.id, t]));
     let sessions: Awaited<ReturnType<WorkerBackend["list"]>> = [];
     try {
       sessions = await withDeadline(state.backend.list(), BACKEND_LIST_MS, []);
     } catch {
       /* backend unreachable: report from the db alone */
     }
+    const terminalTaskByAddress = sessions.some((s) => !s.task_id)
+      ? new Map(state.db.listTerminals().map((t) => [t.address, t.task_id]))
+      : null;
+    const taskIds = sessions
+      .map((s) => s.task_id ?? terminalTaskByAddress?.get(s.address) ?? null)
+      .filter((id): id is string => Boolean(id));
+    const tasks = new Map(state.db.getTasksByIds(taskIds).map((t) => [t.id, t]));
     const out = sessions.map((s) => {
-      const taskId = s.task_id ?? state.db.getTerminal(s.address)?.task_id ?? null;
+      const taskId = s.task_id ?? terminalTaskByAddress?.get(s.address) ?? null;
       const task = taskId ? tasks.get(taskId) ?? null : null;
       return {
         address: s.address,
@@ -1054,23 +1116,40 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const epic = state.db.getEpic(id);
     if (!epic) return null;
     // The board data mirrors Jira: a prompt-created task stays on the Tasks page.
-    const tasks = state.db.listEpicTasks(id).filter((t) => t.jira_key), links = state.db.listEpicLinks(id);
-    const impacted = impactedTaskIds(state.db, id);
-    const views = epicViews(tasks, links, state.db.listItems()).map((v) => ({ ...v, impacted: impacted.has(v.task.id) }));
+    const allTasks = state.db.listEpicTasks(id);
+    const tasks = allTasks.filter((t) => t.jira_key), links = state.db.listEpicLinks(id);
+    const design = state.db.latestDesign(id);
+    const impacted = impactedTaskIds(state.db, id, { tasks: allTasks, latestVersion: design?.version ?? 1 });
+    const views = epicViews(tasks, links, state.db.listActivePrItems()).map((v) => ({ ...v, impacted: impacted.has(v.task.id) }));
     return {
       epic, tasks, links, views, summary: epicSummary(views),
-      design: state.db.latestDesign(id), design_versions: state.db.listDesigns(id).length,
+      design, design_versions: state.db.countDesigns(id),
       amendments: state.db.listAmendments(id, "proposed"),
-      agent: epicAgents.view(id),
+      agent: epicAgents.view(id, epic),
     };
   };
 
   on("GET", "/api/epics", (_req, res) => {
-    const items = state.db.listItems();
-    json(res, 200, state.db.listEpics().map((epic) => ({
+    const epics = state.db.listEpics();
+    const items = state.db.listActivePrItems();
+    const tasksByEpic = new Map<string, Task[]>();
+    for (const task of state.db.listAllEpicTasks()) {
+      if (!task.epic_id) continue;
+      const list = tasksByEpic.get(task.epic_id);
+      if (list) list.push(task);
+      else tasksByEpic.set(task.epic_id, [task]);
+    }
+    const linksByEpic = new Map<string, EpicLink[]>();
+    for (const link of state.db.listAllEpicLinks()) {
+      const list = linksByEpic.get(link.epic_id);
+      if (list) list.push(link);
+      else linksByEpic.set(link.epic_id, [link]);
+    }
+    const agentStates = epicAgents.runStates();
+    json(res, 200, epics.map((epic) => ({
       ...epic,
-      summary: epicSummary(epicViews(state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), items)),
-      agent_state: epicAgents.view(epic.id)?.runState ?? null,
+      summary: epicSummary(epicViews(tasksByEpic.get(epic.id) ?? [], linksByEpic.get(epic.id) ?? [], items)),
+      agent_state: agentStates.get(epic.id) ?? null,
     })));
   });
 
@@ -1102,11 +1181,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   const epicRequestSettings = (body: unknown): EpicRequestSettings => {
-    const b = (body ?? {}) as { favorite_name?: unknown; repo_path?: unknown };
-    if (b.favorite_name !== undefined && typeof b.favorite_name !== "string") throw new EpicRequestError("favorite_name must be a string");
+    const b = (body ?? {}) as { favorite_name?: unknown; favorite?: unknown; repo_path?: unknown };
+    const rawFav = b.favorite_name !== undefined ? b.favorite_name : b.favorite;
+    if (rawFav !== undefined && typeof rawFav !== "string") throw new EpicRequestError("favorite_name must be a string");
     if (b.repo_path !== undefined && typeof b.repo_path !== "string") throw new EpicRequestError("repo_path must be a string");
     const out: EpicRequestSettings = {};
-    if (b.favorite_name !== undefined) out.favorite_name = b.favorite_name;
+    if (rawFav !== undefined) out.favorite_name = rawFav;
     if (b.repo_path !== undefined) out.repo_path = b.repo_path;
     return out;
   };
@@ -1121,25 +1201,67 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   const epicRequestFailure = (res: ServerResponse, err: unknown) =>
     json(res, err instanceof EpicRequestError ? err.status : 500, { error: String(err instanceof Error ? err.message : err) });
 
-  // The selectors are saved as soon as they change, so the next request on
-  // this epic starts from the same favorite and folder.
+  // Assigning a favorite on an epic saves it as the epic's default and updates
+  // compatible open, unstarted epic tasks to run with its conf.
   on("PATCH", "/api/epics/:id", (_req, res, { params, body }) => {
     const epic = state.db.getEpic(params.id);
     if (!epic) return json(res, 404, { error: "epic not found" });
     try {
       const input = epicRequestSettings(body);
-      const available = (state.cfg.favorites ?? []).filter((f) =>
-        (f.context ?? "professional") === (state.db.listRepos().find((r) => r.path === (input.repo_path ?? epic.repo_path))?.context ?? "professional"));
-      const storedFavorite = available.some((f) => f.name === (input.favorite_name ?? epic.favorite_name))
-        ? input.favorite_name ?? epic.favorite_name ?? ""
-        : "";
-      saveEpicRequestSettings(state.db, epic, {
-        favorite_name: storedFavorite,
-        repo_path: input.repo_path ?? epic.repo_path ?? "",
-      }, state.cfg.favorites ?? []);
+      const repos = state.db.listRepos();
+      const favorites = state.cfg.favorites ?? [];
+      const reviewers = state.cfg.reviewers ?? [];
+      const nextRepoPath = input.repo_path !== undefined ? input.repo_path.trim() : (epic.repo_path ?? "");
+      let appliedTasks: Task[] = [];
+      if (input.favorite_name !== undefined) {
+        saveEpicRequestSettings(state.db, epic, {
+          favorite_name: input.favorite_name,
+          repo_path: nextRepoPath,
+        }, favorites);
+        if (input.favorite_name.trim()) {
+          const updatedEpic = state.db.getEpic(epic.id)!;
+          const savedFav = resolveEpicFavorite(updatedEpic, nextRepoPath, favorites, repos);
+          if (savedFav) {
+            appliedTasks = applyEpicFavoriteToOpenTasks(state.db, epic.id, savedFav, favorites, repos, reviewers);
+            for (const t of appliedTasks) state.hub.broadcast("task.updated", t);
+          }
+        }
+      } else {
+        const savedName = epic.favorite_name ?? "";
+        const compatible = !savedName
+          ? ""
+          : nextRepoPath
+            ? (favoriteForPath(savedName, nextRepoPath, favorites, repos)?.name ?? "")
+            : (favorites.some((f) => f.name === savedName) ? savedName : "");
+        saveEpicRequestSettings(state.db, epic, {
+          favorite_name: compatible,
+          repo_path: nextRepoPath,
+        }, favorites);
+      }
       state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));
-      json(res, 200, epicDetail(epic.id));
+      json(res, 200, { ...epicDetail(epic.id)!, applied_tasks: appliedTasks.length });
     } catch (err) { epicRequestFailure(res, err); }
+  });
+
+  on("DELETE", "/api/epics/:id", (_req, res, { params }) => {
+    const epic = state.db.getEpic(params.id);
+    if (!epic) return json(res, 404, { error: "epic not found" });
+    const { archivedItemIds, detachedTaskIds } = state.db.deleteEpic(epic.id);
+    state.db.recordMetric("epic.deleted", epic.id, {
+      key: epic.jira_key,
+      detached_tasks: detachedTaskIds.length,
+      archived_items: archivedItemIds.length,
+    });
+    for (const itemId of archivedItemIds) {
+      const item = state.db.getItem(itemId);
+      if (item) state.hub.broadcast("item.updated", item);
+    }
+    for (const taskId of detachedTaskIds) {
+      const task = state.db.getTask(taskId);
+      if (task) state.hub.broadcast("task.updated", task);
+    }
+    state.hub.broadcast("epic.deleted", { id: epic.id, jira_key: epic.jira_key });
+    json(res, 200, { ok: true });
   });
 
   // One free-form field on the Epic page: every kind of request becomes a
@@ -1209,18 +1331,48 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       return json(res, 409, { error: "only Jira tickets can be launched from the epic; dispatch this task from the Tasks page" });
     }
     const view = epicViews(
-      state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), state.db.listItems(),
+      state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), state.db.listActivePrItems(),
     ).find((v) => v.task.id === params.taskId);
     if (!view) return json(res, 404, { error: "task not in epic" });
     if (view.state !== "ready") return json(res, 409, { error: `task is ${view.state}, only ready tasks can be launched` });
     const task = view.task;
-    if (!task.target) return json(res, 400, { error: "task has no harness — set one on the task before launching" });
     if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — set one on the task before launching" });
+    const reviewers = state.cfg.reviewers ?? [];
+    const epicFavorite = resolveEpicFavorite(epic, task.repo_path, state.cfg.favorites ?? [], state.db.listRepos());
+    let effectiveTarget = task.target;
+    let effectiveAgent = task.agent ?? null;
+    let effectiveModel = task.model ?? null;
+    let effectiveReasoning = task.reasoning ?? null;
+    let effectiveReview: string | null = null;
+    if (effectiveTarget) {
+      const savedReviewer = reviewerBySummary(task.review, reviewers);
+      effectiveReview = savedReviewer && !delegateConflict(savedReviewer, effectiveTarget, effectiveAgent) ? savedReviewer.name : null;
+    } else if (epicFavorite) {
+      effectiveTarget = epicFavorite.harness;
+      effectiveAgent = task.agent ?? (epicFavorite.agent || null);
+      effectiveModel = task.model ?? (epicFavorite.model || null);
+      effectiveReasoning = task.reasoning ?? (epicFavorite.reasoning || null);
+      const favReviewer = epicFavorite.review
+        ? reviewers.find((r) => r.name === epicFavorite.review) ?? null
+        : reviewerBySummary(task.review, reviewers);
+      if (favReviewer) {
+        const conflict = delegateConflict(favReviewer, effectiveTarget, effectiveAgent);
+        if (conflict) return json(res, 400, { error: conflict });
+        effectiveReview = favReviewer.name;
+      }
+    } else if (epic.favorite_name?.trim()) {
+      return json(res, 400, { error: `epic favorite "${epic.favorite_name}" is not configured for this task's repository — configure the task or assign a compatible favorite` });
+    } else {
+      return json(res, 400, { error: "task has no harness — set one on the task before launching" });
+    }
     stackEpicTaskOnPrerequisite(state.db, state.hub, view);
     try {
       const result = await dispatchTask(
-        state.db, state.cfg, state.backend, state.db.getTask(task.id)!, task.target, {
-          agent: task.agent ?? null,
+        state.db, state.cfg, state.backend, state.db.getTask(task.id)!, effectiveTarget, {
+          agent: effectiveAgent,
+          model: effectiveModel,
+          reasoning: effectiveReasoning,
+          review: effectiveReview,
           jira: state.jira ?? null,
         },
       );
@@ -1459,7 +1611,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       { ...buildReport({
         records: scanner.records(),
         tasks,
-        prices: { ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
+        worktrees: state.db.listTaskWorktrees(),
+        prices:{ ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) },
         range: raw as UsageRange,
         scanning: scanner.scanning,
       }), pr_additions: prAdditions },
