@@ -93,14 +93,18 @@ What each one is for:
   sub-agent (`ocr_claude` or `ocr_codex`) in the same working directory, ends its
   turn, and is woken when the sub-agent answers. Two rounds max (a new title per
   round), the outcome goes in the PR body, and it must never run `ocr` itself.
-- **`ocr-delegate.md`** — what the review sub-agent does: `ocr delegate preview`
-  twice (a range for committed changes, none for uncommitted ones), `ocr delegate
-  rule`, read each diff, adversarially verify candidate findings against
-  surrounding callers/types/tests, then answer with one JSON object
-  `{findings, coverage}`. Read-only: it never edits, commits or pushes. The text
-  is hashed into the name of the registered omnigent agent, so editing it
-  registers a new agent at the next dispatch instead of running the old one; the
-  old agent stays in the registry.
+- **`ocr-delegate.md`** — what the review sub-agent does: resolve `<base>` to
+  `origin/<base>` when it exists (avoiding a stale local branch), run
+  `ocr delegate preview` twice (a range for committed changes, none for
+  uncommitted ones), run `ocr delegate rule` on `reviewable_files` (skipping
+  when empty), include changed Markdown and other plain-text docs that `ocr`
+  marks `unsupported_ext` (while keeping binary, generated, and `default_path`
+  exclusions in `skipped_files`), read each diff, adversarially verify
+  candidate findings against surrounding callers/types/tests/docs, then answer
+  with one JSON object `{findings, coverage}`. Read-only: it never edits,
+  commits or pushes. The text is hashed into the name of the registered omnigent
+  agent, so editing it registers a new agent at the next dispatch instead of
+  running the old one; the old agent stays in the registry.
 - **`review.md`** — reviewing someone else's PR/MR on any harness: read-only,
   follow `fabien-reviewer` by name or from its skill file when the harness does
   not list it, adversarially verify every candidate finding against surrounding
@@ -208,7 +212,7 @@ substituted — see `llmComplete()` in `server/llm.ts`).
 | `{pr_url}` | the task's PR/MR URL (empty for a code task without one) | every convention |
 | `{review_command}` | the reviewer command, `{base_branch}` already resolved | `skills/pre-pr-review.md` |
 | `{review_agent}` | the delegate reviewer's sub-agent name (`ocr_claude` or `ocr_codex`) | `skills/pre-pr-delegate-review.md` |
-| `{base_branch}` | the task's base branch, else the remote default branch name (empty when there is no remote) | `reviewers[].command`, `skills/pre-pr-delegate-review.md` |
+| `{base_branch}` | the task's base branch, else the remote default branch name (empty when there is no remote); for `skills/pre-pr-delegate-review.md`, Corral qualifies it as `origin/<branch>` when that branch exists on `origin` | `reviewers[].command`, `skills/pre-pr-delegate-review.md` |
 | `{prompt}` | the prompt text | `assistant` argv |
 
 A convention left with an unsubstituted `{placeholder}` is a bug: the agent will

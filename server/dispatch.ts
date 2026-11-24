@@ -117,7 +117,7 @@ function readSkill(cfg: Config, name: string, fallback: string): string {
 
 const OCR_DELEGATE_FALLBACK = [
   "You are a read-only reviewer: never edit a file, commit or push.",
-  "Run `ocr delegate preview` and `ocr delegate rule`, read the diffs, then reply with one JSON object",
+  "Resolve `<base>` to `origin/<base>` when it exists, run `ocr delegate preview` (including changed Markdown/text docs marked `unsupported_ext`) and `ocr delegate rule` for reviewable files, read the diffs, then reply with one JSON object",
   '`{"findings": [{"path", "start_line", "end_line", "severity", "category", "content"}], "coverage": {"total_files", "reviewed_files", "skipped_files"}}`.',
 ].join("\n");
 
@@ -216,9 +216,9 @@ async function worktreeBase(repo: string, base: string | null): Promise<string |
     const remoteRef = `refs/heads/${branch}`;
     const remoteBranch = await git("ls-remote", "--heads", "origin", remoteRef);
     if (remoteBranch.split("\n").some((line) => line.split("\t")[1] === remoteRef)) {
-      // Explicit fetch works even when the clone tracks only its default branch.
-      await git("fetch", "origin", remoteRef);
-      return commit("FETCH_HEAD");
+      // Explicit refspec fetch updates refs/remotes/origin/<branch> even in --single-branch clones.
+      await git("fetch", "origin", `+${remoteRef}:refs/remotes/origin/${branch}`);
+      return commit(`refs/remotes/origin/${branch}`);
     }
     return commit(base);
   }
@@ -239,6 +239,29 @@ async function defaultBranchName(repo: string): Promise<string | null> {
   await git("fetch", "origin");
   const remoteHead = await git("ls-remote", "--symref", "origin", "HEAD");
   return remoteHead.match(/^ref: refs\/heads\/(.+)\s+HEAD$/m)?.[1] ?? null;
+}
+
+/** Base ref for a delegate reviewer: prefers freshly fetched `origin/<branch>`
+ *  so a stale local branch is never diffed against. */
+async function delegateBaseRef(repo: string, pinnedBase: string | null): Promise<string> {
+  const git = async (...args: string[]) => (await execFileAsync("git", ["-C", repo, ...args], {
+    encoding: "utf8", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  })).stdout.trim();
+  const remotes = (await git("remote")).split("\n");
+  const pinned = pinnedBase?.trim() ?? "";
+  if (!remotes.includes("origin")) return pinned;
+  if (pinned) {
+    const branch = pinned.startsWith("origin/") ? pinned.slice("origin/".length) : pinned;
+    const remoteRef = `refs/heads/${branch}`;
+    const remoteBranch = await git("ls-remote", "--heads", "origin", remoteRef);
+    if (remoteBranch.split("\n").some((line) => line.split("\t")[1] === remoteRef)) {
+      await git("fetch", "origin", `+${remoteRef}:refs/remotes/origin/${branch}`);
+      return `origin/${branch}`;
+    }
+    return pinned;
+  }
+  const defaultBranch = await defaultBranchName(repo);
+  return defaultBranch ? `origin/${defaultBranch}` : "";
 }
 
 export interface DispatchResult {
@@ -323,17 +346,18 @@ export async function dispatchTask(
     if (!reviewer) throw new Error(`unknown reviewer: ${opts.review}`);
     const conflict = delegateConflict(reviewer, target, opts.agent);
     if (conflict) throw new Error(conflict);
-    const baseBranch = task.base_branch?.trim() || await defaultBranchName(task.repo_path);
     if (isDelegateReviewer(reviewer)) {
       // An analysis task never gets a review step (see questionConvention), so it
       // must not get an agent chosen for one either.
       if (!analysis) {
         const name = delegateAgentName(reviewer);
-        reviewAgent = { name, baseBranch: baseBranch ?? "" };
+        const baseRef = await delegateBaseRef(task.repo_path, task.base_branch);
+        reviewAgent = { name, baseBranch: baseRef };
         delegates = [{ name, harness: reviewer.delegate, prompt: readSkill(cfg, "ocr-delegate.md", OCR_DELEGATE_FALLBACK) }];
         frozenReview = reviewSummary(reviewer);
       }
     } else {
+      const baseBranch = task.base_branch?.trim() || await defaultBranchName(task.repo_path);
       reviewCommand = reviewer.command.replaceAll("{base_branch}", () => baseBranch ?? "");
       frozenReview = reviewCommand;
     }
