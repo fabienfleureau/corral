@@ -131,7 +131,11 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   configurable per repo in `.corral/triage.json`, [ADR 0019](adr/0019-pr-risk-triage-observe-only.md))
   highlights review depth without altering readiness or approvals. **Force
   refresh** re-checks one PR on demand. A merged PR completes its task and
-  archives its items (see the **Archived** tab).
+  archives its items (see the **Archived** tab). An agent's done report does
+  not complete a task whose PR is still open: the task stays in progress until
+  the PR merges or closes. The task row then shows how it ended: **PR merged**,
+  **PR closed**, or **reported** (done with no PR)
+  ([ADR 0022](adr/0022-task-outcome-and-keep-open.md)).
 - **Pull Requests page** — your own PRs/MRs, review requests, and colleagues' open
   PRs in repos where you can push, on GitHub and GitLab, grouped by repo and
   colored by readiness.
