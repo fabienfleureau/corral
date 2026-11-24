@@ -653,6 +653,11 @@ export class Db {
     return (row as unknown as Item) ?? null;
   }
 
+  latestQuestionItemForTerminal(address: string): Item | null {
+    const row = this.stmt(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' ORDER BY created_ms DESC LIMIT 1`).get(address);
+    return (row as unknown as Item) ?? null;
+  }
+
   // ---- repos ----
 
   insertRepo(r: Repo): void {

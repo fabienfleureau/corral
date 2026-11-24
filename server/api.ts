@@ -426,6 +426,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const item = state.db.getItem(params.id);
     if (!item) return json(res, 404, { error: "item not found" });
     state.db.updateItem(params.id, { status: "resolved", resolved_ms: Date.now(), snooze_until_ms: null });
+    const address = item.source_ref ?? (item.task_id ? state.db.getTask(item.task_id)?.terminal_address ?? null : null);
+    if (address) state.capture?.cancelStoppedRetries?.(address);
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.resolved", params.id, { how: "manual" });
     state.hub.broadcast("item.updated", state.db.getItem(params.id));
@@ -433,7 +435,10 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   });
 
   on("POST", "/api/items/:id/archive", (_req, res, { params }) => {
+    const existing = state.db.getItem(params.id);
     state.db.updateItem(params.id, { status: "archived", snooze_until_ms: null });
+    const address = existing?.source_ref ?? (existing?.task_id ? state.db.getTask(existing.task_id)?.terminal_address ?? null : null);
+    if (address) state.capture?.cancelStoppedRetries?.(address);
     state.hub.broadcast("item.updated", state.db.getItem(params.id));
     json(res, 200, state.db.getItem(params.id));
   });
@@ -600,6 +605,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       state.hub.broadcast("epic.updated", state.db.getEpic(updated.epic_id));
     }
     if (status === "done" || status === "archived") {
+      const address = updated.terminal_address ?? task.terminal_address;
+      if (address) state.capture?.cancelStoppedRetries?.(address);
       await cleanupFinishedTask(state.db, state.backend, task.id, { hub: state.hub, reason: `status-${status}` });
     }
     json(res, 200, state.db.getTask(task.id));
@@ -655,6 +662,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (!task) return json(res, 404, { error: "task not found" });
     if (task.status !== "dispatched" || !task.terminal_address) return json(res, 400, { error: "task has no active session" });
     if (!state.backend.archive) return json(res, 501, { error: "this backend cannot archive sessions" });
+    state.capture?.beginArchiving?.(task.terminal_address);
     try {
       await state.backend.archive(task.terminal_address);
       state.db.updateTask(task.id, { status: "archived" });
@@ -663,6 +671,8 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       json(res, 200, state.db.getTask(task.id));
     } catch (err) {
       json(res, 500, { error: String(err) });
+    } finally {
+      state.capture?.endArchiving?.(task.terminal_address);
     }
   });
 
