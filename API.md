@@ -60,6 +60,7 @@ type Item = {
   handling: number;            // pr items: 1 = the agent has the PR work in flight
   created_ms: number; updated_ms: number;
   resolved_ms: number | null; snooze_until_ms: number | null;
+  snooze_count: number;         // times the human snoozed it; 2+ shows "snoozed N×" and sorts first
 };
 
 ```
@@ -94,7 +95,7 @@ A failed cycle leaves the previous report available.
 - `POST /api/items/:id/summarize` → `Item` — LLM summary of `body` into `summary` (async, may take ~10s)
 - `POST /api/items/:id/resolve` → `Item` — the inbox labels this action **Acknowledge**; the stored status stays `resolved`
 - `POST /api/items/:id/archive` → `Item`
-- `POST /api/items/:id/snooze` `{until_ms?}` → `Item` (default +1h)
+- `POST /api/items/:id/snooze` `{until_ms?}` → `Item` (default +1h); increments `snooze_count`
 - `POST /api/prs/sync` → `{ok, ran}` — starts a background re-check of every dispatched/done task with a known PR (throttled to once per 30s; `ran: false` when skipped). A merged PR completes the task and archives all its items, and records `merged_ms` and `merge_readiness` on the task once; a closed one resolves the PR item. Updates are broadcast as PRs are re-checked. Each successful check also stores the last observed state in the task's `pr_meta.pr` (`state`, `mergeable`, `checks`, unresolved `threads` ids/count, readiness `reasons`, `checked_ms`) without changing `updated_ms`; it is evidence for the improvement digest, not task activity.
 
 ### Tasks
@@ -172,7 +173,7 @@ a dispatch or a PR sync.
 - `GET /api/analysis-repo` → `{repo}`; `PUT /api/analysis-repo` `{repo}` persists the git repository used by analyses.
 - `GET /api/improvement` → schedule, last attempt/success, error and running state.
 - `PUT /api/improvement` `{intervalDays: 0|1|7|30}` → updated state; 0 disables automatic runs.
-- `POST /api/improvement/run` → a dispatched analysis task. The agent reports an inbox digest when finished. Concurrent launch requests share one run. The analysis sends bounded evidence to the agent. By default: 60 recent task snapshots plus up to 60 tasks linked from items or task events (so older items keep their task), 300 items, 1500 events with their payloads, persisted PR snapshots (checks, mergeability, unresolved thread counts and gate reasons), merge time and readiness at merge per task (`merged_ms`, `merge_readiness`, with a `merges` count of merges whose last open snapshot was not ready) and API-equivalent usage cost/token attribution per task from local agent logs. It also includes derived `data_quality` flags (untitled tasks, done tasks without a PR, repeated dispatches, items resolved without a timestamp, duplicate PR items, orphan/malformed task ids, open PR items) and an explicit `gaps` list; caps are reported in `limits`/`truncated`. Production outcomes and review-thread bodies are still not recorded. Scheduled runs catch up after restart and failed runs retry after one hour.
+- `POST /api/improvement/run` → a dispatched analysis task. The agent reports an inbox digest when finished. Concurrent launch requests share one run. The analysis sends bounded evidence to the agent. By default: 60 recent task snapshots plus up to 60 tasks linked from items or task events (so older items keep their task), 300 items, 1500 events with their payloads, persisted PR snapshots (checks, mergeability, unresolved thread counts and gate reasons), merge time and readiness at merge per task (`merged_ms`, `merge_readiness`, with a `merges` count of merges whose last open snapshot was not ready) and API-equivalent usage cost/token attribution per task from local agent logs. It also includes derived `data_quality` flags (untitled tasks, done tasks without a PR, repeated dispatches, items resolved without a timestamp, duplicate PR items, orphan/malformed task ids, open PR items, items snoozed 2+ times) and an explicit `gaps` list; caps are reported in `limits`/`truncated`. Production outcomes and review-thread bodies are still not recorded. Scheduled runs catch up after restart and failed runs retry after one hour.
 
 ### Engineering skills analysis
 - `GET /api/engineering-skills` → analysis status with an independent schedule.

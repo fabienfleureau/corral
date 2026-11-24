@@ -10,7 +10,7 @@ import { Markdown } from "../markdown";
 import { ItemBody } from "../item-body";
 import { PlanView, type PlanStaleConflict } from "../PlanView";
 import { clearPlanDraft } from "../plan-draft";
-import { agentRunStatus, inProgressInboxItems, inProgressInboxTasks, isHandlingItem, openInboxItems, selectedInboxItem, taskLocation, type AgentRunStatus } from "../inbox-selection";
+import { agentRunStatus, inProgressInboxItems, inProgressInboxTasks, isHandlingItem, isRepeatSnoozed, openInboxItems, repeatSnoozedFirst, selectedInboxItem, taskLocation, type AgentRunStatus } from "../inbox-selection";
 import { INBOX_ACTION_COOLDOWN_MS, inboxActionsLocked } from "../inbox-action-lock";
 import { useVisibleInboxItems } from "../use-visible-inbox-items";
 import { inboxTitle, itemDisplayTitle } from "../inbox-title";
@@ -266,7 +266,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   }, [active]);
 
   const visibleItems = useVisibleInboxItems(allItems);
-  const snoozedItems = useVisibleInboxItems(allItems, "snoozed");
+  const snoozedVisible = useVisibleInboxItems(allItems, "snoozed");
+  const snoozedItems = useMemo(() => repeatSnoozedFirst(snoozedVisible), [snoozedVisible]);
   const inProgressItems = useMemo(() => inProgressInboxItems(allItems, tasks), [allItems, tasks]);
   const inProgressTasks = useMemo(
     () => inProgressInboxTasks(tasks, allItems, sessions, terminals),
@@ -542,7 +543,11 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                       {timeAgo(item.created_ms)}
                     </span>
                     {needsYou ? <span className="badge badge-urgent">needs you</span> : null}
-                    {snoozed ? <span className="badge badge-snoozed">snoozed</span> : null}
+                    {isRepeatSnoozed(item) ? (
+                      <span className="badge badge-snoozed" title="Snoozed again and again: decide, delegate or archive it">
+                        snoozed {item.snooze_count}×
+                      </span>
+                    ) : snoozed ? <span className="badge badge-snoozed">snoozed</span> : null}
                     <JiraPill jiraKey={rowTask?.jira_key} jiraUrl={rowTask?.jira_url} />
                     {rowPr ? (
                       <a

@@ -470,7 +470,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   on("POST", "/api/items/:id/snooze", (req, res, { body, params }) => {
     const until = Number((body as { until_ms?: number })?.until_ms ?? Date.now() + 3600_000);
-    state.db.updateItem(params.id, { snooze_until_ms: until });
+    state.db.snoozeItem(params.id, until);
     state.db.recordMetric("item.snoozed", params.id, { until_ms: until });
     const updated = state.db.getItem(params.id);
     state.hub.broadcast("item.updated", updated);

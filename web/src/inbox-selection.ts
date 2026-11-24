@@ -21,9 +21,22 @@ export function visibleInboxItems(items: Item[], now: number, view: "visible" | 
   return items.filter((item) => item.status !== "open" || item.snooze_until_ms === null || item.snooze_until_ms <= now);
 }
 
-/** Open items that ask the human for something — the agent is not on them. */
+/** Snoozed this many times, an item is flagged as being put off. */
+export const REPEAT_SNOOZE_THRESHOLD = 2;
+
+export function isRepeatSnoozed(item: Item): boolean {
+  return (item.snooze_count ?? 0) >= REPEAT_SNOOZE_THRESHOLD;
+}
+
+/** Repeatedly snoozed items first, otherwise the order is kept. */
+export function repeatSnoozedFirst(items: Item[]): Item[] {
+  return [...items.filter(isRepeatSnoozed), ...items.filter((item) => !isRepeatSnoozed(item))];
+}
+
+/** Open items that ask the human for something — the agent is not on them.
+ *  Items the human keeps snoozing come first so they get a decision. */
 export function openInboxItems(items: Item[]): Item[] {
-  return items.filter((item) => item.status === "open" && !isHandlingItem(item));
+  return repeatSnoozedFirst(items.filter((item) => item.status === "open" && !isHandlingItem(item)));
 }
 
 /** Items the agent is actively handling (e.g. PR review comments or rebase).

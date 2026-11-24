@@ -346,7 +346,7 @@ export function seedTaskHistory(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
 }
 
 /** Open inbox items: a ready PR, a PR still needing work, two questions — the
- *  last one from the Jira-imported task, so rows show ticket provenance. Plus,
+ *  first snoozed twice, the last one from the Jira-imported task, so rows show ticket provenance. Plus,
  *  for the in-progress view, a PR item the agent is handling (merge conflicts)
  *  whose task has already reported done. */
 export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
@@ -506,6 +506,9 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
     },
   ];
   for (const item of items) db.insertItem(item);
+  // A question put off twice already: the inbox flags it and lists it first.
+  db.snoozeItem("sample-question", now - 2 * 60 * 60_000);
+  db.snoozeItem("sample-question", now - 60 * 60_000);
 }
 
 /** Synthetic Claude session logs so the Usage page has chart data in captures. */

@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS items (
   resolved_ms INTEGER,
   snooze_until_ms INTEGER,
   elicitation TEXT,
-  triage TEXT
+  triage TEXT,
+  snooze_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_task ON items(task_id);
@@ -283,6 +284,11 @@ export class Db {
     if (!names.has("elicitation")) this.raw.exec(`ALTER TABLE items ADD COLUMN elicitation TEXT`);
     if (!names.has("handling")) this.raw.exec(`ALTER TABLE items ADD COLUMN handling INTEGER NOT NULL DEFAULT 0`);
     if (!names.has("triage")) this.raw.exec(`ALTER TABLE items ADD COLUMN triage TEXT`);
+    if (!names.has("snooze_count")) {
+      this.raw.exec(`ALTER TABLE items ADD COLUMN snooze_count INTEGER NOT NULL DEFAULT 0`);
+      // Snoozes before the column existed are in the metrics log.
+      this.raw.exec(`UPDATE items SET snooze_count = (SELECT COUNT(*) FROM metrics_events WHERE name = 'item.snoozed' AND ref = items.id)`);
+    }
     const taskCols = this.raw.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
     const taskNames = new Set(taskCols.map((c) => c.name));
     if (!taskNames.has("pr_url")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN pr_url TEXT`);
@@ -741,6 +747,11 @@ export class Db {
     const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
     const values = keys.map((k) => patch[k] as never);
     this.stmt(`UPDATE items SET ${sets}, updated_ms = ? WHERE id = ?`).run(...values, Date.now(), id);
+  }
+
+  /** Snooze an item and count it, so repeated snoozes can be flagged. */
+  snoozeItem(id: string, untilMs: number): void {
+    this.stmt(`UPDATE items SET snooze_until_ms = ?, snooze_count = snooze_count + 1, updated_ms = ? WHERE id = ?`).run(untilMs, Date.now(), id);
   }
 
   getItem(id: string): Item | null {

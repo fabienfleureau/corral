@@ -45,7 +45,7 @@ disabled and the agent backend points to an unavailable local address. It seeds
 synthetic open, dispatched, and done tasks with pinned and default model settings
 (one open task tagged as a probable repeat of a done one, one retrying an archived task),
 plus a professional and a personal repo, favorites in both contexts, open
-inbox items (a ready PR, a PR needing work, a question), a Jira-imported
+inbox items (a ready PR, a PR needing work, a question snoozed twice), a Jira-imported
 task carrying its ticket link with an open question on it, so the inbox shows
 ticket provenance, a dispatched task whose prompt quotes a local Markdown path,
 and a Pull Requests listing (the human's own PR, a requested review,

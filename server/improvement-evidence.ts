@@ -104,6 +104,8 @@ export interface EvidenceItem {
   resolved_ms: number | null;
   waited_ms: number | null;
   first_reply_ms: number | null;
+  /** Lifetime snoozes, not limited to the evidence window. */
+  snooze_count: number;
   events: Record<string, { count: number; first_ms: number; last_ms: number }>;
   flags: string[];
 }
@@ -143,6 +145,8 @@ export interface ImprovementEvidence {
     multiple_resolution_events: { item_id: string; count: number; first_ms: number; last_ms: number }[];
     duplicate_pr_items: { task_id: string; item_ids: string[] }[];
     open_pr_items: { item_id: string; task_id: string | null; age_ms: number }[];
+    /** Items snoozed 2+ times: the human keeps putting them off. */
+    repeatedly_snoozed_items: { count: number; items: { item_id: string; kind: string; status: string; snoozes: number; age_ms: number }[] };
     items_outside_task_window: number;
   };
   usage: UsageEvidence | null;
@@ -159,6 +163,8 @@ export interface ImprovementEvidenceOptions {
 }
 
 const EVENT_DATA_CHARS = 400;
+/** Same threshold as the inbox badge (web/src/inbox-selection.ts). */
+const REPEAT_SNOOZES = 2;
 
 /** Event payloads are the useful part (dispatch model/address, done reason),
  *  but some carry long text. Keep small payloads intact and clip the rest. */
@@ -385,6 +391,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     }
     if ((agg?.get("item.resolved")?.count ?? 0) > 1) flags.push("multiple_resolution_events");
     if (item.status === "archived" && item.resolved_ms === null) flags.push("archived_without_resolution");
+    if ((item.snooze_count ?? 0) >= REPEAT_SNOOZES) flags.push("snoozed_repeatedly");
     const resolvedAt = item.resolved_ms ?? (item.status === "resolved" || item.status === "archived" ? agg?.get("item.resolved")?.last_ms ?? null : null);
     return {
       id: item.id,
@@ -400,6 +407,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       resolved_ms: item.resolved_ms,
       waited_ms: resolvedAt !== null ? resolvedAt - item.created_ms : null,
       first_reply_ms: agg?.get("item.replied")?.first_ms ?? null,
+      snooze_count: item.snooze_count ?? 0,
       events,
       flags,
     };
@@ -415,6 +423,9 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     .filter((i) => i.flags.includes("multiple_resolution_events"))
     .map((i) => ({ item_id: i.id, count: i.events.resolved?.count ?? 0, first_ms: i.events.resolved?.first_ms ?? 0, last_ms: i.events.resolved?.last_ms ?? 0 }));
 
+  const repeatedlySnoozed = evidenceItems
+    .filter((i) => i.flags.includes("snoozed_repeatedly"))
+    .map((i) => ({ item_id: i.id, kind: i.kind, status: i.status, snoozes: i.snooze_count, age_ms: now - i.created_ms }));
   const mergedTasks = evidenceTasks.filter((t) => t.merged_ms !== null);
   const notReadyMerges = mergedTasks.filter((t) => t.merge_readiness && !t.merge_readiness.ready);
 
@@ -476,6 +487,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       open_pr_items: evidenceItems
         .filter((i) => i.kind === "pr" && i.status === "open")
         .map((i) => ({ item_id: i.id, task_id: i.task_id, age_ms: now - i.created_ms })),
+      repeatedly_snoozed_items: { count: repeatedlySnoozed.length, items: repeatedlySnoozed },
       items_outside_task_window: evidenceItems.filter((i) => i.flags.includes("outside_task_window")).length,
     },
     usage,
