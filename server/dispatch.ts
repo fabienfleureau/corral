@@ -18,6 +18,7 @@ import { contractBlock, isDirectory } from "./multi-repo.ts";
 import { epicContext } from "./epic-design.ts";
 import { delegateAgentName, delegateConflict, isDelegateReviewer, reviewSummary } from "./reviewers.ts";
 import { logTaskEvent, promptData } from "./task-events.ts";
+import { ensureTaskTitle } from "./task-title.ts";
 import type { WorkerBackend, WorkerDelegate, WorkerSession } from "./worker.ts";
 import { taskLabel, type Task } from "./types.ts";
 
@@ -290,6 +291,12 @@ export async function dispatchTask(
   if (!task.repo_path?.trim()) {
     throw new Error("task has no repo assigned — assign one before dispatching");
   }
+  // A task created untitled before titles were derived: name it now, so the
+  // branch, the session and every list show a title.
+  if (!task.title.trim() && task.prompt.trim()) {
+    void ensureTaskTitle(db, { broadcast() {} }, task.id);
+    task = db.getTask(task.id) ?? task;
+  }
   const spec = task.kind === "spec";
   const analysis = task.kind === "analysis";
   const ops = task.kind === "ops";
@@ -322,7 +329,7 @@ export async function dispatchTask(
   const originalBranch = task.branch ?? branchName(task);
   let branch = originalBranch;
 
-  // Untitled task: send no title so omnigent generates one; capture adopts it.
+  // Untitled task (no prompt either): send no title so omnigent generates one.
   const name = task.title.trim() ? `corral-${slugify(task.title, 24)}` : null;
   const taskContext = [...new Set([task.title.trim(), task.prompt.trim()].filter(Boolean))];
   if (task.jira_url) taskContext.push(`Jira: ${task.jira_url}`);

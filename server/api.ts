@@ -22,6 +22,7 @@ import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequi
 import { applyAmendment, impactedTaskIds, proposeAmendments, rejectAmendment, reviseDesign } from "./epic-design.ts";
 import { BlockConflict } from "./jira-blocks.ts";
 import { summarizeText, llmComplete } from "./llm.ts";
+import { ensureTaskTitle, type TitleCompleter } from "./task-title.ts";
 import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
@@ -84,6 +85,15 @@ export interface AppState {
   /** Model/reasoning per task session: finished sessions are read once. */
   sessionFacts?: SessionFacts;
   prAdditions?: PrAdditionsCache;
+  /** Names untitled tasks (see titleCompleter); null disables it. */
+  titleAssistant?: TitleCompleter | null;
+}
+
+/** The assistant call that names untitled tasks: injected in tests, null to
+ *  disable, else the configured assistant command when there is one. */
+function titleCompleter(state: AppState): TitleCompleter | null {
+  if (state.titleAssistant !== undefined) return state.titleAssistant;
+  return state.cfg.assistant?.[0] ? (prompt) => llmComplete(state.cfg, prompt, 60_000) : null;
 }
 
 /** A Jira issue as the import would create it, plus the fingerprint of those fields. */
@@ -524,7 +534,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const now = Date.now();
     const task: Task = {
       id: randomUUID(),
-      // Empty title = adopt omnigent's session title once dispatched.
+      // Empty title = derived from the prompt below (ensureTaskTitle).
       title: b.title?.trim() || (kind === "review" ? `Review ${prUrl}` : ""),
       prompt: b.prompt ?? "",
       kind,
@@ -559,8 +569,11 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       pr: task.pr_url,
       attachments: attached.files.length || undefined,
     });
-    state.hub.broadcast("task.updated", task);
-    json(res, 200, task);
+    // Untitled: a short title now, a better one from the assistant later.
+    void ensureTaskTitle(state.db, state.hub, task.id, titleCompleter(state));
+    const created = state.db.getTask(task.id) ?? task;
+    state.hub.broadcast("task.updated", created);
+    json(res, 200, created);
   }, MAX_TASK_BODY_BYTES);
 
   on("GET", "/api/tasks/:id/attachments", (_req, res, { params }) => {

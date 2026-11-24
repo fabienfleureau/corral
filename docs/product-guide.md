@@ -44,6 +44,10 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   [`ocr delegate`](https://github.com/alibaba/open-code-review) sub-agent on
   that harness, so a Claude task can be reviewed on the Codex quota and the other
   way round. Delegates need the Claude harness and no explicit agent.
+- **Task titles** — leave the title empty and Corral names the task from its
+  prompt: the first sentence, cut to about 60 characters, then a short title
+  from the `assistant` command when one is configured. A title you type is
+  never replaced.
 - **Prompt attachments** — drop files on the New task prompt, paste a screenshot
   or pick them: PNG, JPEG, GIF and WebP images, PDFs, and text or code files (up
   to 10 files, 25 MB). They are stored with the task and sent to the agent with

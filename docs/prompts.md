@@ -184,6 +184,7 @@ substituted — see `llmComplete()` in `server/llm.ts`).
 
 | Builder | Purpose | Rules it carries |
 |---|---|---|
+| `taskTitlePrompt()` — `server/task-title.ts` | a task created without a title (`POST /api/tasks`), after its derived title is stored | task description framed as data (first 4000 chars); reply is the title only, one line, ≤60 characters, imperative, no quotes; replaces the derived title only if nobody changed it meanwhile; any failure keeps the derived title |
 | `summarizeText()` — `server/llm.ts` | the inbox **Summarize** button on a raw captured output tail | one-sentence question + 2–4 sentences of context, no preamble, last 8000 chars of output |
 | `orchestrationPrompt()` — `server/epic-orchestration.ts` | on an epic orchestration request | asks for a reviewable plan using the current design, task states and blockers; makes no changes |
 | `amendmentPrompt()` — `server/epic-design.ts` | after an epic's design is revised: which unstarted tasks change and how | ticket text framed as data; reply is JSON only (`[{key, amendment}]`, `[]` when nothing changes); unknown keys and empty amendments are dropped; nothing is written to Jira until the human applies each one in the inbox |
