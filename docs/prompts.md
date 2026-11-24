@@ -9,7 +9,7 @@ Prompt families:
 |---|---|---|---|
 | **Agent conventions** | `skills/*.md` | the dispatched coding agent (Claude Code, Codex, …) | every dispatch, and every PR-loop respawn |
 | **PR-loop messages** | string builders in `server/pr.ts` | a live agent session, or a fresh respawn | when the PR loop has work for the agent |
-| **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts` | the `assistant` command | when the human clicks Summarize, or a digest runs |
+| **Corral's own LLM calls** | string builders in `server/llm.ts`, `server/improvement.ts`, `server/skills-analysis.ts`, `server/task-title.ts` | the `assistant` command | when the human clicks Summarize, a digest runs, or a task is created without a title |
 | **KPI analysis** | `kpiPrompt()` in `server/kpi.ts` | the Omnigent agent from the selected favorite | every manual or scheduled KPI cycle |
 | **KPI status artifacts** | `kpiArtifactPrompt()` in `server/kpi-artifact.ts` | a Claude `ops` task from a configured favorite | when the human builds an artifact from the KPI page |
 | **Epic autonomous agent** | `epicAgentPrompt()` in `server/epic-agent.ts` | the Omnigent agent from the epic's selected favorite | every manual or scheduled epic implementation cycle |
