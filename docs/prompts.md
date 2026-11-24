@@ -277,7 +277,9 @@ and the authenticated Corral task lifecycle endpoints (`POST /api/epics/:id/task
 `POST /api/tasks/:id/check-pr`, and `POST /api/epics/:id/sync`). It instructs
 the agent to autonomously discover implementation steps and drive unblocked epic
 work through real Corral tasks like a human — creating tasks in the right
-repository with the right agent without duplicating existing tasks, launching or
+repository with the right agent without duplicating existing tasks, configuring
+or assigning repo/favorite/target/agent on existing open tasks via
+`PATCH /api/tasks/:id`, launching or
 dispatching ready tasks so Corral and Jira statuses move forward, instructing
 running tasks, refreshing PRs, and updating task statuses instead of silently
 implementing epic tasks outside Corral. It also instructs the agent to report

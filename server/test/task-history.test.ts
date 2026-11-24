@@ -113,6 +113,7 @@ test("taskChanges covers the lifecycle fields a human wants to trace", () => {
     exit_code: 0, model: "opus", branch: "feat/x",
   });
   assert.equal(changes, 6, "status, jira, pr, exit code, model and branch");
+  assert.equal(logChangesFor(before, { repo_path: "/tmp/other", target: "codex" }), 2, "assigning repo and harness are history events");
   const withWorktree = makeTask({ worktree_path: "/tmp/wt" });
   assert.equal(logChangesFor(withWorktree, { worktree_path: null }), 1, "removing a worktree is an event");
 });
