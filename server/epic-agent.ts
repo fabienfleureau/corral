@@ -178,7 +178,7 @@ export function parseEpicAgentReport(message: string): EpicAgentReport {
 }
 
 export interface EpicPromptContext {
-  epic: Pick<Epic, "jira_key" | "title" | "description">;
+  epic: Pick<Epic, "jira_key" | "title" | "description" | "favorite_name">;
   design: { version: number; body: string } | null;
   jiraTickets?: {
     key: string;
@@ -230,7 +230,7 @@ export function epicAgentPrompt(ctx: EpicPromptContext): string {
         "Operating Corral tasks (act like a human using Corral):",
         "- Importing a Jira epic does NOT automatically create Corral tasks for its tickets. Whenever you work on an epic task (from `jiraTickets`, existing `tasks`, or a discovered step), ALWAYS operate through a real Corral task and move its status — never silently implement epic task code on the side outside Corral.",
         "- Before creating a task, check `tasks` in the data below and never create a duplicate for work (or a `jira_key`) that already has a Corral task.",
-        "- **Create a real Corral task** in the right repository with the right agent: pick `repo_path` from `repos` (registered repo path or name) or an absolute folder path, pick `favorite` (from `favorites`, matching the repository's `context`) or explicit `target` (from `harnesses`) and `agent`, and include `jira_key` when the task corresponds to one of `jiraTickets` so Corral links the ticket metadata, dependency graph and Jira status sync:",
+        "- **Create a real Corral task** in the right repository with the right agent: pick `repo_path` from `repos` (registered repo path or name) or an absolute folder path, pick `favorite` (from `favorites`, matching the repository's `context`) or explicit `target` (from `harnesses`) and `agent`, and include `jira_key` when the task corresponds to one of `jiraTickets` so Corral links the ticket metadata, dependency graph and Jira status sync. If `epic.favorite` is set, tasks created with both `favorite` and `target` omitted automatically inherit that favorite (use the epic's designated favorite unless a task requires a different repository context or conf):",
         `\`\`\`sh\ncurl -s -X POST "${ctx.corral.url}/api/epics/${ctx.corral.epicId}/tasks" \\\n  -H "Authorization: Bearer ${ctx.corral.token}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"title":"<short title>","prompt":"<clear, self-contained instructions>","repo_path":"<repo path or name>","favorite":"<favorite name>","jira_key":"<optional EX-101>"}'\n\`\`\``,
         "  (Optional fields: `target`, `agent`, `model`, `reasoning`, `kind` (`code` or `ops`), `base_branch`.)",
         "- **Configure / assign existing open tasks** (e.g. when an existing task in `tasks` has no `repo`, `target`, or `agent` set, or needs a different repository, favorite, harness, agent, model, reasoning, or `base_branch` before launch) — update it directly via `PATCH /api/tasks/<taskId>` instead of calling the create endpoint or asking a human to assign it:",
@@ -287,6 +287,7 @@ export function epicAgentPrompt(ctx: EpicPromptContext): string {
       epic: {
         key: ctx.epic.jira_key,
         title: ctx.epic.title,
+        favorite: ctx.epic.favorite_name ?? null,
         designVersion: ctx.design?.version ?? 1,
         design: (ctx.design?.body ?? ctx.epic.description).slice(0, 12_000),
       },

@@ -232,7 +232,7 @@ export const api = {
     return rows;
   },
   orchestrateEpic: (id: string, request: string): Promise<{ proposal: string }> => post(`/api/epics/${id}/orchestrate`, { request }),
-  patchEpicSettings: async (id: string, input: { favorite_name: string; repo_path: string }): Promise<EpicDetail> =>
+  patchEpicSettings: async (id: string, input: { favorite_name?: string; repo_path?: string }): Promise<EpicDetail> =>
     checkEpicDetail(await patch(`/api/epics/${id}`, input), "PATCH", `/api/epics/${id}`),
   createEpicRequest: (id: string, input: { request: string; favorite_name: string; repo_path: string; kind?: "code" | "ops" }): Promise<Task> =>
     post(`/api/epics/${id}/requests`, input),

@@ -5,18 +5,28 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { createRequire } from "node:module";
-import type { EpicTaskView } from "../../web/src/types.ts";
+import type { EpicTaskView, Favorite, Repo } from "../../web/src/types.ts";
 
 const bundle = await build({
-  stdin: { contents: `export { epicBoardGroups } from "./web/src/pages/Epics.tsx";`, resolveDir: process.cwd(), loader: "ts" },
+  stdin: { contents: `export { epicBoardGroups, epicTaskConf, favoriteConfSummary } from "./web/src/pages/Epics.tsx";`, resolveDir: process.cwd(), loader: "ts" },
   bundle: true,
   platform: "node",
   format: "cjs",
   write: false,
 });
-const mod = { exports: {} as { epicBoardGroups: (views: EpicTaskView[]) => { state: string; label: string; views: EpicTaskView[] }[] } };
+const mod = {
+  exports: {} as {
+    epicBoardGroups: (views: EpicTaskView[]) => { state: string; label: string; views: EpicTaskView[] }[];
+    favoriteConfSummary: (f: Pick<Favorite, "harness" | "agent" | "model" | "reasoning" | "review">) => string;
+    epicTaskConf: (
+      task: Pick<EpicTaskView["task"], "repo_path" | "target" | "agent" | "model" | "reasoning" | "review">,
+      epicFavorite: Favorite | null,
+      repos: Pick<Repo, "path" | "context">[],
+    ) => { target: string; agent: string | null; model: string | null; reasoning: string | null; review: string | null; inherited: boolean; favoriteName?: string } | null;
+  },
+};
 new Function("require", "module", "exports", bundle.outputFiles[0].text)(createRequire(import.meta.url), mod, mod.exports);
-const { epicBoardGroups } = mod.exports;
+const { epicBoardGroups, epicTaskConf, favoriteConfSummary } = mod.exports;
 
 const view = (id: string, state: EpicTaskView["state"]): EpicTaskView => ({
   task: { id, title: id, jira_key: id } as EpicTaskView["task"],
@@ -45,4 +55,33 @@ test("epicBoardGroups omits killed Jira tickets while keeping active and out gro
     ],
   );
   assert.ok(groups.every((g) => g.state !== "killed"));
+});
+
+test("favoriteConfSummary and epicTaskConf resolve explicit conf, inherited epic favorite, and context mismatches", () => {
+  const workFav: Favorite = { name: "Careful", harness: "claude", agent: "builder", model: "opus", reasoning: "high", context: "professional", review: "cubic" };
+  const bareFav: Favorite = { name: "Auto", harness: "codex", agent: "", model: "", reasoning: "", context: "professional", review: "" };
+  const repos: Pick<Repo, "path" | "context">[] = [
+    { path: "/work/app", context: null },
+    { path: "/home/side", context: "personal" },
+  ];
+
+  assert.equal(favoriteConfSummary(workFav), "claude · builder · opus · high · review: cubic");
+  assert.equal(favoriteConfSummary(bareFav), "codex · smart-route");
+
+  assert.deepEqual(
+    epicTaskConf({ repo_path: "/work/app", target: "", agent: null, model: null, reasoning: null, review: null }, workFav, repos),
+    { target: "claude", agent: "builder", model: "opus", reasoning: "high", review: "cubic", inherited: true, favoriteName: "Careful" },
+  );
+  assert.deepEqual(
+    epicTaskConf({ repo_path: "/work/app", target: "codex", agent: null, model: "gpt-6", reasoning: null, review: null }, workFav, repos),
+    { target: "codex", agent: null, model: "gpt-6", reasoning: null, review: null, inherited: false },
+  );
+  assert.equal(
+    epicTaskConf({ repo_path: "/home/side", target: "", agent: null, model: null, reasoning: null, review: null }, workFav, repos),
+    null,
+  );
+  assert.equal(
+    epicTaskConf({ repo_path: "/work/app", target: "", agent: null, model: null, reasoning: null, review: null }, null, repos),
+    null,
+  );
 });

@@ -413,6 +413,7 @@ export async function dispatchTask(
     status: "dispatched",
     target,
     target_state: "confirmed",
+    agent: opts.agent === undefined ? task.agent ?? null : opts.agent,
     model: opts.model === undefined ? task.model ?? null : opts.model,
     reasoning: opts.reasoning === undefined ? task.reasoning ?? null : opts.reasoning,
     branch: noBranch ? null : branch,

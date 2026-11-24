@@ -177,3 +177,54 @@ test("epic request: a favorite with a delegate reviewer shows the sub-agent, not
     db.close();
   }
 });
+
+test("epic favorite assignment updates compatible open tasks, validates favorite, and preserves dispatched/incompatible tasks", () => withApi(async (send, db) => {
+  const now = Date.now();
+  const baseTask = (id: string, over: Partial<Task> = {}): Task => ({
+    id, title: id, prompt: "do work", kind: "code", repo_path: work.path, target: "", target_state: "suggested",
+    agent: null, model: null, reasoning: null, review: null, base_branch: null, branch: null, worktree_path: null,
+    assignee: null, jira_key: id, jira_url: null, jira_parent_key: "E-1", jira_status: "To Do", pr_url: null,
+    pr_meta: null, status: "open", terminal_address: null, exit_code: null, created_ms: now, updated_ms: now,
+    epic_id: "e", ...over,
+  });
+  db.insertTask(baseTask("EX-1", { target: "codex", model: "old-model" }));
+  db.insertTask(baseTask("EX-2", { repo_path: "" }));
+  db.insertTask(baseTask("EX-3", { repo_path: home.path, target: "codex" }));
+  db.insertTask(baseTask("EX-4", { status: "dispatched", terminal_address: "sess-1", target: "codex" }));
+
+  // Assigning a personal favorite when the epic has no repo_path yet succeeds.
+  const personal = await send("PATCH", "/api/epics/e", { favorite: "Home" });
+  assert.equal(personal.status, 200, JSON.stringify(personal.body));
+  assert.equal(personal.body.epic.favorite_name, "Home");
+  assert.equal(personal.body.applied_tasks, 2, "updates EX-2 (empty repo) and EX-3 (personal repo)");
+  assert.equal(db.getTask("EX-3")!.target, "codex");
+  assert.equal(db.getTask("EX-2")!.target, "codex");
+  assert.equal(db.getTask("EX-1")!.target, "codex", "EX-1 (professional repo) was not overwritten by personal favorite");
+
+  // Unknown favorite returns 400.
+  const missing = await send("PATCH", "/api/epics/e", { favorite_name: "Missing" });
+  assert.equal(missing.status, 400);
+
+  // Assigning a professional favorite updates EX-1 and EX-2, leaving EX-3 (personal) and EX-4 (dispatched) alone.
+  const workFav = await send("PATCH", "/api/epics/e", { favorite_name: "Work" });
+  assert.equal(workFav.status, 200, JSON.stringify(workFav.body));
+  assert.equal(workFav.body.epic.favorite_name, "Work");
+  assert.equal(workFav.body.applied_tasks, 2);
+  for (const id of ["EX-1", "EX-2"]) {
+    const t = db.getTask(id)!;
+    assert.equal(t.target, "claude");
+    assert.equal(t.agent, "worker");
+    assert.equal(t.model, "opus");
+    assert.equal(t.reasoning, "high");
+    assert.equal(t.review, reviewSummary(reviewers[0]));
+  }
+  assert.equal(db.getTask("EX-3")!.target, "codex");
+  assert.equal(db.getTask("EX-4")!.target, "codex");
+
+  // Changing only repo_path without favorite_name does not modify open tasks.
+  db.updateTask("EX-1", { target: "codex", agent: null, model: null, reasoning: null, review: null });
+  const repoOnly = await send("PATCH", "/api/epics/e", { repo_path: work.path });
+  assert.equal(repoOnly.status, 200);
+  assert.equal(repoOnly.body.applied_tasks, 0);
+  assert.equal(db.getTask("EX-1")!.target, "codex");
+}));
