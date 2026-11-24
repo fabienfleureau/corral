@@ -126,6 +126,27 @@ test("improvement evidence: joins tasks outside the recent window and flags reco
   }
 });
 
+test("improvement evidence: items snoozed twice or more are counted", () => {
+  const db = new Db(":memory:");
+  try {
+    db.insertItem(item({ id: "i-twice", kind: "question", created_ms: NOW - 4 * DAY }));
+    db.insertItem(item({ id: "i-once", kind: "pr" }));
+    db.snoozeItem("i-twice", NOW + 3_600_000);
+    db.snoozeItem("i-twice", NOW + 7_200_000);
+    db.snoozeItem("i-once", NOW + 3_600_000);
+
+    const evidence = collectImprovementEvidence(db, { now: NOW });
+    assert.ok(evidence.items.find((i) => i.id === "i-twice")?.flags.includes("snoozed_repeatedly"));
+    assert.equal(evidence.items.find((i) => i.id === "i-once")?.snooze_count, 1);
+    assert.deepEqual(evidence.data_quality.repeatedly_snoozed_items, {
+      count: 1,
+      items: [{ item_id: "i-twice", kind: "question", status: "open", snoozes: 2, age_ms: 4 * DAY }],
+    });
+  } finally {
+    db.close();
+  }
+});
+
 test("improvement evidence: usage costs and the models actually used attach to tasks", () => {
   const db = new Db(":memory:");
   try {

@@ -89,7 +89,9 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
 - **Question inbox** — dispatched agents are given `skills/question-report.md`,
   which tells them to POST a clean question via `$CORRAL_URL/api/reports`. Structured
   question batches and permission requests are answered from the item. Acknowledge,
-  snooze (1h, 4h, tomorrow) and archive sit on top. Archiving a task from the
+  snooze (1h, 4h, tomorrow) and archive sit on top. An item snoozed twice or
+  more shows `snoozed N×` and sorts first in its list; nothing else happens
+  automatically ([ADR 0021](adr/0021-flag-repeatedly-snoozed-items.md)). Archiving a task from the
   inbox also archives its session in Omnigent when it has one; the session leaves
   its repository project, which Corral deletes once no live session remains in
   it (a renamed or configured project is kept). A run that stops without a

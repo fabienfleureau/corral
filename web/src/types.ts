@@ -62,6 +62,7 @@ export type Item = {
   updated_ms: number;
   resolved_ms: number | null;
   snooze_until_ms: number | null;
+  snooze_count?: number; // times the human snoozed it; 2+ is flagged and sorted first
 };
 
 export type SessionInfo = {

@@ -241,6 +241,8 @@ export interface Item {
   updated_ms: number;
   resolved_ms: number | null;
   snooze_until_ms: number | null;
+  /** How many times the human snoozed this item; 2+ is flagged in the inbox. */
+  snooze_count?: number;
 }
 
 export interface TrackedTerminal {
