@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
 import type { DailyActivity, Epic, EpicAmendment, EpicDesign, EpicLink, EpicTicket, Item, ItemKind, ItemStatus, MetricEvent, PlanReview, PlanReviewComment, PlanRevision, PlanSubtask, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
-import { logTaskChanges, type TaskEvent } from "./task-events.ts";
+import { logTaskChanges, TRACKED_TASK_FIELDS, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS kpi_monitors (
@@ -226,6 +226,8 @@ export class Db {
   constructor(path: string) {
     this.raw = new DatabaseSync(path);
     this.raw.exec("PRAGMA journal_mode = WAL;");
+    this.raw.exec("PRAGMA busy_timeout = 5000;");
+    this.raw.exec("PRAGMA temp_store = MEMORY;");
     this.raw.exec(SCHEMA);
     this.migrate();
   }
@@ -244,7 +246,7 @@ export class Db {
     return { xp, level, levelXp, nextLevelXp: level * 100, tasks, inbox };
   }
 
-  private stmt(sql: string): StatementSync {
+  stmt(sql: string): StatementSync {
     const cached = this.statements.get(sql);
     if (cached) return cached;
     const prepared = this.raw.prepare(sql);
@@ -301,12 +303,33 @@ export class Db {
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
     if (!taskNames.has("repeat_of")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN repeat_of TEXT`);
     if (!taskNames.has("retry_of")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN retry_of TEXT`);
+    if (!taskNames.has("merged_ms")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN merged_ms INTEGER`);
+    if (!taskNames.has("merge_readiness")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN merge_readiness TEXT`);
     const epicCols = this.raw.prepare("PRAGMA table_info(epics)").all() as { name: string }[];
     if (!epicCols.some((c) => c.name === "design_block_hash")) this.raw.exec(`ALTER TABLE epics ADD COLUMN design_block_hash TEXT`);
     if (!epicCols.some((c) => c.name === "favorite_name")) this.raw.exec(`ALTER TABLE epics ADD COLUMN favorite_name TEXT`);
     if (!epicCols.some((c) => c.name === "repo_path")) this.raw.exec(`ALTER TABLE epics ADD COLUMN repo_path TEXT NOT NULL DEFAULT ''`);
     const repoCols = this.raw.prepare("PRAGMA table_info(repos)").all() as { name: string }[];
     if (!repoCols.some((c) => c.name === "context")) this.raw.exec(`ALTER TABLE repos ADD COLUMN context TEXT`);
+    // Indexes covering hot queries and migrated columns (e.g. tasks.epic_id).
+    this.raw.exec(`
+      CREATE INDEX IF NOT EXISTS idx_tasks_jira_key ON tasks(jira_key);
+      CREATE INDEX IF NOT EXISTS idx_tasks_epic ON tasks(epic_id, jira_key, created_ms);
+      CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status, created_ms DESC);
+      CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_ms DESC);
+      CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_ms DESC);
+      CREATE INDEX IF NOT EXISTS idx_task_events_ts ON task_events(ts, id);
+      CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_ms DESC);
+      CREATE INDEX IF NOT EXISTS idx_items_status_created ON items(status, created_ms DESC);
+      CREATE INDEX IF NOT EXISTS idx_items_kind_status_created ON items(kind, status, created_ms DESC);
+      CREATE INDEX IF NOT EXISTS idx_items_task_kind_status_created ON items(task_id, kind, status, created_ms DESC);
+      CREATE INDEX IF NOT EXISTS idx_items_source_kind_status_created ON items(source_ref, kind, status, created_ms DESC);
+      CREATE INDEX IF NOT EXISTS idx_metrics_name_ref_id ON metrics_events(name, ref, id);
+      CREATE INDEX IF NOT EXISTS idx_metrics_name_id ON metrics_events(name, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics_events(ts);
+      CREATE INDEX IF NOT EXISTS idx_epic_amendments_item ON epic_amendments(item_id);
+      CREATE INDEX IF NOT EXISTS idx_kpi_measurements_history ON kpi_measurements(kpi_id, to_day DESC, from_day DESC);
+    `);
     // Task history arrived after tasks did: give every pre-existing task the one
     // event its row still knows the time of, so a history never starts blank.
     // Flagged as backfilled — the other events happened at unknown times.
@@ -353,28 +376,25 @@ export class Db {
   // ---- tasks ----
 
   insertTask(t: Task): void {
-    this.raw
-      .prepare(
-        `INSERT INTO tasks (id, title, prompt, repo_path, target, target_state, base_branch, branch,
-          worktree_path, assignee, jira_key, jira_url, jira_parent_key, jira_status, pr_url, pr_meta, handoff, status, terminal_address,
-          exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review, parent_task_id, spec, epic_id, repeat_of, retry_of)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        t.id, t.title, t.prompt, t.repo_path, t.target, t.target_state, t.base_branch, t.branch,
-        t.worktree_path, t.assignee, t.jira_key, t.jira_url, t.jira_parent_key, t.jira_status ?? null, t.pr_url, t.pr_meta ?? null,
-        t.handoff ?? null, t.status, t.terminal_address, t.exit_code, t.created_ms, t.updated_ms, t.model ?? null, t.reasoning ?? null, t.agent ?? null,
-        t.kind ?? "code", t.review ?? null, t.parent_task_id ?? null, t.spec ?? null, t.epic_id ?? null, t.repeat_of ?? null, t.retry_of ?? null,
-      );
+    this.stmt(
+      `INSERT INTO tasks (id, title, prompt, repo_path, target, target_state, base_branch, branch,
+        worktree_path, assignee, jira_key, jira_url, jira_parent_key, jira_status, pr_url, pr_meta, handoff, status, terminal_address,
+        exit_code, created_ms, updated_ms, model, reasoning, agent, kind, review, parent_task_id, spec, epic_id, repeat_of, retry_of)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      t.id, t.title, t.prompt, t.repo_path, t.target, t.target_state, t.base_branch, t.branch,
+      t.worktree_path, t.assignee, t.jira_key, t.jira_url, t.jira_parent_key, t.jira_status ?? null, t.pr_url, t.pr_meta ?? null,
+      t.handoff ?? null, t.status, t.terminal_address, t.exit_code, t.created_ms, t.updated_ms, t.model ?? null, t.reasoning ?? null, t.agent ?? null,
+      t.kind ?? "code", t.review ?? null, t.parent_task_id ?? null, t.spec ?? null, t.epic_id ?? null, t.repeat_of ?? null, t.retry_of ?? null,
+    );
   }
 
   updateTask(id: string, patch: Partial<Task>, touch = true): void {
     const keys = Object.keys(patch).filter((k) => k !== "id") as (keyof Task)[];
     if (keys.length === 0) return;
-    // Read before writing: the diff is what the task's history records, so
-    // every state change is logged wherever it comes from (an API edit, a
-    // dispatch, the Jira sync, the PR loop) without each caller remembering to.
-    const before = this.getTask(id);
+    // Read before writing only when a history-tracked field is patched; internal
+    // bookkeeping writes (like pr_meta snapshots) skip the extra SELECT.
+    const before = keys.some((k) => TRACKED_TASK_FIELDS.has(k)) ? this.getTask(id) : null;
     const sets = keys.map((k) => `${String(k)} = ?`).join(", ");
     const values = keys.map((k) => patch[k] as never);
     // Internal bookkeeping (a PR snapshot) must not make a stale task look
@@ -390,11 +410,12 @@ export class Db {
     this.raw.exec("BEGIN");
     try {
       this.insertTask(t);
+      const insertAttachment = this.stmt(
+        `INSERT INTO task_attachments (id, task_id, filename, content_type, bytes, data, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
       files.forEach((f, i) => {
-        this.raw
-          .prepare(`INSERT INTO task_attachments (id, task_id, filename, content_type, bytes, data, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-          // created_ms + index keeps the order the files were dropped in.
-          .run(randomUUID(), t.id, f.filename, f.content_type, f.data.length, f.data, t.created_ms + i);
+        // created_ms + index keeps the order the files were dropped in.
+        insertAttachment.run(randomUUID(), t.id, f.filename, f.content_type, f.data.length, f.data, t.created_ms + i);
       });
       this.raw.exec("COMMIT");
     } catch (err) {
@@ -457,6 +478,46 @@ export class Db {
       ) WHERE ended_ms >= ? ORDER BY ended_ms DESC`).all(since) as unknown as (Task & { ended_ms: number })[];
   }
 
+  /** Fetch a set of tasks by id without scanning the full table. */
+  getTasksByIds(ids: string[]): Task[] {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return [];
+    const out: Task[] = [];
+    // Variable-arity IN clauses bypass `this.stmt` so they never evict hot statements.
+    for (let i = 0; i < unique.length; i += 400) {
+      const chunk = unique.slice(i, i + 400);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const rows = this.raw.prepare(`SELECT * FROM tasks WHERE id IN (${placeholders})`).all(...chunk) as unknown as Task[];
+      out.push(...rows);
+    }
+    return out;
+  }
+
+  listPrCandidateTasks(): Task[] {
+    return this.stmt(
+      `SELECT * FROM tasks
+       WHERE status IN ('dispatched', 'done')
+         AND kind NOT IN ('review', 'spec', 'analysis', 'ops', 'grill')
+         AND branch IS NOT NULL AND branch != ''
+         AND repo_path != ''
+       ORDER BY created_ms DESC`,
+    ).all() as unknown as Task[];
+  }
+
+  listCleanupCandidateTasks(): Task[] {
+    return this.stmt(
+      `SELECT * FROM tasks
+       WHERE status IN ('done', 'archived')
+         AND worktree_path IS NOT NULL AND worktree_path != ''
+         AND terminal_address IS NOT NULL AND terminal_address != ''
+         AND NOT EXISTS (
+           SELECT 1 FROM items
+           WHERE items.task_id = tasks.id AND items.kind = 'pr' AND items.status = 'open'
+         )
+       ORDER BY created_ms DESC`,
+    ).all() as unknown as Task[];
+  }
+
   /** Events for tasks in registered professional repositories, in chronological order. */
   listDailyActivity(start: number, end: number): DailyActivity[] {
     return this.stmt(`SELECT e.*, t.title, t.prompt, r.name AS repo_name, r.path AS repo_path, t.jira_url, t.jira_key, t.pr_url, t.terminal_address
@@ -490,12 +551,57 @@ export class Db {
     return this.stmt(`SELECT * FROM epics ORDER BY created_ms DESC`).all() as unknown as Epic[];
   }
 
+  /** Remove an epic and its epic-owned records while preserving linked Corral tasks. */
+  deleteEpic(id: string): { deleted: boolean; archivedItemIds: string[]; detachedTaskIds: string[] } {
+    if (!this.getEpic(id)) return { deleted: false, archivedItemIds: [], detachedTaskIds: [] };
+    this.raw.exec("BEGIN");
+    try {
+      const amendmentItems = this.stmt(
+        `SELECT DISTINCT i.id FROM items i JOIN epic_amendments a ON a.item_id = i.id WHERE a.epic_id = ? AND i.status = 'open'`,
+      ).all(id) as unknown as { id: string }[];
+      const launchItems = this.stmt(
+        `SELECT DISTINCT i.id FROM items i JOIN tasks t ON t.id = i.task_id WHERE t.epic_id = ? AND i.kind = 'launch' AND i.status = 'open'`,
+      ).all(id) as unknown as { id: string }[];
+      const archivedItemIds = [...new Set([...amendmentItems, ...launchItems].map((r) => r.id))];
+      const now = Date.now();
+      for (const itemId of archivedItemIds) {
+        this.stmt(`UPDATE items SET status = 'archived', resolved_ms = ?, updated_ms = ? WHERE id = ?`).run(now, now, itemId);
+      }
+
+      const detachedTaskIds = (
+        this.stmt(`SELECT id FROM tasks WHERE epic_id = ?`).all(id) as unknown as { id: string }[]
+      ).map((r) => r.id);
+      this.stmt(`UPDATE tasks SET epic_id = NULL, epic_out = 0 WHERE epic_id = ?`).run(id);
+
+      this.stmt(`DELETE FROM epic_links WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epic_tickets WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epic_designs WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epic_amendments WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epic_agents WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epics WHERE id = ?`).run(id);
+
+      this.raw.exec("COMMIT");
+      return { deleted: true, archivedItemIds, detachedTaskIds };
+    } catch (err) {
+      this.raw.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
   listEpicTasks(epicId: string): Task[] {
     return this.stmt(`SELECT * FROM tasks WHERE epic_id = ? ORDER BY jira_key, created_ms`).all(epicId) as unknown as Task[];
   }
 
+  listAllEpicTasks(): Task[] {
+    return this.stmt(`SELECT * FROM tasks WHERE epic_id IS NOT NULL ORDER BY jira_key, created_ms`).all() as unknown as Task[];
+  }
+
   listEpicLinks(epicId: string): EpicLink[] {
     return this.stmt(`SELECT * FROM epic_links WHERE epic_id = ? ORDER BY task_key, blocked_by_key`).all(epicId) as unknown as EpicLink[];
+  }
+
+  listAllEpicLinks(): EpicLink[] {
+    return this.stmt(`SELECT * FROM epic_links ORDER BY epic_id, task_key, blocked_by_key`).all() as unknown as EpicLink[];
   }
 
   replaceEpicLinks(epicId: string, links: { task_key: string; blocked_by_key: string }[]): void {
@@ -552,6 +658,10 @@ export class Db {
     return this.stmt(`SELECT * FROM epic_designs WHERE epic_id = ? ORDER BY version DESC`).all(epicId) as unknown as EpicDesign[];
   }
 
+  countDesigns(epicId: string): number {
+    return (this.stmt(`SELECT COUNT(*) AS n FROM epic_designs WHERE epic_id = ?`).get(epicId) as { n: number }).n;
+  }
+
   insertAmendment(a: EpicAmendment): void {
     this.stmt(`INSERT INTO epic_amendments (id, epic_id, task_id, design_version, body, status, item_id, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(a.id, a.epic_id, a.task_id, a.design_version, a.body, a.status, a.item_id, a.created_ms);
@@ -595,19 +705,34 @@ export class Db {
     return rows as unknown as TaskEvent[];
   }
 
+  /** Every worktree path a task was given, oldest first. Worktree cleanup
+   *  clears tasks.worktree_path; the history keeps the path, so usage logged
+   *  in that worktree can still be attributed to its task. */
+  listTaskWorktrees(): { task_id: string; path: string }[] {
+    return this.stmt(`
+      SELECT task_id, path FROM (
+        SELECT task_id, ts, id, json_extract(data, '$.to') AS path FROM task_events
+        WHERE kind = 'session' AND message LIKE 'Worktree: %' AND json_valid(data)
+        UNION ALL
+        SELECT task_id, ts, id, json_extract(data, '$.worktree') AS path FROM task_events
+        WHERE kind = 'prompt' AND json_valid(data)
+      )
+      WHERE typeof(path) = 'text' AND path <> ''
+      ORDER BY ts, id
+    `).all() as unknown as { task_id: string; path: string }[];
+  }
+
   // ---- items ----
 
   insertItem(i: Item): void {
-    this.raw
-      .prepare(
-        `INSERT INTO items (id, kind, status, title, summary, body, context, options, ready, handling, source_ref, task_id, structured,
-          created_ms, updated_ms, resolved_ms, snooze_until_ms, elicitation, triage)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        i.id, i.kind, i.status, i.title, i.summary, i.body, i.context, i.options, i.ready, i.handling ?? 0, i.source_ref, i.task_id,
-        i.structured, i.created_ms, i.updated_ms, i.resolved_ms, i.snooze_until_ms, i.elicitation ?? null, i.triage ?? null,
-      );
+    this.stmt(
+      `INSERT INTO items (id, kind, status, title, summary, body, context, options, ready, handling, source_ref, task_id, structured,
+        created_ms, updated_ms, resolved_ms, snooze_until_ms, elicitation, triage)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      i.id, i.kind, i.status, i.title, i.summary, i.body, i.context, i.options, i.ready, i.handling ?? 0, i.source_ref, i.task_id,
+      i.structured, i.created_ms, i.updated_ms, i.resolved_ms, i.snooze_until_ms, i.elicitation ?? null, i.triage ?? null,
+    );
   }
 
   updateItem(id: string, patch: Partial<Item>): void {
@@ -638,10 +763,64 @@ export class Db {
     return this.stmt(sql).all(...args) as unknown as Item[];
   }
 
+  findPrItemForTask(taskId: string, opts: { includeArchived?: boolean } = {}): Item | null {
+    const sql = opts.includeArchived
+      ? `SELECT * FROM items WHERE task_id = ? AND kind = 'pr' ORDER BY CASE WHEN status = 'archived' THEN 1 ELSE 0 END ASC, created_ms DESC LIMIT 1`
+      : `SELECT * FROM items WHERE task_id = ? AND kind = 'pr' AND status != 'archived' ORDER BY created_ms DESC LIMIT 1`;
+    return (this.stmt(sql).get(taskId) as unknown as Item) ?? null;
+  }
+
+  hasOpenPrItem(taskId: string): boolean {
+    return Boolean(this.stmt(`SELECT 1 FROM items WHERE task_id = ? AND kind = 'pr' AND status = 'open' LIMIT 1`).get(taskId));
+  }
+
+  listActivePrItems(): Item[] {
+    return this.stmt(`SELECT * FROM items WHERE kind = 'pr' AND status != 'archived' ORDER BY created_ms DESC`).all() as unknown as Item[];
+  }
+
+  listTaskIdsWithActivePrItem(): string[] {
+    const rows = this.stmt(`SELECT DISTINCT task_id FROM items WHERE kind = 'pr' AND status != 'archived' AND task_id IS NOT NULL`).all() as { task_id: string }[];
+    return rows.map((r) => r.task_id);
+  }
+
+  findOpenItemForTask(taskId: string, kind: ItemKind): Item | null {
+    return (this.stmt(`SELECT * FROM items WHERE task_id = ? AND kind = ? AND status = 'open' ORDER BY created_ms DESC LIMIT 1`).get(taskId, kind) as unknown as Item) ?? null;
+  }
+
+  listOpenItemsForTask(taskId: string, kind: ItemKind): Item[] {
+    return this.stmt(`SELECT * FROM items WHERE task_id = ? AND kind = ? AND status = 'open' ORDER BY created_ms DESC`).all(taskId, kind) as unknown as Item[];
+  }
+
+  listUnarchivedItemsForTask(taskId: string): Item[] {
+    return this.stmt(`SELECT * FROM items WHERE task_id = ? AND status != 'archived' ORDER BY created_ms DESC`).all(taskId) as unknown as Item[];
+  }
+
+  hasOpenItemFor(address: string, taskId: string): boolean {
+    return Boolean(
+      this.stmt(`SELECT 1 FROM items WHERE source_ref = ? AND status = 'open' LIMIT 1`).get(address)
+      || this.stmt(`SELECT 1 FROM items WHERE task_id = ? AND status = 'open' LIMIT 1`).get(taskId),
+    );
+  }
+
+  listSnoozedOpenItemsFor(opts: { taskId?: string | null; address?: string | null; now?: number }): Item[] {
+    const { taskId = null, address = null, now = Date.now() } = opts;
+    if (!taskId && !address) return [];
+    const byId = new Map<string, Item>();
+    if (taskId) {
+      for (const item of this.stmt(`SELECT * FROM items WHERE task_id = ? AND status = 'open' AND snooze_until_ms > ? ORDER BY created_ms DESC`).all(taskId, now) as unknown as Item[]) {
+        byId.set(item.id, item);
+      }
+    }
+    if (address) {
+      for (const item of this.stmt(`SELECT * FROM items WHERE source_ref = ? AND status = 'open' AND snooze_until_ms > ? ORDER BY created_ms DESC`).all(address, now) as unknown as Item[]) {
+        byId.set(item.id, item);
+      }
+    }
+    return [...byId.values()].sort((a, b) => b.created_ms - a.created_ms);
+  }
+
   openQuestionItemForTerminal(address: string): Item | null {
-    const row = this.raw
-      .prepare(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' AND status = 'open' ORDER BY created_ms DESC LIMIT 1`)
-      .get(address);
+    const row = this.stmt(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' AND status = 'open' ORDER BY created_ms DESC LIMIT 1`).get(address);
     return (row as unknown as Item) ?? null;
   }
 
@@ -653,9 +832,13 @@ export class Db {
   openQuestionItemsFor(opts: { address?: string | null; taskId?: string | null }): Item[] {
     const { address, taskId } = opts;
     if (address && taskId) {
-      return this.stmt(
-        `SELECT * FROM items WHERE kind = 'question' AND status = 'open' AND (task_id = ? OR (source_ref = ? AND (task_id IS NULL OR task_id = ?))) ORDER BY created_ms DESC`,
-      ).all(taskId, address, taskId) as unknown as Item[];
+      const byTask = this.stmt(
+        `SELECT * FROM items WHERE task_id = ? AND kind = 'question' AND status = 'open' ORDER BY created_ms DESC`,
+      ).all(taskId) as unknown as Item[];
+      const bySource = this.stmt(
+        `SELECT * FROM items WHERE source_ref = ? AND kind = 'question' AND status = 'open' AND task_id IS NULL ORDER BY created_ms DESC`,
+      ).all(address) as unknown as Item[];
+      return [...byTask, ...bySource].sort((a, b) => b.created_ms - a.created_ms);
     }
     if (taskId) {
       return this.stmt(`SELECT * FROM items WHERE task_id = ? AND kind = 'question' AND status = 'open' ORDER BY created_ms DESC`).all(taskId) as unknown as Item[];
@@ -671,11 +854,15 @@ export class Db {
     return (row as unknown as Item) ?? null;
   }
 
+  latestQuestionItemForTerminal(address: string): Item | null {
+    const row = this.stmt(`SELECT * FROM items WHERE source_ref = ? AND kind = 'question' ORDER BY created_ms DESC LIMIT 1`).get(address);
+    return (row as unknown as Item) ?? null;
+  }
+
   // ---- repos ----
 
   insertRepo(r: Repo): void {
-    this.raw
-      .prepare(`INSERT OR IGNORE INTO repos (id, name, path, jira_prefix, context, source, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    this.stmt(`INSERT OR IGNORE INTO repos (id, name, path, jira_prefix, context, source, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(r.id, r.name, r.path, r.jira_prefix, r.context ?? null, r.source, r.created_ms);
   }
 
@@ -702,8 +889,7 @@ export class Db {
   }
 
   getRepoByJiraPrefix(prefix: string): Repo | null {
-    const row = this.raw
-      .prepare(`SELECT * FROM repos WHERE UPPER(jira_prefix) = ? ORDER BY created_ms LIMIT 1`)
+    const row = this.stmt(`SELECT * FROM repos WHERE UPPER(jira_prefix) = ? ORDER BY created_ms LIMIT 1`)
       .get(prefix.toUpperCase());
     return (row as unknown as Repo) ?? null;
   }
@@ -715,19 +901,17 @@ export class Db {
   // ---- terminals ----
 
   upsertTerminal(t: TrackedTerminal): void {
-    this.raw
-      .prepare(
-        `INSERT INTO terminals (address, task_id, name, agent, last_status, last_turn, updated_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(address) DO UPDATE SET
-           task_id = COALESCE(excluded.task_id, terminals.task_id),
-           name = COALESCE(excluded.name, terminals.name),
-           agent = COALESCE(excluded.agent, terminals.agent),
-           last_status = COALESCE(excluded.last_status, terminals.last_status),
-           last_turn = excluded.last_turn,
-           updated_ms = excluded.updated_ms`,
-      )
-      .run(t.address, t.task_id, t.name, t.agent, t.last_status, t.last_turn, t.updated_ms);
+    this.stmt(
+      `INSERT INTO terminals (address, task_id, name, agent, last_status, last_turn, updated_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(address) DO UPDATE SET
+         task_id = COALESCE(excluded.task_id, terminals.task_id),
+         name = COALESCE(excluded.name, terminals.name),
+         agent = COALESCE(excluded.agent, terminals.agent),
+         last_status = COALESCE(excluded.last_status, terminals.last_status),
+         last_turn = excluded.last_turn,
+         updated_ms = excluded.updated_ms`,
+    ).run(t.address, t.task_id, t.name, t.agent, t.last_status, t.last_turn, t.updated_ms);
   }
 
   getTerminal(address: string): TrackedTerminal | null {
@@ -742,32 +926,27 @@ export class Db {
   // ---- metrics ----
 
   recordMetric(name: string, ref: string | null, data: unknown): void {
-    this.raw
-      .prepare(`INSERT INTO metrics_events (ts, name, ref, data) VALUES (?, ?, ?, ?)`)
+    this.stmt(`INSERT INTO metrics_events (ts, name, ref, data) VALUES (?, ?, ?, ?)`)
       .run(Date.now(), name, ref, data === undefined || data === null ? null : JSON.stringify(data));
   }
 
   metricSummary(): { name: string; count: number; last_ms: number }[] {
-    return this.raw
-      .prepare(`SELECT name, COUNT(*) AS count, MAX(ts) AS last_ms FROM metrics_events GROUP BY name ORDER BY count DESC`)
+    return this.stmt(`SELECT name, COUNT(*) AS count, MAX(ts) AS last_ms FROM metrics_events GROUP BY name ORDER BY count DESC`)
       .all() as unknown as { name: string; count: number; last_ms: number }[];
   }
 
   recentMetrics(limit = 50): MetricEvent[] {
-    return this.raw
-      .prepare(`SELECT * FROM metrics_events ORDER BY id DESC LIMIT ?`)
+    return this.stmt(`SELECT * FROM metrics_events ORDER BY id DESC LIMIT ?`)
       .all(limit) as unknown as MetricEvent[];
   }
 
   // ---- plan revisions and reviews ----
 
   insertPlanRevision(rev: PlanRevision): void {
-    this.raw
-      .prepare(
-        `INSERT INTO plan_revisions (id, task_id, version, title, contract, subtasks_json, markdown, created_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(rev.id, rev.task_id, rev.version, rev.title, rev.contract, JSON.stringify(rev.subtasks), rev.markdown, rev.created_ms);
+    this.stmt(
+      `INSERT INTO plan_revisions (id, task_id, version, title, contract, subtasks_json, markdown, created_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(rev.id, rev.task_id, rev.version, rev.title, rev.contract, JSON.stringify(rev.subtasks), rev.markdown, rev.created_ms);
   }
 
   listPlanRevisions(taskId: string): PlanRevision[] {
@@ -810,12 +989,10 @@ export class Db {
   }
 
   insertPlanReview(review: PlanReview): void {
-    this.raw
-      .prepare(
-        `INSERT INTO plan_reviews (id, task_id, revision_id, note, comments_json, created_ms)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(review.id, review.task_id, review.revision_id, review.note, JSON.stringify(review.comments), review.created_ms);
+    this.stmt(
+      `INSERT INTO plan_reviews (id, task_id, revision_id, note, comments_json, created_ms)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(review.id, review.task_id, review.revision_id, review.note, JSON.stringify(review.comments), review.created_ms);
   }
 
   listPlanReviews(taskId: string): PlanReview[] {

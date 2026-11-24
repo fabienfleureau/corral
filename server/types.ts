@@ -168,6 +168,12 @@ export interface Task {
   pr_url: string | null;
   /** JSON state for the PR loop, e.g. {"pushed":"<thread ids>"} (dedupe). */
   pr_meta: string | null;
+  /** When the task's PR merged: the platform's merge time, else when the PR
+   *  loop first saw the merge. Null until then. */
+  merged_ms?: number | null;
+  /** JSON {@link MergeReadiness}: the readiness gate's last state seen before
+   *  the merge. Null when no open snapshot preceded the merge. */
+  merge_readiness?: string | null;
   /** Handoff document from the last completed run — injected into follow-up sessions. */
   handoff?: string | null;
   /** The spec task that created this one (multi-repo): its contract is injected at dispatch. */
@@ -194,6 +200,19 @@ export interface Task {
   exit_code: number | null;
   created_ms: number;
   updated_ms: number;
+}
+
+/** The readiness gate as last seen while the PR was open, kept at merge time
+ *  so "merged before green" is measurable. */
+export interface MergeReadiness {
+  ready: boolean;
+  reasons: string[];
+  failing_checks: number;
+  pending_checks: boolean;
+  unresolved_threads: number;
+  review_decision: string | null;
+  /** When that state was observed (compare with merged_ms for staleness). */
+  checked_ms: number;
 }
 
 /** Display label: the task title, or the prompt's first line while the

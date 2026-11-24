@@ -8,7 +8,7 @@
 // what it truncated; production outcomes are still not recorded.
 
 import type { Db } from "./db.ts";
-import { taskLabel, type Item, type Task } from "./types.ts";
+import { taskLabel, type Item, type MergeReadiness, type Task } from "./types.ts";
 import type { PrSnapshot } from "./pr.ts";
 import type { UsageEvidence } from "./usage.ts";
 
@@ -32,6 +32,7 @@ const LIFECYCLE_EVENTS = [
   "item.snoozed",
   "pr.comments_pushed",
   "pr.conflicts_pushed",
+  "pr.merged",
   "jira.imported",
   "jira.marked_done",
   "jira.commented",
@@ -83,6 +84,10 @@ export interface EvidenceTask {
   retry_of: string | null;
   items_in_window: { total: number; open: number; question_open: number; pr_open: number; resolved: number; archived: number };
   pr: PrSnapshot | null;
+  /** When the PR merged (null when not merged or merged before this was recorded). */
+  merged_ms: number | null;
+  /** The gate's last state seen while the PR was open; null when unknown. */
+  merge_readiness: MergeReadiness | null;
   usage: { cost_usd: number; tokens: number; models: string[]; agents: string[]; unpriced_calls: number } | null;
   flags: string[];
 }
@@ -118,6 +123,9 @@ export interface ImprovementEvidence {
   tasks: EvidenceTask[];
   items: EvidenceItem[];
   events: EvidenceEvent[];
+  /** Merges recorded for the tasks above: how many passed the readiness gate
+   *  at their last open snapshot. `unknown` had no open snapshot before the merge. */
+  merges: { total: number; ready: number; not_ready: number; unknown: number; not_ready_task_ids: string[] };
   data_quality: {
     untitled_tasks: string[];
     tasks_without_model: string[];
@@ -176,6 +184,16 @@ function readPrSnapshot(raw: string | null): PrSnapshot | null {
   }
 }
 
+function readMergeReadiness(raw: string | null | undefined): MergeReadiness | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return value && typeof value === "object" ? (value as MergeReadiness) : null;
+  } catch {
+    return null;
+  }
+}
+
 function inClause(values: string[]): { sql: string; args: string[] } {
   return { sql: values.map(() => "?").join(", "), args: values };
 }
@@ -190,21 +208,21 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
   const since = now - days * DAY;
 
   const count = (sql: string, ...args: (string | number)[]): number =>
-    (db.raw.prepare(sql).get(...args) as { n: number }).n;
+    (db.stmt(sql).get(...args) as { n: number }).n;
 
   // Tasks recently touched, plus every task an item or task event points at.
   const taskCount = count("SELECT COUNT(*) AS n FROM tasks WHERE updated_ms >= ?", since);
-  const recentTasks = db.raw
-    .prepare("SELECT * FROM tasks WHERE updated_ms >= ? ORDER BY updated_ms DESC LIMIT ?")
+  const recentTasks = db
+    .stmt("SELECT * FROM tasks WHERE updated_ms >= ? ORDER BY updated_ms DESC LIMIT ?")
     .all(since, taskLimit) as unknown as Task[];
 
   const itemCount = count("SELECT COUNT(*) AS n FROM items WHERE created_ms >= ? OR status = 'open'", since);
-  const itemRows = db.raw
-    .prepare("SELECT * FROM items WHERE created_ms >= ? OR status = 'open' ORDER BY created_ms DESC LIMIT ?")
+  const itemRows = db
+    .stmt("SELECT * FROM items WHERE created_ms >= ? OR status = 'open' ORDER BY created_ms DESC LIMIT ?")
     .all(since, itemLimit) as unknown as Item[];
 
-  const taskEventRefs = db.raw
-    .prepare("SELECT DISTINCT ref FROM metrics_events WHERE ts >= ? AND name LIKE 'task.%' AND ref IS NOT NULL")
+  const taskEventRefs = db
+    .stmt("SELECT DISTINCT ref FROM metrics_events WHERE ts >= ? AND name LIKE 'task.%' AND ref IS NOT NULL")
     .all(since) as { ref: string }[];
   const recentIds = new Set(recentTasks.map((t) => t.id));
   const candidateLinkedIds = [...new Set([
@@ -229,8 +247,8 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
   const inTaskWindow = new Set(recentTasks.map((t) => t.id));
 
   // Aggregate counts do not depend on the event cap.
-  const aggregates = db.raw
-    .prepare("SELECT ref, name, COUNT(*) AS count, MIN(ts) AS first_ms, MAX(ts) AS last_ms FROM metrics_events WHERE ts >= ? AND ref IS NOT NULL GROUP BY ref, name")
+  const aggregates = db
+    .stmt("SELECT ref, name, COUNT(*) AS count, MIN(ts) AS first_ms, MAX(ts) AS last_ms FROM metrics_events WHERE ts >= ? AND ref IS NOT NULL GROUP BY ref, name")
     .all(since) as unknown as AggregateRow[];
   const aggByRef = new Map<string, Map<string, AggregateRow>>();
   for (const row of aggregates) {
@@ -292,6 +310,8 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     if (task.pr_url && !readPrSnapshot(task.pr_meta)) flags.push("no_pr_snapshot");
     if (task.repeat_of) flags.push("probable_repeat");
     if (task.retry_of) flags.push("retry");
+    const mergeReadiness = task.merged_ms != null ? readMergeReadiness(task.merge_readiness) : null;
+    if (mergeReadiness && !mergeReadiness.ready) flags.push("merged_before_ready");
     const usage = usageByTask.get(task.id);
     return {
       id: task.id,
@@ -329,6 +349,8 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
         archived: taskItems.filter((i) => i.status === "archived").length,
       },
       pr: readPrSnapshot(task.pr_meta),
+      merged_ms: task.merged_ms ?? null,
+      merge_readiness: mergeReadiness,
       usage: usage
         ? { cost_usd: usage.cost_usd, tokens: usage.tokens, models: usage.models, agents: usage.agents, unpriced_calls: usage.unpriced_calls }
         : null,
@@ -393,6 +415,9 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     .filter((i) => i.flags.includes("multiple_resolution_events"))
     .map((i) => ({ item_id: i.id, count: i.events.resolved?.count ?? 0, first_ms: i.events.resolved?.first_ms ?? 0, last_ms: i.events.resolved?.last_ms ?? 0 }));
 
+  const mergedTasks = evidenceTasks.filter((t) => t.merged_ms !== null);
+  const notReadyMerges = mergedTasks.filter((t) => t.merge_readiness && !t.merge_readiness.ready);
+
   const usage = opts.usage ?? null;
   return {
     window: { since_ms: since, generated_ms: now, days },
@@ -407,6 +432,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       "Production outcomes are not recorded: a merged PR only proves delivery to the base branch.",
       "Review thread bodies are not persisted; only the unresolved count and ids are available.",
       "PR snapshots (checks, mergeability, thread counts) exist only for syncs that ran after they were added.",
+      "Merge time and readiness at merge (merged_ms, merge_readiness) exist only for merges seen after they were added; older merges are not backfilled. merge_readiness is the last open snapshot, which can predate the merge by up to one sync interval.",
       "Events and items are capped as listed in limits/truncated; counts come from aggregate queries, not the sampled event list.",
       usage
         ? "Costs are API-list-price estimates from local agent logs, not billed amounts."
@@ -415,6 +441,13 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     tasks: evidenceTasks,
     items: evidenceItems,
     events: eventRows.map((e) => ({ ts: e.ts, name: e.name, ref: e.ref, data: parseData(e.data) })),
+    merges: {
+      total: mergedTasks.length,
+      ready: mergedTasks.filter((t) => t.merge_readiness?.ready === true).length,
+      not_ready: notReadyMerges.length,
+      unknown: mergedTasks.filter((t) => !t.merge_readiness).length,
+      not_ready_task_ids: notReadyMerges.map((t) => t.id),
+    },
     data_quality: {
       untitled_tasks: evidenceTasks.filter((t) => !t.title.trim()).map((t) => t.id),
       tasks_without_model: evidenceTasks.filter((t) => !t.model).map((t) => t.id),
