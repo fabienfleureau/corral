@@ -538,6 +538,27 @@ export function seedScreenshotUsage(home: string): void {
   }
   writeFileSync(join(dir, "usage.jsonl"), lines.join("\n") + "\n");
 
+  // Synthetic Antigravity transcript (one omnigent session) for the agent chart.
+  const agyLogs = join(home, ".omnigent", "antigravity-native", "fixture", "agy-home", ".gemini", "antigravity-cli", "brain", "fixture-conversation", ".system_generated", "logs");
+  mkdirSync(agyLogs, { recursive: true });
+  const steps: string[] = [];
+  for (let day = 6; day >= 0; day--) {
+    for (let call = 0; call < 3; call++) {
+      steps.push(JSON.stringify({
+        step_index: steps.length,
+        source: "MODEL",
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: new Date(now - day * 86_400_000 - call * 3_600_000).toISOString(),
+        model: call === 2 ? "gemini-4-hydrogen-high" : "gemini-4-neon-medium",
+        input_tokens: 20_000 + call * 5_000,
+        cache_read_tokens: 40_000,
+        output_tokens: 6_000 + day * 500,
+      }));
+    }
+  }
+  writeFileSync(join(agyLogs, "transcript_full.jsonl"), steps.join("\n") + "\n");
+
   // Synthetic Claude quota snapshot (ccstatusline cache) for sidebar + Usage rings.
   const ccDir = join(home, ".cache", "ccstatusline");
   mkdirSync(ccDir, { recursive: true });
