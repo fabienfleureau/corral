@@ -72,6 +72,17 @@ test("a report naming only another project's PR links nothing", async () => {
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("a code task's question citing a PR of its repo does not adopt it", async () => {
+  const dir = gitRepo("git@github.com:acme/app.git");
+  const db = new Db(":memory:");
+  try {
+    db.insertTask(makeTask({ repo_path: dir }));
+    const engine = new CaptureEngine(db, backend, hub);
+    await engine.createStructuredQuestion({ kind: "question", taskId: "task-1", title: "Rebase?", body: `This conflicts with ${URL}, rebase on it?` });
+    assert.equal(db.getTask("task-1")?.pr_url, null);
+  } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("pull URL matching handles GitLab nested groups", () => {
   const mr = "https://gitlab.com/acme/platform/engine/-/merge_requests/3117";
   assert.equal(pullUrlForRemotes(`MR: ${mr}`, ["git@gitlab.com:acme/platform/engine.git"]), mr);

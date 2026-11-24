@@ -34,6 +34,9 @@ import type { Item, TaskSpec } from "./types.ts";
 import { pullUrlForRemotes } from "./repo-match.ts";
 import { gitRemoteUrls } from "./repos.ts";
 
+/** Task kinds a reported PR link may attach to (see linkReportedPr). */
+const LINKABLE_KINDS = new Set(["grill", "ops", "analysis", "spec"]);
+
 /** Any GitHub PR or GitLab MR link. */
 const ANY_PR_URL = /https?:\/\/[^\s<>()]+?(?:\/pull\/|\/-\/merge_requests\/|\/merge_requests\/)\d+/i;
 
@@ -786,10 +789,12 @@ export class CaptureEngine {
   }
 
   /** A digest or question that mentions a PR/MR of the task's own repo links
-   *  it to the task, when the task has none (an interview that opened a PR). */
+   *  it to the task, when the task has none (an interview that opened a PR).
+   *  Only for kinds the PR loop never follows: a code task finds its PR through
+   *  its branch, and a PR it merely cites must not become the PR it delivers. */
   private linkReportedPr(taskId: string, body: string): void {
     const task = this.db.getTask(taskId);
-    if (!task || task.pr_url || !task.repo_path || task.kind === "review") return;
+    if (!task || task.pr_url || !task.repo_path || !LINKABLE_KINDS.has(task.kind ?? "code")) return;
     const url = pullUrlForRemotes(body, gitRemoteUrls(task.repo_path));
     if (!url) return;
     this.db.updateTask(task.id, { pr_url: url });
