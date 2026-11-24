@@ -9,15 +9,20 @@ import {
   DEFAULT_PRICES,
   GoQuotaCache,
   UsageScanner,
+  attachQuotaPredictions,
   buildReport,
   claudeQuota,
   codexQuota,
+  inferWindowMs,
+  monthWindowMs,
   opencodeGoQuota,
   parseClaudeLine,
   parseCodexLines,
+  predictQuotaWindow,
   priceFor,
   recordCost,
   type AgentQuota,
+  type QuotaWindow,
   type UsageRecord,
 } from "../usage.ts";
 import type { Task } from "../types.ts";
@@ -344,4 +349,235 @@ test("opencodeGoQuota skips a malformed response instead of throwing", async () 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("monthWindowMs and inferWindowMs handle calendar months, leap years, and labels", () => {
+  const DAY = 86_400_000;
+  // March 31 -> Feb 28 (non-leap 2026) = 31 days; March 31 -> Feb 29 (leap 2024) = 31 days? Wait: Feb has 28 days in 2026, so Feb 28..Mar 31 is 31 days.
+  // Check Feb 28 -> Jan 28 (31 days) and Mar 31 -> Feb 28 (2026, 31 days) vs Mar 28 -> Feb 28 (2026, 28 days; 2024, 29 days).
+  assert.equal(monthWindowMs(Date.UTC(2026, 2, 28, 12, 0)), 28 * DAY);
+  assert.equal(monthWindowMs(Date.UTC(2024, 2, 28, 12, 0)), 29 * DAY);
+  assert.equal(monthWindowMs(Date.UTC(2026, 2, 31, 0, 0)), 31 * DAY);
+  assert.equal(monthWindowMs(Date.UTC(2026, 0, 15, 6, 0)), 31 * DAY);
+
+  const reset = Date.UTC(2026, 11, 1, 0, 0);
+  assert.equal(inferWindowMs("Monthly", reset), 30 * DAY);
+  assert.equal(inferWindowMs("Weekly (all models)", reset), 7 * DAY);
+  assert.equal(inferWindowMs("2-week", reset), 14 * DAY);
+  assert.equal(inferWindowMs("5-hour session", reset), 5 * 3_600_000);
+  assert.equal(inferWindowMs("Gemini · Five Hour", reset), 5 * 3_600_000);
+  assert.equal(inferWindowMs("30d limit", reset), 30 * DAY);
+  assert.equal(inferWindowMs("Daily", reset), DAY);
+  assert.equal(inferWindowMs("30-minute", reset), 30 * 60_000);
+  assert.equal(inferWindowMs("Unknown bucket", reset), null);
+});
+
+test("predictQuotaWindow skips short windows, stale resets, and noisy early starts", () => {
+  const DAY = 86_400_000;
+  const now = Date.UTC(2026, 10, 24, 12, 0);
+  const baseWin = (over: Partial<QuotaWindow>): QuotaWindow => ({
+    label: "Weekly",
+    used_percent: 40,
+    resets_ms: now + 3 * DAY,
+    window_ms: 7 * DAY,
+    ...over,
+  });
+
+  // Short 5h window is not a higher (week/month) quota.
+  assert.equal(
+    predictQuotaWindow({
+      agent: "claude",
+      window: baseWin({ label: "5-hour session", window_ms: 5 * 3_600_000, resets_ms: now + 3 * 3_600_000 }),
+      records: [],
+      prices: DEFAULT_PRICES,
+      now,
+    }),
+    null,
+  );
+  // Stale reset passed.
+  assert.equal(
+    predictQuotaWindow({
+      agent: "claude",
+      window: baseWin({ resets_ms: now - 1000 }),
+      records: [],
+      prices: DEFAULT_PRICES,
+      now,
+    }),
+    null,
+  );
+  // Very early in window with low usage (< 5.9h elapsed and < 20% used).
+  assert.equal(
+    predictQuotaWindow({
+      agent: "claude",
+      window: baseWin({ used_percent: 5, resets_ms: now + 7 * DAY - 2 * 3_600_000 }),
+      records: [],
+      prices: DEFAULT_PRICES,
+      now,
+    }),
+    null,
+  );
+  // Early spike (>= 20% used) still predicts.
+  const spike = predictQuotaWindow({
+    agent: "claude",
+    window: baseWin({ used_percent: 30, resets_ms: now + 7 * DAY - 2 * 3_600_000 }),
+    records: [],
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.equal(spike?.status, "will_hit");
+  assert.equal(spike?.will_hit, true);
+
+  // 100% exhausted -> hit.
+  const hit = predictQuotaWindow({
+    agent: "opencode-go",
+    window: baseWin({ label: "Monthly", used_percent: 100, window_ms: 30 * DAY, resets_ms: now + 10 * DAY }),
+    records: [],
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.deepEqual(hit, {
+    will_hit: true,
+    status: "hit",
+    projected_percent: 100,
+    hits_in_ms: 0,
+    hits_at_ms: now,
+    rate_per_day: 5,
+    basis: "pace",
+  });
+
+  // 0% used -> safe.
+  const zero = predictQuotaWindow({
+    agent: "claude",
+    window: baseWin({ used_percent: 0 }),
+    records: [],
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.equal(zero?.status, "safe");
+  assert.equal(zero?.projected_percent, 0);
+  assert.equal(zero?.will_hit, false);
+});
+
+test("predictQuotaWindow computes pace fallback and curve-weighted forecasts", () => {
+  const DAY = 86_400_000;
+  const now = Date.UTC(2026, 10, 24, 12, 0);
+  const resetsMs = now + 3 * DAY; // 4 days elapsed, 3 days left in 7d window
+
+  // Pace fallback (no records): 30% in 4d -> 7.5%/d -> 52.5% projected -> safe.
+  const safe = predictQuotaWindow({
+    agent: "codex",
+    window: { label: "Weekly", used_percent: 30, resets_ms: resetsMs, window_ms: 7 * DAY },
+    records: [],
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.equal(safe?.basis, "pace");
+  assert.equal(safe?.status, "safe");
+  assert.equal(safe?.projected_percent, 52.5);
+
+  // Pace close: 52% in 4d -> 13%/d -> 91% projected -> close.
+  const close = predictQuotaWindow({
+    agent: "codex",
+    window: { label: "Weekly", used_percent: 52, resets_ms: resetsMs, window_ms: 7 * DAY },
+    records: [],
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.equal(close?.status, "close");
+  assert.equal(close?.will_hit, false);
+  assert.equal(close?.projected_percent, 91);
+
+  // Ramp-up curve: 50% in 4d (avg 12.5%/d -> pace would say 87.5% safe/close),
+  // but heavy recent usage makes EWMA curve predict will_hit.
+  const rampRecords: UsageRecord[] = [
+    rec({ agent: "codex", model: "gpt-6.1-sol", ts: now - 3.5 * DAY, output: 100_000 }),
+    rec({ agent: "codex", model: "gpt-6.1-sol", ts: now - 0.5 * DAY, output: 1_000_000 }),
+    rec({ agent: "codex", model: "gpt-6.1-sol", ts: now - 0.1 * DAY, output: 1_000_000 }),
+  ];
+  const ramp = predictQuotaWindow({
+    agent: "codex",
+    window: { label: "Weekly", used_percent: 50, resets_ms: resetsMs, window_ms: 7 * DAY },
+    records: rampRecords,
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.equal(ramp?.basis, "curve");
+  assert.equal(ramp?.status, "will_hit");
+  assert.equal(ramp?.will_hit, true);
+  assert.ok(ramp && ramp.projected_percent > 100);
+  assert.ok(ramp && ramp.hits_in_ms !== null && ramp.hits_in_ms > 0 && ramp.hits_in_ms < 3 * DAY);
+
+  // Cool-down curve: 64% in 4d (avg 16%/d -> pace would say 112% will_hit),
+  // but usage was front-loaded on day 1 and stopped -> curve predicts safe.
+  const coolRecords: UsageRecord[] = [
+    rec({ agent: "claude", model: "claude-opus-5-5", ts: now - 3.9 * DAY, output: 2_000_000 }),
+    rec({ agent: "claude", model: "claude-opus-5-5", ts: now - 0.2 * DAY, output: 50_000 }),
+  ];
+  const cool = predictQuotaWindow({
+    agent: "claude",
+    window: { label: "Weekly Opus", used_percent: 64, resets_ms: resetsMs, window_ms: 7 * DAY },
+    records: coolRecords,
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.equal(cool?.basis, "curve");
+  assert.equal(cool?.will_hit, false);
+  assert.ok(cool && cool.projected_percent < 100);
+
+  // Model filter: Sonnet records do not skew Opus prediction; unpriced tokens still drive curve.
+  const filtered = predictQuotaWindow({
+    agent: "claude",
+    window: { label: "Weekly Opus", used_percent: 40, resets_ms: resetsMs, window_ms: 7 * DAY },
+    records: [rec({ agent: "claude", model: "claude-sonnet-5-5", ts: now - 0.1 * DAY, output: 5_000_000 })],
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.equal(filtered?.basis, "pace");
+
+  // Unpriced model falls back to token weights for the curve.
+  const unpriced = predictQuotaWindow({
+    agent: "google",
+    window: { label: "Gemini · Weekly", used_percent: 50, resets_ms: resetsMs, window_ms: 7 * DAY },
+    records: [
+      rec({ agent: "antigravity", model: "gemini-experimental-custom", ts: now - 3.5 * DAY, output: 1000 }),
+      rec({ agent: "antigravity", model: "gemini-experimental-custom", ts: now - 0.2 * DAY, output: 100_000 }),
+    ],
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.equal(unpriced?.basis, "curve");
+  assert.equal(unpriced?.will_hit, true);
+
+  // Monthly window works too.
+  const monthly = predictQuotaWindow({
+    agent: "opencode-go",
+    window: { label: "Monthly", used_percent: 80, resets_ms: now + 10 * DAY, window_ms: 30 * DAY },
+    records: [],
+    prices: DEFAULT_PRICES,
+    now,
+  });
+  assert.equal(monthly?.will_hit, true);
+  assert.equal(monthly?.status, "will_hit");
+  assert.equal(monthly?.projected_percent, 120);
+});
+
+test("attachQuotaPredictions clones snapshots without mutating cached inputs", () => {
+  const DAY = 86_400_000;
+  const now = Date.UTC(2026, 10, 24, 12, 0);
+  const original: AgentQuota = {
+    agent: "opencode-go",
+    source: "OpenCode Go",
+    as_of_ms: now,
+    stale: false,
+    plan: null,
+    windows: [
+      { label: "5-hour session", used_percent: 40, resets_ms: now + 2 * 3_600_000, window_ms: 5 * 3_600_000 },
+      { label: "Weekly", used_percent: 40, resets_ms: now + 3 * DAY, window_ms: 7 * DAY },
+    ],
+    note: null,
+  };
+  const enriched = attachQuotaPredictions([original], [], DEFAULT_PRICES, now);
+  assert.equal(original.windows[1].prediction, undefined);
+  assert.equal(enriched[0].windows[0].prediction, null);
+  assert.equal(enriched[0].windows[1].prediction?.status, "safe");
 });

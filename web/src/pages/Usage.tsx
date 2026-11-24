@@ -7,7 +7,7 @@ import { api } from "../api";
 import type { AgentQuota, PlatformRateLimit, RateLimitWindow, UsageAgent, UsageRange, UsageReport, UsageTotals } from "../types";
 import { errText, formatTs, timeAgo } from "../util";
 import { Spinner } from "../ui";
-import { quotaTone } from "../sidebar-quotas";
+import { formatQuotaPrediction, quotaPredictionDetail, quotaTone } from "../sidebar-quotas";
 
 export const RANGES: { key: UsageRange; label: string; shortLabel: string }[] = [
   { key: "24h", label: "Last 24 hours", shortLabel: "Last 24h" },
@@ -91,12 +91,16 @@ function resetIn(ms: number | null): string {
   return `resets in ${Math.ceil(diff / 60_000)}m`;
 }
 
-function QuotaCard({ q, loading = false, error }: { q: AgentQuota; loading?: boolean; error?: string | null }) {
+export function QuotaCard({ q, loading = false, error }: { q: AgentQuota; loading?: boolean; error?: string | null }) {
+  const hasWillHit = !loading && q.windows.some((w) => w.prediction?.status === "will_hit");
+  const hasClose = !loading && !hasWillHit && q.windows.some((w) => w.prediction?.status === "close");
   return (
     <div className="usage-card" aria-busy={loading || undefined}>
       <div className="usage-card-head">
         <strong>{AGENT_LABEL[q.agent]}</strong>
         {q.plan ? <span className="badge badge-mute">{q.plan}</span> : null}
+        {hasWillHit ? <span className="badge badge-urgent">will hit</span> : null}
+        {hasClose ? <span className="badge badge-warn">close</span> : null}
         {q.stale && q.windows.length ? <span className="badge badge-wait">stale</span> : null}
       </div>
       {loading ? <LoadingNote label="Loading quota…" error={error} /> : null}
@@ -104,6 +108,8 @@ function QuotaCard({ q, loading = false, error }: { q: AgentQuota; loading?: boo
       {!loading && q.windows.map((w) => {
         const pct = Math.max(0, Math.min(100, w.used_percent));
         const tone = usageBarTone(pct);
+        const pred = w.prediction ?? null;
+        const projectedPct = pred ? Math.max(pct, Math.min(100, pred.projected_percent)) : pct;
         return (
           <div key={w.label} className="usage-quota-row">
             <div className="usage-quota-label">
@@ -112,9 +118,28 @@ function QuotaCard({ q, loading = false, error }: { q: AgentQuota; loading?: boo
                 {Math.round(w.used_percent)}% · {resetIn(w.resets_ms)}
               </span>
             </div>
-            <div className="usage-bar">
+            <div
+              className="usage-bar"
+              role="progressbar"
+              aria-valuenow={Math.round(pct)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label={`${AGENT_LABEL[q.agent]} ${w.label} quota`}
+            >
               <div className={`usage-bar-fill ${tone}`} style={{ width: `${pct}%` }} />
+              {pred && projectedPct > pct ? (
+                <div
+                  className={`usage-bar-projected usage-bar-projected-${pred.status}`}
+                  style={{ left: `${pct}%`, width: `${projectedPct - pct}%` }}
+                  aria-hidden="true"
+                />
+              ) : null}
             </div>
+            {pred ? (
+              <div className={`usage-quota-forecast quota-forecast-${pred.status}`} title={quotaPredictionDetail(pred)}>
+                {formatQuotaPrediction(pred)}
+              </div>
+            ) : null}
           </div>
         );
       })}

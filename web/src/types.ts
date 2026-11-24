@@ -259,6 +259,26 @@ export type UsageTotals = {
   unpriced_calls: number;
 };
 
+export type QuotaPredictionStatus = "hit" | "will_hit" | "close" | "safe";
+
+export type QuotaPrediction = {
+  will_hit: boolean;
+  status: QuotaPredictionStatus;
+  projected_percent: number;
+  hits_in_ms: number | null;
+  hits_at_ms: number | null;
+  rate_per_day: number;
+  basis: "curve" | "pace";
+};
+
+export type QuotaWindow = {
+  label: string;
+  used_percent: number;
+  resets_ms: number | null;
+  window_ms?: number | null;
+  prediction?: QuotaPrediction | null;
+};
+
 export type AgentQuota = {
   /** Antigravity spend has no quota of its own: it draws on the Google quota. */
   agent: Exclude<UsageAgent, "antigravity"> | "google";
@@ -266,7 +286,7 @@ export type AgentQuota = {
   as_of_ms: number | null;
   stale: boolean;
   plan: string | null;
-  windows: { label: string; used_percent: number; resets_ms: number | null }[];
+  windows: QuotaWindow[];
   note: string | null;
 };
 

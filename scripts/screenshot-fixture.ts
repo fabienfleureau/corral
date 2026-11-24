@@ -646,21 +646,40 @@ export function seedScreenshotUsage(home: string): void {
   mkdirSync(codexDir, { recursive: true });
   writeFileSync(
     join(codexDir, "rollout-fixture.jsonl"),
-    JSON.stringify({
-      type: "event_msg",
-      timestamp: new Date(now - 5 * 60_000).toISOString(),
-      payload: {
-        type: "token_count",
-        rate_limits: {
-          plan_type: "Plus",
-          primary: {
-            used_percent: 42,
-            window_minutes: 300,
-            resets_at: Math.floor((now + 3 * 3_600_000) / 1000),
+    [
+      JSON.stringify({ type: "turn_context", timestamp: new Date(now - 3 * 86_400_000).toISOString(), payload: { model: "gpt-6.1-sol" } }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: new Date(now - 3 * 86_400_000).toISOString(),
+        payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100_000, cached_input_tokens: 50_000, output_tokens: 10_000 } } },
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: new Date(now - 86_400_000).toISOString(),
+        payload: { type: "token_count", info: { total_token_usage: { input_tokens: 350_000, cached_input_tokens: 150_000, output_tokens: 45_000 } } },
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: new Date(now - 5 * 60_000).toISOString(),
+        payload: {
+          type: "token_count",
+          info: { total_token_usage: { input_tokens: 900_000, cached_input_tokens: 400_000, output_tokens: 130_000 } },
+          rate_limits: {
+            plan_type: "Plus",
+            primary: {
+              used_percent: 42,
+              window_minutes: 300,
+              resets_at: Math.floor((now + 3 * 3_600_000) / 1000),
+            },
+            secondary: {
+              used_percent: 68,
+              window_minutes: 10080,
+              resets_at: Math.floor((now + 3 * 86_400_000) / 1000),
+            },
           },
         },
-      },
-    }) + "\n",
+      }),
+    ].join("\n") + "\n",
   );
 }
 

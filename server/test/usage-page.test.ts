@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 
 const bundle = await build({
   stdin: {
-    contents: `import React from "react"; import { renderToStaticMarkup } from "react-dom/server"; import { UsagePage, formatUsageWindow } from "./web/src/pages/Usage.tsx"; export const render = () => renderToStaticMarkup(React.createElement(UsagePage)); export { formatUsageWindow };`,
+    contents: `import React from "react"; import { renderToStaticMarkup } from "react-dom/server"; import { QuotaCard, UsagePage, formatUsageWindow } from "./web/src/pages/Usage.tsx"; export const render = () => renderToStaticMarkup(React.createElement(UsagePage)); export const renderQuotaCard = (q) => renderToStaticMarkup(React.createElement(QuotaCard, { q })); export { formatUsageWindow };`,
     resolveDir: process.cwd(),
     loader: "jsx",
   },
@@ -20,6 +20,7 @@ const bundle = await build({
 const module = {
   exports: {} as {
     render: () => string;
+    renderQuotaCard: (q: unknown) => string;
     formatUsageWindow: (
       range: "24h" | "7d" | "30d" | "all",
       report: { range: "24h" | "7d" | "30d" | "all"; since_ms: number | null; generated_ms: number; timeline: { start_ms: number }[] } | null,
@@ -28,7 +29,7 @@ const module = {
   },
 };
 new Function("require", "module", "exports", bundle.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
-const { render, formatUsageWindow } = module.exports;
+const { render, renderQuotaCard, formatUsageWindow } = module.exports;
 
 function renderWithHash(hash: string): string {
   const globals = globalThis as unknown as { window: unknown };
@@ -110,4 +111,70 @@ test("formatUsageWindow formats ranges and guards missing or stale reports", () 
 
   const inverted = formatUsageWindow("all", { range: "all", since_ms: null, generated_ms: end, timeline: [{ start_ms: end + 1000 }] }, "en-US");
   assert.deepEqual(inverted, { dates: null, label: "All time" });
+});
+
+test("QuotaCard renders prediction badges, projected bars, and forecast copy", () => {
+  const future = Date.now() + 3 * 86_400_000;
+  const willHitHtml = renderQuotaCard({
+    agent: "codex",
+    source: "Codex session logs",
+    as_of_ms: Date.now(),
+    stale: false,
+    plan: "Plus",
+    windows: [
+      { label: "5-hour", used_percent: 35, resets_ms: Date.now() + 3_600_000, prediction: null },
+      {
+        label: "Weekly",
+        used_percent: 68,
+        resets_ms: future,
+        prediction: { will_hit: true, status: "will_hit", projected_percent: 120, hits_in_ms: 36 * 3_600_000, hits_at_ms: Date.now() + 36 * 3_600_000, rate_per_day: 21, basis: "curve" },
+      },
+    ],
+    note: null,
+  });
+  assert.match(willHitHtml, /badge-urgent">will hit</);
+  assert.match(willHitHtml, /usage-bar-projected usage-bar-projected-will_hit/);
+  assert.match(willHitHtml, /quota-forecast-will_hit/);
+  assert.match(willHitHtml, /Hits in ~1d 12h \(~120% pace\)/);
+  assert.equal((willHitHtml.match(/usage-quota-forecast/g) ?? []).length, 1, "5h window omits forecast");
+
+  const closeHtml = renderQuotaCard({
+    agent: "claude",
+    source: "ccstatusline cache",
+    as_of_ms: Date.now(),
+    stale: false,
+    plan: null,
+    windows: [
+      {
+        label: "Weekly (all models)",
+        used_percent: 55,
+        resets_ms: future,
+        prediction: { will_hit: false, status: "close", projected_percent: 91, hits_in_ms: null, hits_at_ms: null, rate_per_day: 12, basis: "pace" },
+      },
+    ],
+    note: null,
+  });
+  assert.match(closeHtml, /badge-warn">close</);
+  assert.match(closeHtml, /usage-bar-projected-close/);
+  assert.match(closeHtml, /Close · ~91% by reset/);
+
+  const safeHtml = renderQuotaCard({
+    agent: "opencode-go",
+    source: "OpenCode Go",
+    as_of_ms: Date.now(),
+    stale: false,
+    plan: null,
+    windows: [
+      {
+        label: "Monthly",
+        used_percent: 20,
+        resets_ms: future,
+        prediction: { will_hit: false, status: "safe", projected_percent: 45, hits_in_ms: null, hits_at_ms: null, rate_per_day: 2, basis: "curve" },
+      },
+    ],
+    note: null,
+  });
+  assert.doesNotMatch(safeHtml, /badge-urgent|badge-warn/);
+  assert.match(safeHtml, /usage-bar-projected-safe/);
+  assert.match(safeHtml, /On track · ~45% by reset/);
 });

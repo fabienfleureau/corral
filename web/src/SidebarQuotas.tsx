@@ -4,7 +4,13 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { AgentQuota } from "./types";
 import { timeAgo } from "./util";
-import { buildSidebarQuotaGauges, formatResetIn, quotaAriaLabel } from "./sidebar-quotas";
+import {
+  buildSidebarQuotaGauges,
+  formatQuotaPrediction,
+  formatResetIn,
+  quotaAriaLabel,
+  quotaPredictionDetail,
+} from "./sidebar-quotas";
 import type { SidebarQuotaGauge } from "./sidebar-quotas";
 
 const RING_GEOMETRY = [
@@ -217,6 +223,7 @@ export function SidebarQuotas({
               <span className="sidebar-quota-icon" aria-hidden="true">
                 <ProviderMark agent={gauge.agent} />
               </span>
+              {gauge.willHit ? <span className="sidebar-quota-alert" aria-hidden="true" /> : null}
             </span>
           </button>
         );
@@ -253,6 +260,14 @@ export function SidebarQuotas({
                     />
                   </div>
                   {reset ? <div className="sidebar-quota-tooltip-reset muted">{reset}</div> : null}
+                  {w.prediction ? (
+                    <div
+                      className={`sidebar-quota-tooltip-forecast quota-forecast-${w.prediction.status}`}
+                      title={quotaPredictionDetail(w.prediction)}
+                    >
+                      {formatQuotaPrediction(w.prediction)}
+                    </div>
+                  ) : null}
                 </div>
               );
             })}

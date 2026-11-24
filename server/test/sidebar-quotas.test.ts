@@ -7,12 +7,14 @@ import { createRequire } from "node:module";
 import { build } from "esbuild";
 import {
   buildSidebarQuotaGauges,
+  formatQuotaPrediction,
   formatResetIn,
   quotaAriaLabel,
+  quotaPredictionDetail,
   quotaTone,
   remainingPercent,
 } from "../../web/src/sidebar-quotas.ts";
-import type { AgentQuota } from "../../web/src/types.ts";
+import type { AgentQuota, QuotaPrediction } from "../../web/src/types.ts";
 import { createHttpServer } from "../api.ts";
 import { Db } from "../db.ts";
 import { GoQuotaCache, UsageScanner, emptyGoQuota } from "../usage.ts";
@@ -147,6 +149,48 @@ test("SidebarQuotas renders concentric progress rings and provider marks", async
   assert.match(html, /quota-ring-outer quota-ring-hot quota-ring-exhausted" data-remaining="0"/);
   assert.match(html, /stroke-linecap="round"/);
   assert.match(html, /quota-ring-arc quota-ring-empty/);
+  assert.doesNotMatch(html, /sidebar-quota-alert/);
+
+  const withAlert = mod.exports.render([
+    quota("claude", [
+      {
+        label: "Weekly",
+        used_percent: 70,
+        resets_ms: null,
+        prediction: { will_hit: true, status: "will_hit", projected_percent: 120, hits_in_ms: 36 * 3_600_000, hits_at_ms: 100, rate_per_day: 20, basis: "curve" },
+      },
+    ]),
+  ]);
+  assert.match(withAlert, /sidebar-quota-alert/);
+});
+
+test("formatQuotaPrediction, quotaPredictionDetail, willHit, and quotaAriaLabel handle predictions", () => {
+  const pred = (over: Partial<QuotaPrediction>): QuotaPrediction => ({
+    will_hit: false,
+    status: "safe",
+    projected_percent: 42,
+    hits_in_ms: null,
+    hits_at_ms: null,
+    rate_per_day: 6,
+    basis: "curve",
+    ...over,
+  });
+  assert.equal(formatQuotaPrediction(pred({})), "On track · ~42% by reset");
+  assert.equal(formatQuotaPrediction(pred({ status: "close", projected_percent: 91 })), "Close · ~91% by reset");
+  assert.equal(formatQuotaPrediction(pred({ status: "will_hit", will_hit: true, projected_percent: 135, hits_in_ms: 30 * 3_600_000 })), "Hits in ~1d 6h (~135% pace)");
+  assert.equal(formatQuotaPrediction(pred({ status: "will_hit", will_hit: true, projected_percent: 450, hits_in_ms: 5 * 3_600_000 })), "Hits in ~5h (>300% pace)");
+  assert.equal(formatQuotaPrediction(pred({ status: "hit", will_hit: true, projected_percent: 100 })), "Limit hit (100%)");
+  assert.match(quotaPredictionDetail(pred({})), /based on current usage curve/);
+  assert.match(quotaPredictionDetail(pred({ basis: "pace" })), /based on window pace/);
+
+  const [gauge] = buildSidebarQuotaGauges([
+    quota("codex", [
+      { label: "5-hour", used_percent: 20, resets_ms: 1000, prediction: null },
+      { label: "Weekly", used_percent: 70, resets_ms: 2000, prediction: pred({ status: "will_hit", will_hit: true, projected_percent: 125, hits_in_ms: 48 * 3_600_000 }) },
+    ]),
+  ]);
+  assert.equal(gauge.willHit, true);
+  assert.match(quotaAriaLabel(gauge), /Hits in ~2d \(~125% pace\)/);
 });
 
 test("GET /api/usage/quota scans Codex session logs on first call", async () => {

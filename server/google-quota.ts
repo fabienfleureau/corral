@@ -13,7 +13,7 @@ import https from "node:https";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveExecutable, runAsync } from "./exec.ts";
-import { QuotaCache, type AgentQuota, type QuotaWindow } from "./usage.ts";
+import { QuotaCache, inferWindowMs, type AgentQuota, type QuotaWindow } from "./usage.ts";
 
 const SERVICE_PREFIX = "/exa.language_server_pb.LanguageServerService";
 const QUOTA_SUMMARY_PATH = `${SERVICE_PREFIX}/RetrieveUserQuotaSummary`;
@@ -160,10 +160,13 @@ export function parseQuotaSummary(payload: Json | null | undefined, now = Date.n
       const used = usedPercentFrom(bucket);
       if (used === null) continue;
       const label = bucketLabel(groupName, str(bucket?.displayName), str(bucket?.window), str(bucket?.bucketId), windows.length);
+      const resetsMs = ms(bucket?.resetTime ?? bucket?.resetsAt);
+      const windowHint = [str(bucket?.window), str(bucket?.displayName), str(bucket?.bucketId), label].filter(Boolean).join(" ");
       windows.push({
         label,
         used_percent: used,
-        resets_ms: ms(bucket?.resetTime ?? bucket?.resetsAt),
+        resets_ms: resetsMs,
+        window_ms: inferWindowMs(windowHint, resetsMs),
       });
     }
   }
@@ -193,10 +196,12 @@ export function parseUserStatus(payload: Json | null | undefined, now = Date.now
     const label = str(cfg?.label) ?? str(cfg?.modelOrAlias?.model) ?? `Model ${windows.length + 1}`;
     if (seen.has(label)) continue;
     seen.add(label);
+    const resetsMs = ms(cfg?.quotaInfo?.resetTime);
     windows.push({
       label,
       used_percent: used,
-      resets_ms: ms(cfg?.quotaInfo?.resetTime),
+      resets_ms: resetsMs,
+      window_ms: inferWindowMs(label, resetsMs),
     });
   }
   if (!windows.length) return null;

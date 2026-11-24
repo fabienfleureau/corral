@@ -44,7 +44,7 @@ import { cachedPulls, platformRateLimits, refreshPulls } from "./pulls.ts";
 import type { EpicLink, Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { PlanConflictError, PlanDeliveryError, PlanError, approvePlan, isDirectory, listTaskPlanRevisions, requestPlanChanges, validatePlanReviewInput, validateSubtasks } from "./multi-repo.ts";
-import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type AgentQuota, type UsageRange } from "./usage.ts";
+import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, attachQuotaPredictions, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type AgentQuota, type UsageRange } from "./usage.ts";
 import { GoogleQuotaCache } from "./google-quota.ts";
 import { SHIPPED_CATALOG, mergeCatalog, parseCatalog } from "./model-catalog.ts";
 import { PrAdditionsCache } from "./usage-pr.ts";
@@ -1670,8 +1670,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       (state.googleQuota ??= new GoogleQuotaCache()).get(refresh),
       scanner.refresh(refresh).catch(() => undefined),
     ]);
-    const quota: AgentQuota[] = [claudeQuota(scanner.sources.claudeQuotaDir), codexQuota(scanner.codexRateLimits()), go, google];
-    json(res, 200, { quota, fetched_ms: Date.now() });
+    const now = Date.now();
+    const prices = { ...DEFAULT_PRICES, ...(state.cfg.usage?.prices ?? {}) };
+    const quota = attachQuotaPredictions(
+      [claudeQuota(scanner.sources.claudeQuotaDir, now), codexQuota(scanner.codexRateLimits(), now), go, google],
+      scanner.records(),
+      prices,
+      now,
+    );
+    json(res, 200, { quota, fetched_ms: now });
   });
 
   on("GET", "/api/config", (_req, res) => {
