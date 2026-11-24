@@ -84,7 +84,10 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   **amendment** per unstarted task, which you apply (written to the Jira ticket) or
   reject from the inbox. Jira stays the source of truth; Corral only writes its own
   delimited `[corral:begin:…]` blocks. The `epic-brainstorm` skill turns a
-  brainstorming into an epic in that format. Vocabulary: [`GLOSSARY.md`](../GLOSSARY.md),
+  brainstorming into an epic in that format. Use **Remove** on the Epics page to
+  remove an epic from Corral (design history, proposed amendments, and autonomous agent
+  settings/report) without touching Jira; existing Corral tasks remain detached on the
+  Tasks page and the epic can be re-imported by its Jira key later. Vocabulary: [`GLOSSARY.md`](../GLOSSARY.md),
   decision: [ADR 0001](adr/0001-jira-source-of-truth-for-epics.md).
 - **Question inbox** — dispatched agents are given `skills/question-report.md`,
   which tells them to POST a clean question via `$CORRAL_URL/api/reports`. Structured
