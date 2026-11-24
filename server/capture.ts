@@ -31,6 +31,11 @@ import {
   type StoppedRetryConfig,
 } from "./stopped-retry.ts";
 import type { Item, TaskSpec } from "./types.ts";
+import { pullUrlForRemotes } from "./repo-match.ts";
+import { gitRemoteUrls } from "./repos.ts";
+
+/** Any GitHub PR or GitLab MR link. */
+const ANY_PR_URL = /https?:\/\/[^\s<>()]+?(?:\/pull\/|\/-\/merge_requests\/|\/merge_requests\/)\d+/i;
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
 
@@ -550,7 +555,11 @@ export class CaptureEngine {
     // A task without a PR of its own reports into the inbox as information.
     const taskKind = taskId ? this.db.getTask(taskId)?.kind : undefined;
     const noPr = taskKind === "review" || taskKind === "spec" || taskKind === "analysis" || taskKind === "ops" || taskKind === "grill" || (taskKind === "grill-docs" && !/\bPR:\s*https?:\/\/[^\s)]+\/(?:pull|merge_requests)\/\d+/i.test(opts.body));
-    const itemKind: Item["kind"] = isDone ? (noPr ? "digest" : "pr") : "question";
+    // A `pr` report that names no PR (analysis, no code) is information, not
+    // a PR to gate: unless the task already knows its PR.
+    const prWithoutUrl = opts.kind === "pr" && !ANY_PR_URL.test(opts.body) && !(taskId && this.db.getTask(taskId)?.pr_url);
+    const itemKind: Item["kind"] = isDone ? (noPr || prWithoutUrl ? "digest" : "pr") : "question";
+    if (taskId && itemKind !== "pr") this.linkReportedPr(taskId, opts.body);
     const address =
       opts.terminal ??
       (taskId ? this.db.getTask(taskId)?.terminal_address ?? null : null);
@@ -774,6 +783,18 @@ export class CaptureEngine {
     this.db.recordMetric("item.created", item.id, { kind: "plan", capture: "structured", task_id: taskId });
     this.hub.broadcast("item.created", item);
     return item;
+  }
+
+  /** A digest or question that mentions a PR/MR of the task's own repo links
+   *  it to the task, when the task has none (an interview that opened a PR). */
+  private linkReportedPr(taskId: string, body: string): void {
+    const task = this.db.getTask(taskId);
+    if (!task || task.pr_url || !task.repo_path || task.kind === "review") return;
+    const url = pullUrlForRemotes(body, gitRemoteUrls(task.repo_path));
+    if (!url) return;
+    this.db.updateTask(task.id, { pr_url: url });
+    this.db.recordMetric("task.pr_found", task.id, { url, how: "report" });
+    this.hub.broadcast("task.updated", this.db.getTask(task.id));
   }
 
   /** Verify the PR gate right after a completion report (best effort). */
