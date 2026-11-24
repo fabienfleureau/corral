@@ -472,6 +472,43 @@ export class Db {
     return this.stmt(`SELECT * FROM epics ORDER BY created_ms DESC`).all() as unknown as Epic[];
   }
 
+  /** Remove an epic and its epic-owned records while preserving linked Corral tasks. */
+  deleteEpic(id: string): { deleted: boolean; archivedItemIds: string[]; detachedTaskIds: string[] } {
+    if (!this.getEpic(id)) return { deleted: false, archivedItemIds: [], detachedTaskIds: [] };
+    this.raw.exec("BEGIN");
+    try {
+      const amendmentItems = this.stmt(
+        `SELECT DISTINCT i.id FROM items i JOIN epic_amendments a ON a.item_id = i.id WHERE a.epic_id = ? AND i.status = 'open'`,
+      ).all(id) as unknown as { id: string }[];
+      const launchItems = this.stmt(
+        `SELECT DISTINCT i.id FROM items i JOIN tasks t ON t.id = i.task_id WHERE t.epic_id = ? AND i.kind = 'launch' AND i.status = 'open'`,
+      ).all(id) as unknown as { id: string }[];
+      const archivedItemIds = [...new Set([...amendmentItems, ...launchItems].map((r) => r.id))];
+      const now = Date.now();
+      for (const itemId of archivedItemIds) {
+        this.stmt(`UPDATE items SET status = 'archived', resolved_ms = ?, updated_ms = ? WHERE id = ?`).run(now, now, itemId);
+      }
+
+      const detachedTaskIds = (
+        this.stmt(`SELECT id FROM tasks WHERE epic_id = ?`).all(id) as unknown as { id: string }[]
+      ).map((r) => r.id);
+      this.stmt(`UPDATE tasks SET epic_id = NULL, epic_out = 0 WHERE epic_id = ?`).run(id);
+
+      this.stmt(`DELETE FROM epic_links WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epic_tickets WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epic_designs WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epic_amendments WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epic_agents WHERE epic_id = ?`).run(id);
+      this.stmt(`DELETE FROM epics WHERE id = ?`).run(id);
+
+      this.raw.exec("COMMIT");
+      return { deleted: true, archivedItemIds, detachedTaskIds };
+    } catch (err) {
+      this.raw.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
   listEpicTasks(epicId: string): Task[] {
     return this.stmt(`SELECT * FROM tasks WHERE epic_id = ? ORDER BY jira_key, created_ms`).all(epicId) as unknown as Task[];
   }

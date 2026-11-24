@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import type { EpicTaskView, Favorite, Repo } from "../../web/src/types.ts";
 
 const bundle = await build({
-  stdin: { contents: `export { epicBoardGroups, epicTaskConf, favoriteConfSummary } from "./web/src/pages/Epics.tsx";`, resolveDir: process.cwd(), loader: "ts" },
+  stdin: { contents: `export { epicBoardGroups, epicTaskConf, favoriteConfSummary, nextSelectedEpicAfterRemove, reconcileSelectedEpic } from "./web/src/pages/Epics.tsx";`, resolveDir: process.cwd(), loader: "ts" },
   bundle: true,
   platform: "node",
   format: "cjs",
@@ -23,10 +23,12 @@ const mod = {
       epicFavorite: Favorite | null,
       repos: Pick<Repo, "path" | "context">[],
     ) => { target: string; agent: string | null; model: string | null; reasoning: string | null; review: string | null; inherited: boolean; favoriteName?: string } | null;
+    reconcileSelectedEpic: (currentId: string | null, rows: readonly { id: string }[]) => string | null;
+    nextSelectedEpicAfterRemove: (rows: readonly { id: string }[], removedId: string) => string | null;
   },
 };
 new Function("require", "module", "exports", bundle.outputFiles[0].text)(createRequire(import.meta.url), mod, mod.exports);
-const { epicBoardGroups, epicTaskConf, favoriteConfSummary } = mod.exports;
+const { epicBoardGroups, epicTaskConf, favoriteConfSummary, nextSelectedEpicAfterRemove, reconcileSelectedEpic } = mod.exports;
 
 const view = (id: string, state: EpicTaskView["state"]): EpicTaskView => ({
   task: { id, title: id, jira_key: id } as EpicTaskView["task"],
@@ -84,4 +86,21 @@ test("favoriteConfSummary and epicTaskConf resolve explicit conf, inherited epic
     epicTaskConf({ repo_path: "/work/app", target: "", agent: null, model: null, reasoning: null, review: null }, null, repos),
     null,
   );
+});
+
+test("reconcileSelectedEpic keeps a valid selection and falls back when the selected epic disappears", () => {
+  const rows = [{ id: "e1" }, { id: "e2" }];
+  assert.equal(reconcileSelectedEpic(null, rows), "e1");
+  assert.equal(reconcileSelectedEpic("e2", rows), "e2");
+  assert.equal(reconcileSelectedEpic("deleted", rows), "e1");
+  assert.equal(reconcileSelectedEpic("deleted", []), null);
+});
+
+test("nextSelectedEpicAfterRemove picks the neighbor after removal or null when none remain", () => {
+  const rows = [{ id: "e1" }, { id: "e2" }, { id: "e3" }];
+  assert.equal(nextSelectedEpicAfterRemove(rows, "e1"), "e2");
+  assert.equal(nextSelectedEpicAfterRemove(rows, "e2"), "e3");
+  assert.equal(nextSelectedEpicAfterRemove(rows, "e3"), "e2");
+  assert.equal(nextSelectedEpicAfterRemove([{ id: "e1" }], "e1"), null);
+  assert.equal(nextSelectedEpicAfterRemove(rows, "missing"), "e1");
 });

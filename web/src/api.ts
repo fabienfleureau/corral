@@ -234,6 +234,7 @@ export const api = {
   orchestrateEpic: (id: string, request: string): Promise<{ proposal: string }> => post(`/api/epics/${id}/orchestrate`, { request }),
   patchEpicSettings: async (id: string, input: { favorite_name?: string; repo_path?: string }): Promise<EpicDetail> =>
     checkEpicDetail(await patch(`/api/epics/${id}`, input), "PATCH", `/api/epics/${id}`),
+  deleteEpic: (id: string): Promise<{ ok: boolean }> => request<{ ok: boolean }>(`/api/epics/${id}`, "DELETE"),
   createEpicRequest: (id: string, input: { request: string; favorite_name: string; repo_path: string; kind?: "code" | "ops" }): Promise<Task> =>
     post(`/api/epics/${id}/requests`, input),
   getEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await get(`/api/epics/${id}`), "GET", `/api/epics/${id}`),
@@ -369,6 +370,8 @@ export type ServerEvent =
   | { type: "item.created"; item: Item }
   | { type: "item.updated"; item: Item }
   | { type: "task.updated"; task: Task }
+  | { type: "epic.updated" }
+  | { type: "epic.deleted"; id: string }
   | { type: "pulls.updated" }
   | { type: "session.updated"; address: string; status: string | null };
 
@@ -396,6 +399,11 @@ export function subscribeEvents(onEvent: (event: ServerEvent) => void): () => vo
     const task = parse(ev) as Task | null;
     if (task) onEvent({ type: "task.updated", task });
   };
+  const onEpicUpdated = () => onEvent({ type: "epic.updated" });
+  const onEpicDeleted = (ev: Event) => {
+    const data = parse(ev) as { id?: string } | null;
+    if (data?.id) onEvent({ type: "epic.deleted", id: data.id });
+  };
   // Background refreshes and session status changes: pages just reload.
   const onPullsUpdated = () => onEvent({ type: "pulls.updated" });
   const onSessionUpdated = (ev: Event) => {
@@ -408,11 +416,15 @@ export function subscribeEvents(onEvent: (event: ServerEvent) => void): () => vo
   source.addEventListener("session.updated", onSessionUpdated);
   source.addEventListener("item.updated", onItemUpdated);
   source.addEventListener("task.updated", onTaskUpdated);
+  source.addEventListener("epic.updated", onEpicUpdated);
+  source.addEventListener("epic.deleted", onEpicDeleted);
 
   return () => {
     source.removeEventListener("item.created", onItemCreated);
     source.removeEventListener("item.updated", onItemUpdated);
     source.removeEventListener("task.updated", onTaskUpdated);
+    source.removeEventListener("epic.updated", onEpicUpdated);
+    source.removeEventListener("epic.deleted", onEpicDeleted);
     source.removeEventListener("pulls.updated", onPullsUpdated);
     source.removeEventListener("session.updated", onSessionUpdated);
     source.close();

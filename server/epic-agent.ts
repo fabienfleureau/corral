@@ -540,6 +540,7 @@ export class EpicAgentRunner {
       this.finish(epic.id, row.run_name, "The agent returned an invalid epic report. Inspect the session for its output.");
       return;
     }
+    if (!this.db.getEpic(epic.id)) return;
     const settings = storedSettings(row.settings, epic);
     let memory: string;
     try { memory = persistEpicMemory(epic.jira_key, settings.repoPath, report.memory); }

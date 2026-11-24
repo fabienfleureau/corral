@@ -1,7 +1,7 @@
 // Epics: a Jira epic as an ordered list of tasks, with what blocks each one and
 // how far the whole thing got. Jira owns the structure; resync pulls it again.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api } from "../api";
 import { EpicAgentPanel } from "../EpicAgentPanel";
 import { favoritesFor, repoContext } from "../favorite-context";
@@ -97,6 +97,85 @@ export function epicTaskConf(
   };
 }
 
+export function reconcileSelectedEpic(currentId: string | null, rows: readonly Pick<Epic, "id">[]): string | null {
+  if (currentId && rows.some((r) => r.id === currentId)) return currentId;
+  return rows[0]?.id ?? null;
+}
+
+export function nextSelectedEpicAfterRemove(rows: readonly Pick<Epic, "id">[], removedId: string): string | null {
+  const index = rows.findIndex((r) => r.id === removedId);
+  if (index === -1) return rows[0]?.id ?? null;
+  return rows[index + 1]?.id ?? rows[index - 1]?.id ?? null;
+}
+
+function RemoveEpicDialog({
+  epic,
+  agentRunState,
+  busy,
+  error,
+  onConfirm,
+  onClose,
+}: {
+  epic: Epic;
+  agentRunState: string | null;
+  busy: boolean;
+  error: string | null;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const headingId = useId();
+  const descId = useId();
+  const agentActive = agentRunState === "starting" || agentRunState === "running" || agentRunState === "blocked";
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="confirm-dialog"
+      aria-labelledby={headingId}
+      aria-describedby={descId}
+      onCancel={(e) => {
+        if (busy) e.preventDefault();
+      }}
+      onClose={onClose}
+    >
+      <div className="history-head">
+        <h1 id={headingId} className="history-title">Remove {epic.jira_key} from Corral?</h1>
+      </div>
+      <div id={descId} className="confirm-dialog-body">
+        <p>
+          Removes <strong>{epic.jira_key} · {epic.title}</strong>, its saved design history, proposed
+          amendments, and autonomous agent settings/report from Corral.
+        </p>
+        <p className="muted">
+          Nothing is changed in Jira. Existing Corral tasks stay on the Tasks page, detached from this epic,
+          and you can re-import it by its Jira key later.
+        </p>
+        {agentActive ? (
+          <p className="muted">
+            Its autonomous epic agent is currently active; its schedule and stored run state will be removed.
+          </p>
+        ) : null}
+        {error ? <p className="inline-error" role="alert">{error}</p> : null}
+      </div>
+      <div className="form-foot confirm-dialog-foot">
+        <button type="button" className="btn" autoFocus disabled={busy} onClick={() => dialogRef.current?.close()}>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-danger-solid" disabled={busy} onClick={onConfirm}>
+          {busy ? <Spinner /> : null}
+          {busy ? "Removing…" : "Remove epic"}
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
 export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; refresh: () => void }) {
   const [epics, setEpics] = useState<(Epic & { summary: EpicSummary })[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -112,10 +191,13 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [repoPath, setRepoPath] = useState("");
   const [createdTask, setCreatedTask] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    api.listEpics().then((rows) => { if (!cancelled) { setEpics(rows); setSelectedId((id) => id ?? rows[0]?.id ?? null); } }).catch((e) => { if (!cancelled) setError(errText(e)); });
+    api.listEpics().then((rows) => { if (!cancelled) { setEpics(rows); setSelectedId((id) => reconcileSelectedEpic(id, rows)); } }).catch((e) => { if (!cancelled) setError(errText(e)); });
     api.listRepos().then((rows) => { if (!cancelled) setRepos(rows); }).catch(() => undefined);
     api.getConfig().then((cfg) => { if (!cancelled) setFavorites(cfg.favorites ?? []); }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -138,6 +220,8 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     setRepoPath(detail.epic.repo_path ?? "");
     setRequest("");
     setCreatedTask(null);
+    setConfirmRemove(false);
+    setRemoveError(null);
   }, [detail?.epic.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const savedFavoriteName = detail?.epic.favorite_name ?? "";
@@ -213,6 +297,28 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     void run(async () => { await api.launchEpicTask(epicId, task.id); }).finally(() => setLaunchingId(null));
   };
 
+  const removeEpic = async () => {
+    if (!detail) return;
+    const removedId = detail.epic.id;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await api.deleteEpic(removedId);
+      const nextId = nextSelectedEpicAfterRemove(epics, removedId);
+      setEpics((rows) => rows.filter((r) => r.id !== removedId));
+      setSelectedId(nextId);
+      setDetail(null);
+      setConfirmRemove(false);
+      setCreatedTask(null);
+      setError(null);
+      refresh();
+    } catch (e) {
+      setRemoveError(errText(e));
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   return (
     <section className="page-scroll epics-page">
       <h1>Epics</h1>
@@ -236,7 +342,18 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
           {detail.error ? <p className="inline-error" role="alert">{detail.error}. Restart the Corral server, then reload.</p> : null}
           <div className="epic-head">
             <h2>{detail.epic.jira_key} · {detail.epic.title}</h2>
-            <button className="btn" type="button" disabled={busy} onClick={() => void run(() => api.syncEpic(detail.epic.id))}>Resync from Jira</button>
+            <div className="epic-head-actions">
+              <button className="btn" type="button" disabled={busy || removing} onClick={() => void run(() => api.syncEpic(detail.epic.id))}>Resync from Jira</button>
+              <button
+                className="btn btn-danger"
+                type="button"
+                aria-haspopup="dialog"
+                disabled={busy || removing}
+                onClick={() => { setRemoveError(null); setConfirmRemove(true); }}
+              >
+                Remove
+              </button>
+            </div>
           </div>
           <label className="epic-summary" htmlFor="epic-progress">{summaryText(detail.summary)}</label>
           <progress id="epic-progress" className="epic-progress" value={detail.summary.merged} max={Math.max(detail.summary.total, 1)} />
@@ -455,6 +572,16 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
             <p className="muted">The current design and its amendments stay on the epic. Ask for a change with the request field above.</p>
           </section>
         </article>
+      ) : null}
+      {confirmRemove && detail ? (
+        <RemoveEpicDialog
+          epic={detail.epic}
+          agentRunState={detail.agent?.runState ?? null}
+          busy={removing}
+          error={removeError}
+          onConfirm={() => void removeEpic()}
+          onClose={() => { if (!removing) { setConfirmRemove(false); setRemoveError(null); } }}
+        />
       ) : null}
     </section>
   );

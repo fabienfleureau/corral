@@ -1193,6 +1193,27 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     } catch (err) { epicRequestFailure(res, err); }
   });
 
+  on("DELETE", "/api/epics/:id", (_req, res, { params }) => {
+    const epic = state.db.getEpic(params.id);
+    if (!epic) return json(res, 404, { error: "epic not found" });
+    const { archivedItemIds, detachedTaskIds } = state.db.deleteEpic(epic.id);
+    state.db.recordMetric("epic.deleted", epic.id, {
+      key: epic.jira_key,
+      detached_tasks: detachedTaskIds.length,
+      archived_items: archivedItemIds.length,
+    });
+    for (const itemId of archivedItemIds) {
+      const item = state.db.getItem(itemId);
+      if (item) state.hub.broadcast("item.updated", item);
+    }
+    for (const taskId of detachedTaskIds) {
+      const task = state.db.getTask(taskId);
+      if (task) state.hub.broadcast("task.updated", task);
+    }
+    state.hub.broadcast("epic.deleted", { id: epic.id, jira_key: epic.jira_key });
+    json(res, 200, { ok: true });
+  });
+
   // One free-form field on the Epic page: every kind of request becomes a
   // tracked task, with the epic's saved dispatch choices. Nothing is launched.
   on("POST", "/api/epics/:id/requests", (_req, res, { params, body }) => {
