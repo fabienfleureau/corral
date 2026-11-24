@@ -157,7 +157,9 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   benchmark scores) shows indicators on the task form.
 - **Self-improvement** (`#/improve`) — three analyses, each on demand or on a
   schedule, that dispatch read-only agent tasks in a selected repository and post
-  a digest to the inbox. The *improvement analysis* reviews recent
+  a digest to the inbox. Pick a **Favorite** matching the repository's
+  professional/personal context (or leave it on Auto to use the first matching
+  favorite). The *improvement analysis* reviews recent
   task and PR activity, including tasks tagged as probable repeats. Above the analyses, *Runs that stopped without reporting*
   shows, per harness, how many dispatched runs ended in an inbox escalation
   (stopped, failed or silent) before and after a pivot date, by default the

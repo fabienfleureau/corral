@@ -285,12 +285,20 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   });
-  on("GET", "/api/analysis-repo", (_req, res) => json(res, 200, { repo: analysisAgent.repo() }));
+  on("GET", "/api/analysis-repo", (_req, res) => json(res, 200, analysisAgent.settings()));
   on("PUT", "/api/analysis-repo", (_req, res, { body }) => {
-    const repo = (body as { repo?: unknown } | null)?.repo;
-    if (typeof repo !== "string") return json(res, 400, { error: "Repository path required" });
-    try { analysisAgent.setRepo(repo.trim()); json(res, 200, { repo: analysisAgent.repo() }); }
-    catch { json(res, 400, { error: "Repository must be an existing git repository" }); }
+    const b = (body ?? null) as { repo?: unknown; favorite?: unknown } | null;
+    if (!b || (b.repo === undefined && b.favorite === undefined) || (b.repo !== undefined && typeof b.repo !== "string") || (b.favorite !== undefined && typeof b.favorite !== "string")) {
+      return json(res, 400, { error: "Repository path or favorite required" });
+    }
+    try {
+      json(res, 200, analysisAgent.setSettings({
+        ...(b.repo !== undefined ? { repo: b.repo } : {}),
+        ...(b.favorite !== undefined ? { favorite: b.favorite } : {}),
+      }));
+    } catch (err) {
+      json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   const improvement = state.improvement ??= new ImprovementAnalysis(state.db, state.hub, (prompt) => llmComplete(state.cfg, prompt), {

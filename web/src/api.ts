@@ -349,8 +349,9 @@ export const api = {
   buildKpiArtifact: (id: KpiId, input: KpiArtifactRequest): Promise<{ task: Task }> =>
     post(`/api/kpis/${id}/artifact`, input),
 
-  analysisRepo: (): Promise<{ repo: string }> => get<{ repo: string }>("/api/analysis-repo"),
-  setAnalysisRepo: (repo: string): Promise<{ repo: string }> => put<{ repo: string }>("/api/analysis-repo", { repo }),
+  analysisRepo: (): Promise<{ repo: string; favorite: string }> => get<{ repo: string; favorite: string }>("/api/analysis-repo"),
+  setAnalysisRepo: (repo: string, favorite?: string): Promise<{ repo: string; favorite: string }> =>
+    put<{ repo: string; favorite: string }>("/api/analysis-repo", favorite === undefined ? { repo } : { repo, favorite }),
   engineeringSkillsStatus: (): Promise<AnalysisStatus> => get<AnalysisStatus>("/api/engineering-skills"),
   setEngineeringSkillsSchedule: (intervalDays: number): Promise<AnalysisStatus> => put<AnalysisStatus>("/api/engineering-skills", { intervalDays }),
   runEngineeringSkills: (): Promise<Task> => post<Task>("/api/engineering-skills/run"),

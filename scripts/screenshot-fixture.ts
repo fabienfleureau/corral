@@ -64,6 +64,8 @@ export function seedScreenshotData(db: Db): void {
   seedMultiRepo(db, now);
   db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
   db.insertRepo({ id: "sample-home", name: "side-project", path: "/sample/side-project", jira_prefix: null, context: "personal", source: "manual", created_ms: now });
+  db.raw.exec("CREATE TABLE IF NOT EXISTS analysis_agent_settings (id INTEGER PRIMARY KEY CHECK(id = 1), repo TEXT NOT NULL DEFAULT '', favorite TEXT NOT NULL DEFAULT '')");
+  db.raw.exec("INSERT OR REPLACE INTO analysis_agent_settings (id, repo, favorite) VALUES (1, '/sample/side-project', '')");
   seedInboxItems(db, now);
   seedEpic(db, now);
   seedTaskHistory(db, now);
