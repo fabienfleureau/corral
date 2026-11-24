@@ -31,6 +31,10 @@ export type Task = {
   pr_url: string | null;
   jira_status?: string | null;
   epic_id?: string | null;
+  /** A done task in the same repo this one probably repeats. */
+  repeat_of?: string | null;
+  /** An archived or failed task with the same label that this one retries. */
+  retry_of?: string | null;
   /** 1 once the ticket left its epic in Jira. */
   epic_out?: number;
   /** Resolved review command, frozen at dispatch; null when none. */
