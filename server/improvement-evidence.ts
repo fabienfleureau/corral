@@ -11,6 +11,7 @@ import type { Db } from "./db.ts";
 import { taskLabel, type Item, type Task } from "./types.ts";
 import type { PrSnapshot } from "./pr.ts";
 import type { UsageEvidence } from "./usage.ts";
+import { isPublishQuestion } from "./review-outcome.ts";
 
 const DAY = 86_400_000;
 
@@ -68,6 +69,8 @@ export interface EvidenceTask {
   reasoning: string | null;
   pr_url: string | null;
   pr_role: "authored" | "reviewed";
+  /** Review tasks: published / skipped once known, else null. */
+  review_outcome: string | null;
   branch: string | null;
   base_branch: string | null;
   repo_path: string;
@@ -127,6 +130,8 @@ export interface ImprovementEvidence {
     multiple_resolution_events: { item_id: string; count: number; first_ms: number; last_ms: number }[];
     duplicate_pr_items: { task_id: string; item_ids: string[] }[];
     open_pr_items: { item_id: string; task_id: string | null; age_ms: number }[];
+    /** "Publish N review comments?" questions closed with no reply: the drafts were never approved. */
+    unpublished_reviews: { count: number; items: { item_id: string; task_id: string | null; status: string }[] };
     items_outside_task_window: number;
   };
   usage: UsageEvidence | null;
@@ -295,6 +300,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       reasoning: task.reasoning ?? null,
       pr_url: task.pr_url,
       pr_role: task.kind === "review" ? "reviewed" : "authored",
+      review_outcome: task.review_outcome ?? null,
       branch: task.branch,
       base_branch: task.base_branch,
       repo_path: task.repo_path,
@@ -351,6 +357,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
     }
     if ((agg?.get("item.resolved")?.count ?? 0) > 1) flags.push("multiple_resolution_events");
     if (item.status === "archived" && item.resolved_ms === null) flags.push("archived_without_resolution");
+    if (item.status !== "open" && isPublishQuestion(item) && !agg?.get("item.replied")) flags.push("review_publish_unanswered");
     const resolvedAt = item.resolved_ms ?? (item.status === "resolved" || item.status === "archived" ? agg?.get("item.resolved")?.last_ms ?? null : null);
     return {
       id: item.id,
@@ -380,6 +387,10 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
   const multipleResolutions = evidenceItems
     .filter((i) => i.flags.includes("multiple_resolution_events"))
     .map((i) => ({ item_id: i.id, count: i.events.resolved?.count ?? 0, first_ms: i.events.resolved?.first_ms ?? 0, last_ms: i.events.resolved?.last_ms ?? 0 }));
+
+  const unpublishedReviews = evidenceItems
+    .filter((i) => i.flags.includes("review_publish_unanswered"))
+    .map((i) => ({ item_id: i.id, task_id: i.task_id, status: i.status }));
 
   const usage = opts.usage ?? null;
   return {
@@ -424,6 +435,7 @@ export function collectImprovementEvidence(db: Db, opts: ImprovementEvidenceOpti
       open_pr_items: evidenceItems
         .filter((i) => i.kind === "pr" && i.status === "open")
         .map((i) => ({ item_id: i.id, task_id: i.task_id, age_ms: now - i.created_ms })),
+      unpublished_reviews: { count: unpublishedReviews.length, items: unpublishedReviews },
       items_outside_task_window: evidenceItems.filter((i) => i.flags.includes("outside_task_window")).length,
     },
     usage,

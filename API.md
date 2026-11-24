@@ -31,6 +31,7 @@ type Task = {
   spec: string | null;        // spec tasks: JSON {contract, subtasks:[{repo,title,prompt}], revision_id?, version?, children?}
   pr_url: string | null;      // the task's PR, or the reviewed PR/MR for kind "review"
   review: string | null;      // resolved review command, frozen at dispatch (code tasks)
+  review_outcome: "published" | "skipped" | null; // review tasks: published = publish question answered and the agent reported done; skipped = answered "none", or archived/acknowledged without a reply; null = unknown
   target: string;             // "", "claude", "codex", "opencode"
   target_state: "suggested" | "confirmed";
   base_branch: string | null; branch: string | null; worktree_path: string | null;
@@ -165,7 +166,7 @@ a dispatch or a PR sync.
 - `GET /api/analysis-repo` → `{repo}`; `PUT /api/analysis-repo` `{repo}` persists the git repository used by analyses.
 - `GET /api/improvement` → schedule, last attempt/success, error and running state.
 - `PUT /api/improvement` `{intervalDays: 0|1|7|30}` → updated state; 0 disables automatic runs.
-- `POST /api/improvement/run` → a dispatched analysis task. The agent reports an inbox digest when finished. Concurrent launch requests share one run. The analysis sends bounded evidence to the agent. By default: 60 recent task snapshots plus up to 60 tasks linked from items or task events (so older items keep their task), 300 items, 1500 events with their payloads, persisted PR snapshots (checks, mergeability, unresolved thread counts and gate reasons) and API-equivalent usage cost/token attribution per task from local agent logs. It also includes derived `data_quality` flags (untitled tasks, done tasks without a PR, repeated dispatches, items resolved without a timestamp, duplicate PR items, orphan/malformed task ids, open PR items) and an explicit `gaps` list; caps are reported in `limits`/`truncated`. Production outcomes and review-thread bodies are still not recorded. Scheduled runs catch up after restart and failed runs retry after one hour.
+- `POST /api/improvement/run` → a dispatched analysis task. The agent reports an inbox digest when finished. Concurrent launch requests share one run. The analysis sends bounded evidence to the agent. By default: 60 recent task snapshots plus up to 60 tasks linked from items or task events (so older items keep their task), 300 items, 1500 events with their payloads, persisted PR snapshots (checks, mergeability, unresolved thread counts and gate reasons) and API-equivalent usage cost/token attribution per task from local agent logs. It also includes derived `data_quality` flags (untitled tasks, done tasks without a PR, repeated dispatches, items resolved without a timestamp, duplicate PR items, orphan/malformed task ids, open PR items, "Publish N review comments?" questions closed without a reply) and an explicit `gaps` list; caps are reported in `limits`/`truncated`. Production outcomes and review-thread bodies are still not recorded. Scheduled runs catch up after restart and failed runs retry after one hour.
 
 ### Engineering skills analysis
 - `GET /api/engineering-skills` → analysis status with an independent schedule.

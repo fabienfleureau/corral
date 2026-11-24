@@ -31,6 +31,8 @@ export type Task = {
   pr_url: string | null;
   jira_status?: string | null;
   epic_id?: string | null;
+  /** Review tasks: whether the drafted comments were posted; null while unknown. */
+  review_outcome?: "published" | "skipped" | null;
   /** 1 once the ticket left its epic in Jira. */
   epic_out?: number;
   /** Resolved review command, frozen at dispatch; null when none. */

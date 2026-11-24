@@ -298,6 +298,7 @@ export class Db {
     if (!taskNames.has("design_version")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN design_version INTEGER`);
     if (!taskNames.has("amendment")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN amendment TEXT`);
     if (!taskNames.has("amendment_hash")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN amendment_hash TEXT`);
+    if (!taskNames.has("review_outcome")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN review_outcome TEXT`);
     if (!taskNames.has("jira_status")) this.raw.exec(`ALTER TABLE tasks ADD COLUMN jira_status TEXT`);
     const epicCols = this.raw.prepare("PRAGMA table_info(epics)").all() as { name: string }[];
     if (!epicCols.some((c) => c.name === "design_block_hash")) this.raw.exec(`ALTER TABLE epics ADD COLUMN design_block_hash TEXT`);

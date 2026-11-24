@@ -52,6 +52,7 @@ import { SessionFacts } from "./session-facts.ts";
 import type { SessionFact } from "./session-facts.ts";
 import { handleMcp, instructTask, InstructError } from "./agent-control.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
+import { reviewQuestionClosed, reviewReplied } from "./review-outcome.ts";
 
 /** The skills prompt carries more evidence than a summary: allow a longer assistant call. */
 export const SKILLS_ANALYSIS_TIMEOUT_MS = 300_000;
@@ -402,6 +403,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.replied", item.id, { address });
+    if (content === undefined && !permission) reviewReplied(state.db, state.hub, item, text);
     state.capture?.resetStoppedRetries?.(address);
     const updatedItem = state.db.getItem(item.id);
     state.hub.broadcast("item.updated", updatedItem);
@@ -428,12 +430,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     state.db.updateItem(params.id, { status: "resolved", resolved_ms: Date.now(), snooze_until_ms: null });
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.resolved", params.id, { how: "manual" });
+    reviewQuestionClosed(state.db, state.hub, item, "acknowledged");
     state.hub.broadcast("item.updated", state.db.getItem(params.id));
     json(res, 200, state.db.getItem(params.id));
   });
 
   on("POST", "/api/items/:id/archive", (_req, res, { params }) => {
+    const archived = state.db.getItem(params.id);
     state.db.updateItem(params.id, { status: "archived", snooze_until_ms: null });
+    if (archived && archived.status !== "archived") reviewQuestionClosed(state.db, state.hub, archived, "archived");
     state.hub.broadcast("item.updated", state.db.getItem(params.id));
     json(res, 200, state.db.getItem(params.id));
   });

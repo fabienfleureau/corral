@@ -31,6 +31,7 @@ import {
   type StoppedRetryConfig,
 } from "./stopped-retry.ts";
 import type { Item, TaskSpec } from "./types.ts";
+import { reviewReportedDone } from "./review-outcome.ts";
 
 export type Hub = { broadcast: (type: string, data: unknown) => void };
 
@@ -578,6 +579,7 @@ export class CaptureEngine {
           : opts.body.trim();
         // A merged PR already archived the task: keep it archived.
         this.db.updateTask(task.id, task.status === "archived" ? { handoff } : { status: "done", handoff });
+        reviewReportedDone(this.db, this.hub, task.id);
         this.resolveOpenQuestions({
           taskId: task.id,
           address: address && address === task.terminal_address ? address : null,
