@@ -6,7 +6,8 @@ import { useEffect, useId, useState } from "react";
 import { api } from "../api";
 import type { AnalysisStatus } from "../api";
 import type { PrWaitSplit, RateCounts, StoppedRunRate, WaitStats } from "../../../shared/improvement-metrics";
-import type { Repo } from "../types";
+import { favoritesFor, repoContext } from "../favorite-context";
+import type { Favorite, Repo } from "../types";
 import { errText } from "../util";
 
 interface AnalysisPanelProps {
@@ -210,8 +211,43 @@ function PrWaitPanel() {
 export function ImprovePage() {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [repo, setRepo] = useState("");
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [favorite, setFavorite] = useState("");
   const [repoError, setRepoError] = useState("");
-  useEffect(() => { void Promise.all([api.listRepos(), api.analysisRepo()]).then(([list, saved]) => { setRepos(list); setRepo(saved.repo); }).catch((e: unknown) => setRepoError(errText(e))); }, []);
+  useEffect(() => {
+    void Promise.all([api.listRepos(), api.analysisRepo(), api.getConfig()])
+      .then(([list, saved, cfg]) => {
+        setRepos(list);
+        setRepo(saved.repo);
+        setFavorite(saved.favorite ?? "");
+        setFavorites(cfg.favorites ?? []);
+      })
+      .catch((e: unknown) => setRepoError(errText(e)));
+  }, []);
+
+  const context = repo ? (repoContext(repos, repo) ?? "professional") : null;
+  const shownFavorites = favoritesFor(favorites, context);
+  const favoriteAvailable = !!favorite && shownFavorites.some((f) => f.name === favorite);
+  const autoFavorite = shownFavorites[0] ?? null;
+
+  const emptyFavoriteLabel = !repo
+    ? "Select a repository first"
+    : autoFavorite
+      ? `Auto (${autoFavorite.name} — ${autoFavorite.harness}${autoFavorite.agent ? ` · ${autoFavorite.agent}` : ""})`
+      : favorites.length === 0
+        ? "Default (claude)"
+        : `No ${context} favorite configured`;
+
+  const saveSettings = (nextRepo: string, nextFavorite: string) => {
+    void api.setAnalysisRepo(nextRepo, nextFavorite)
+      .then((result) => {
+        setRepo(result.repo);
+        setFavorite(result.favorite ?? "");
+        setRepoError("");
+      })
+      .catch((error: unknown) => setRepoError(errText(error)));
+  };
+
   return <div className="page settings-page">
     <div className="page-scroll">
       <div className="page-toolbar">
@@ -219,11 +255,31 @@ export function ImprovePage() {
       </div>
       <section className="panel-form">
         <div className="field"><label htmlFor="analysis-repo">Repository for analyses</label>
-          <select id="analysis-repo" value={repo} onChange={(e) => { const value = e.target.value; void api.setAnalysisRepo(value).then((result) => { setRepo(result.repo); setRepoError(""); }).catch((error: unknown) => setRepoError(errText(error))); }}>
+          <select id="analysis-repo" name="repo" value={repo} onChange={(e) => {
+            const value = e.target.value;
+            const nextContext = value ? (repoContext(repos, value) ?? "professional") : null;
+            const allowed = favoritesFor(favorites, nextContext);
+            const nextFavorite = favorite && allowed.some((f) => f.name === favorite) ? favorite : "";
+            saveSettings(value, nextFavorite);
+          }}>
             <option value="">Select a repository</option>
             {repo && !repos.some((r) => r.path === repo) ? <option value={repo}>{repo}</option> : null}
             {repos.map((r) => <option value={r.path} key={r.path}>{r.name} — {r.path}</option>)}
           </select>
+        </div>
+        <div className="field"><label htmlFor="analysis-favorite">Favorite for analyses</label>
+          <select id="analysis-favorite" name="favorite" aria-describedby="analysis-favorite-help" disabled={!repo}
+            value={favoriteAvailable ? favorite : favorite ? "__unavailable__" : ""}
+            onChange={(e) => saveSettings(repo, e.target.value)}>
+            <option value="">{emptyFavoriteLabel}</option>
+            {favorite && !favoriteAvailable ? <option value="__unavailable__" disabled>{favorite} (unavailable for {context} context)</option> : null}
+            {shownFavorites.map((f) => <option key={f.name} value={f.name}>{f.name} — {f.harness}{f.agent ? ` · ${f.agent}` : ""}</option>)}
+          </select>
+          <small id="analysis-favorite-help" className="muted">
+            {repo && favorites.length > 0 && shownFavorites.length === 0
+              ? <>No {context} favorite configured. Add a {context} favorite in <a href="#/settings">Settings</a> to run analyses in this repository.</>
+              : <>The favorite sets the harness, agent, model and reasoning. Only favorites matching the repository&apos;s context{context ? ` (${context})` : ""} are shown.</>}
+          </small>
         </div>
         {repoError ? <div className="inline-error" role="alert">{repoError}</div> : null}
       </section>
