@@ -39,7 +39,7 @@ import { addRepo, gitRemoteUrls, gitToplevel, importFingerprint, importPreview, 
 import { matchRepoForPull } from "./repo-match.ts";
 import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
 import { cachedPulls, platformRateLimits, refreshPulls } from "./pulls.ts";
-import type { Item, Repo, Task } from "./types.ts";
+import type { EpicLink, Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { PlanConflictError, PlanDeliveryError, PlanError, approvePlan, isDirectory, listTaskPlanRevisions, requestPlanChanges, validatePlanReviewInput, validateSubtasks } from "./multi-repo.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type AgentQuota, type UsageRange } from "./usage.ts";
@@ -415,8 +415,9 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     try {
       const summary = await summarizeText(state.cfg, text, item.title);
       state.db.updateItem(item.id, { summary });
-      state.hub.broadcast("item.updated", state.db.getItem(item.id));
-      json(res, 200, state.db.getItem(item.id));
+      const updated = state.db.getItem(item.id);
+      state.hub.broadcast("item.updated", updated);
+      json(res, 200, updated);
     } catch (err) {
       json(res, 502, { error: String(err) });
     }
@@ -430,8 +431,9 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (address) state.capture?.cancelStoppedRetries?.(address);
     state.db.reward("inbox", item.id);
     state.db.recordMetric("item.resolved", params.id, { how: "manual" });
-    state.hub.broadcast("item.updated", state.db.getItem(params.id));
-    json(res, 200, state.db.getItem(params.id));
+    const updated = state.db.getItem(params.id);
+    state.hub.broadcast("item.updated", updated);
+    json(res, 200, updated);
   });
 
   on("POST", "/api/items/:id/archive", (_req, res, { params }) => {
@@ -439,16 +441,18 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     state.db.updateItem(params.id, { status: "archived", snooze_until_ms: null });
     const address = existing?.source_ref ?? (existing?.task_id ? state.db.getTask(existing.task_id)?.terminal_address ?? null : null);
     if (address) state.capture?.cancelStoppedRetries?.(address);
-    state.hub.broadcast("item.updated", state.db.getItem(params.id));
-    json(res, 200, state.db.getItem(params.id));
+    const updated = state.db.getItem(params.id);
+    state.hub.broadcast("item.updated", updated);
+    json(res, 200, updated);
   });
 
   on("POST", "/api/items/:id/snooze", (req, res, { body, params }) => {
     const until = Number((body as { until_ms?: number })?.until_ms ?? Date.now() + 3600_000);
     state.db.updateItem(params.id, { snooze_until_ms: until });
     state.db.recordMetric("item.snoozed", params.id, { until_ms: until });
-    state.hub.broadcast("item.updated", state.db.getItem(params.id));
-    json(res, 200, state.db.getItem(params.id));
+    const updated = state.db.getItem(params.id);
+    state.hub.broadcast("item.updated", updated);
+    json(res, 200, updated);
   });
 
   on("GET", "/api/progression", (_req, res) => json(res, 200, state.db.progression()));
@@ -847,7 +851,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (task.kind === "spec") return json(res, 400, { error: "spec tasks have no PR of their own" });
     if (task.kind === "grill") return json(res, 400, { error: "interview tasks have no PR of their own" });
     if (task.kind === "ops") return json(res, 400, { error: "ops tasks have no PR of their own" });
-    const hasPrItem = state.db.listItems({ kind: "pr" }).some((i) => i.task_id === task.id && i.status !== "archived");
+    const hasPrItem = Boolean(state.db.findPrItemForTask(task.id));
     if (!task.branch && !task.pr_url && !hasPrItem) return json(res, 400, { error: "task has no branch or PR URL (dispatch it first)" });
     const force = (body as { force?: unknown } | undefined)?.force === true;
     const report: { delivered: PrDelivery | null } = { delivered: null };
@@ -919,15 +923,21 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
 
   // ---- sessions (live agent sessions) ----
   on("GET", "/api/sessions", async (_req, res) => {
-    const tasks = new Map(state.db.listTasks().map((t) => [t.id, t]));
     let sessions: Awaited<ReturnType<WorkerBackend["list"]>> = [];
     try {
       sessions = await withDeadline(state.backend.list(), BACKEND_LIST_MS, []);
     } catch {
       /* backend unreachable: report from the db alone */
     }
+    const terminalTaskByAddress = sessions.some((s) => !s.task_id)
+      ? new Map(state.db.listTerminals().map((t) => [t.address, t.task_id]))
+      : null;
+    const taskIds = sessions
+      .map((s) => s.task_id ?? terminalTaskByAddress?.get(s.address) ?? null)
+      .filter((id): id is string => Boolean(id));
+    const tasks = new Map(state.db.getTasksByIds(taskIds).map((t) => [t.id, t]));
     const out = sessions.map((s) => {
-      const taskId = s.task_id ?? state.db.getTerminal(s.address)?.task_id ?? null;
+      const taskId = s.task_id ?? terminalTaskByAddress?.get(s.address) ?? null;
       const task = taskId ? tasks.get(taskId) ?? null : null;
       return {
         address: s.address,
@@ -1093,23 +1103,40 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const epic = state.db.getEpic(id);
     if (!epic) return null;
     // The board data mirrors Jira: a prompt-created task stays on the Tasks page.
-    const tasks = state.db.listEpicTasks(id).filter((t) => t.jira_key), links = state.db.listEpicLinks(id);
-    const impacted = impactedTaskIds(state.db, id);
-    const views = epicViews(tasks, links, state.db.listItems()).map((v) => ({ ...v, impacted: impacted.has(v.task.id) }));
+    const allTasks = state.db.listEpicTasks(id);
+    const tasks = allTasks.filter((t) => t.jira_key), links = state.db.listEpicLinks(id);
+    const design = state.db.latestDesign(id);
+    const impacted = impactedTaskIds(state.db, id, { tasks: allTasks, latestVersion: design?.version ?? 1 });
+    const views = epicViews(tasks, links, state.db.listActivePrItems()).map((v) => ({ ...v, impacted: impacted.has(v.task.id) }));
     return {
       epic, tasks, links, views, summary: epicSummary(views),
-      design: state.db.latestDesign(id), design_versions: state.db.listDesigns(id).length,
+      design, design_versions: state.db.countDesigns(id),
       amendments: state.db.listAmendments(id, "proposed"),
-      agent: epicAgents.view(id),
+      agent: epicAgents.view(id, epic),
     };
   };
 
   on("GET", "/api/epics", (_req, res) => {
-    const items = state.db.listItems();
-    json(res, 200, state.db.listEpics().map((epic) => ({
+    const epics = state.db.listEpics();
+    const items = state.db.listActivePrItems();
+    const tasksByEpic = new Map<string, Task[]>();
+    for (const task of state.db.listAllEpicTasks()) {
+      if (!task.epic_id) continue;
+      const list = tasksByEpic.get(task.epic_id);
+      if (list) list.push(task);
+      else tasksByEpic.set(task.epic_id, [task]);
+    }
+    const linksByEpic = new Map<string, EpicLink[]>();
+    for (const link of state.db.listAllEpicLinks()) {
+      const list = linksByEpic.get(link.epic_id);
+      if (list) list.push(link);
+      else linksByEpic.set(link.epic_id, [link]);
+    }
+    const agentStates = epicAgents.runStates();
+    json(res, 200, epics.map((epic) => ({
       ...epic,
-      summary: epicSummary(epicViews(state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), items)),
-      agent_state: epicAgents.view(epic.id)?.runState ?? null,
+      summary: epicSummary(epicViews(tasksByEpic.get(epic.id) ?? [], linksByEpic.get(epic.id) ?? [], items)),
+      agent_state: agentStates.get(epic.id) ?? null,
     })));
   });
 
@@ -1270,7 +1297,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       return json(res, 409, { error: "only Jira tickets can be launched from the epic; dispatch this task from the Tasks page" });
     }
     const view = epicViews(
-      state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), state.db.listItems(),
+      state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), state.db.listActivePrItems(),
     ).find((v) => v.task.id === params.taskId);
     if (!view) return json(res, 404, { error: "task not in epic" });
     if (view.state !== "ready") return json(res, 409, { error: `task is ${view.state}, only ready tasks can be launched` });
