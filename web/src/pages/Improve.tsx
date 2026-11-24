@@ -132,7 +132,7 @@ function StoppedRunsPanel() {
           </tbody>
         </table>
       </div>
-      <p className="muted">Recognised by marker {data.sources.marker}, capture event {data.sources.capture_event}, title {data.sources.title}. Rows older than the marker miss reopened escalations.</p>
+      <p className="muted">Recognised by marker {data.sources.marker}, capture event {data.sources.capture_event}, title {data.sources.title}. Rows older than the marker miss reopened escalations. Windows start no earlier than {day(data.detection_start_ms)}: stopped runs left no inbox item before.</p>
     </> : null}
   </section>;
 }
@@ -202,7 +202,7 @@ function PrWaitPanel() {
           </tbody>
         </table>
       </div>
-      <p className="muted">{data.never_ready} PR{data.never_ready === 1 ? "" : "s"} opened in the window never became ready. Review tasks are left out.</p>
+      <p className="muted">{data.never_ready} PR{data.never_ready === 1 ? "" : "s"} opened in the window never became ready; {data.resolved_without_ready} merged or closed without being ready first. Neither is in the table, nor are review tasks.</p>
     </> : null}
   </section>;
 }

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Db } from "../db.ts";
-import { prWaitSplit, stoppedRunRate } from "../improvement-metrics.ts";
+import { STOPPED_DETECTION_START_MS, prWaitSplit, stoppedRunRate } from "../improvement-metrics.ts";
 import { STOPPED_ESCALATED_METRIC } from "../stopped-retry.ts";
 import type { Item, Task } from "../types.ts";
 
@@ -89,6 +89,12 @@ test("stopped-run rate: the after window stops at now and an empty window has no
   assert.equal(rate.after.end_ms, PIVOT + DAY);
   assert.deepEqual(rate.total.after, { dispatches: 0, escalations: 0, rate: null });
   assert.deepEqual(rate.by_harness, []);
+  // Before corral#126 a stopped run left no item: the window starts no earlier.
+  const early = stoppedRunRate(db, { now: NOW, pivot_ms: STOPPED_DETECTION_START_MS + 3 * DAY, days: 14 });
+  assert.equal(early.before.start_ms, STOPPED_DETECTION_START_MS);
+  const ancient = stoppedRunRate(db, { now: NOW, pivot_ms: STOPPED_DETECTION_START_MS - 30 * DAY, days: 14 });
+  assert.equal(ancient.before.start_ms, ancient.before.end_ms, "an empty window, not a negative one");
+  assert.equal(ancient.after.start_ms, ancient.after.end_ms);
   db.close();
 });
 
@@ -139,6 +145,11 @@ test("PR wait split: agent time to first ready, reviewer time to resolution, per
   metric(db, at(0), "task.dispatched", "p5", {});
   addPrItem(db, "pr5", "p5", { status: "archived", created_ms: at(2), resolved_ms: at(2) });
   metric(db, at(2), "item.created", "pr5", { kind: "pr", task_id: "p5", ready: 1 });
+  // engine: needed work until merged; pr.ts fires ready at the merge itself.
+  repoTask("p8", "/repos/engine");
+  metric(db, at(0), "task.dispatched", "p8", {});
+  addPrItem(db, "pr8", "p8", { status: "archived", ready: 1, created_ms: at(1), resolved_ms: at(40) });
+  metric(db, at(40) + 3, "item.ready_for_review", "pr8", { task_id: "p8" });
   // A review task: the PR is not the agent's.
   repoTask("p6", "/repos/app", "review");
   metric(db, at(0), "task.dispatched", "p6", {});
@@ -151,6 +162,7 @@ test("PR wait split: agent time to first ready, reviewer time to resolution, per
 
   const split = prWaitSplit(db, { now: NOW, days: 30 });
   assert.equal(split.never_ready, 1);
+  assert.equal(split.resolved_without_ready, 2, "found merged and merged before ready");
   assert.deepEqual(split.by_repo.map((r) => r.repo), ["/repos/app"]);
   const app = split.by_repo[0];
   assert.equal(app.prs, 3);

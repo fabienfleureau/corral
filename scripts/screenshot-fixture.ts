@@ -60,15 +60,16 @@ export function seedScreenshotData(db: Db): void {
 
 /** Dispatch, ready-for-review and resolution times for the Improve page's PR
  *  wait table. Its window ends at the real now, so these follow Date.now();
- *  merged PRs are archived items, which no other view lists. */
+ *  merged PRs are archived items on tasks no board lists them for; the open
+ *  one reuses the epic's existing PR item and only gains events. */
 function seedPrWaits(db: Db): void {
   const now = Date.now();
   const hour = 3_600_000;
   const insert = db.raw.prepare("INSERT INTO metrics_events (ts, name, ref, data) VALUES (?, ?, ?, ?)");
   const waits: { task: string; item: string; dispatched: number; ready: number; merged: number | null }[] = [
     { task: "sample-running", item: "fixture-pr-merged-1", dispatched: 80, ready: 74, merged: 50 },
-    { task: "sample-epic-EX-104", item: "fixture-pr-merged-2", dispatched: 60, ready: 58, merged: 20 },
-    { task: "sample-epic-EX-103", item: "fixture-pr-merged-3", dispatched: 40, ready: 31, merged: 29 },
+    { task: "sample-epic-request", item: "fixture-pr-merged-2", dispatched: 60, ready: 58, merged: 20 },
+    { task: "sample-open", item: "fixture-pr-merged-3", dispatched: 40, ready: 31, merged: 29 },
     { task: "sample-epic-EX-102", item: "sample-epic-pr-EX-102", dispatched: 30, ready: 26, merged: null },
   ];
   for (const w of waits) {
