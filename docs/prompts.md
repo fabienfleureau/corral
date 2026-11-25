@@ -117,8 +117,9 @@ What each one is for:
   self-contained sub-task per touched repo and the delivery order, then POST
   `kind: "plan"` and wait idle for approval or revision feedback. When revision
   comments arrive, address them and POST a fresh `kind: "plan"`. Corral
-  validates each `repo` and the human approves in the inbox. A child code task
-  later gets the contract appended to its prompt (see below).
+  validates each `repo` and the human approves in the inbox, which creates and
+  dispatches the child code tasks with the contract appended to their prompts
+  (see below).
 - **`epic-task.md`** — an epic ticket's preconditions (a library built, a schema
   merged…) are checked for real before any change; an unmet one becomes a
   question and the agent stops. The human relaunches the task once it holds.

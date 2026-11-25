@@ -419,3 +419,14 @@ export type PlanRevisionsResponse = {
   revisions: PlanRevision[];
   reviews: PlanReview[];
 };
+
+export type PlanDispatchFailure = {
+  task_id: string;
+  title: string;
+  error: string;
+};
+
+export type ApprovePlanResponse = {
+  children: Task[];
+  dispatch_errors: PlanDispatchFailure[];
+};

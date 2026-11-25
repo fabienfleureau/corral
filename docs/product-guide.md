@@ -77,7 +77,9 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   **plan**: the contract between the sub-projects (each REST endpoint, event,
   schema or config key that crosses a repo boundary, with its owner, consumers
   and delivery order) plus up to 12 sub-tasks, one per repo. The plan lands in
-  the inbox; **Approve plan** creates the code tasks, re-validating every path
+  the inbox; **Approve plan** creates and dispatches the code tasks directly
+  (inheriting the spec task's harness settings, and leaving any task whose
+  dispatch fails `open` on the Tasks page), re-validating every path
   (inside the folder, a repository root, no duplicate). Each child's prompt
   carries the contract, so the repos cannot drift apart. A spec task reads only:
   no branch, no commit, no PR. Children show a `from <spec title>` badge.

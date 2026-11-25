@@ -854,14 +854,21 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     }
   });
 
-  on("POST", "/api/tasks/:id/approve-plan", (_req, res, { params, body }) => {
+  on("POST", "/api/tasks/:id/approve-plan", async (_req, res, { params, body }) => {
     const task = state.db.getTask(params.id);
     if (!task) return json(res, 404, { error: "task not found" });
     const rawRevisionId = (body as { revision_id?: unknown } | undefined)?.revision_id;
     const revisionId = typeof rawRevisionId === "string" && rawRevisionId.trim() ? rawRevisionId.trim() : undefined;
     try {
-      const children = approvePlan(state.db, state.hub, task, revisionId);
-      json(res, 200, { children });
+      const result = await approvePlan(state.db, state.hub, task, revisionId, (child, target) =>
+        dispatchTask(state.db, state.cfg, state.backend, child, target, {
+          agent: child.agent ?? null,
+          model: child.model ?? null,
+          reasoning: child.reasoning ?? null,
+          jira: state.jira ?? null,
+        }),
+      );
+      json(res, 200, result);
     } catch (err) {
       if (err instanceof PlanConflictError) {
         return json(res, 409, {

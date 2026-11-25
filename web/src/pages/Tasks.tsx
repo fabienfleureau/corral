@@ -441,7 +441,7 @@ function TaskRow({
           {review && task.review_outcome === "published" ? <span className="badge badge-ready" title="You approved comments and the agent reported the review done">comments published</span> : null}
           {review && task.review_outcome === "skipped" ? <span className="badge badge-mute" title="Declined, or the publish question was closed without a reply: no comments were approved">comments not published</span> : null}
           {task.kind === "grill" || task.kind === "grill-docs" ? <span className="badge badge-review">{task.kind === "grill" ? "grill" : "grill with docs"}</span> : null}
-          {spec ? <span className="badge badge-review" title="Writes the contract between the sub-projects in repo_path; approving its plan in the inbox creates one task per sub-project">multi-repo spec</span> : null}
+          {spec ? <span className="badge badge-review" title="Writes the contract between the sub-projects in repo_path; approving its plan in the inbox creates and dispatches one task per sub-project">multi-repo spec</span> : null}
           {parentTitle ? <span className="badge badge-review" title="Created from a multi-repo plan; the contract is appended to this task's prompt">from {parentTitle}</span> : null}
           {task.retry_of && retryTitle ? (
             <a href={`#/tasks?task=${encodeURIComponent(task.retry_of)}`} className="badge badge-mute" title="Same label as a task archived or failed in the 24 hours before this one was created">
@@ -924,7 +924,7 @@ function NewTaskForm({ tasks, repos, targets, quotas, agentOptions, catalog, mod
             <span>Folder of sub-projects</span>
             <input value={folderPath} onChange={(e) => setSpecFolder(e.target.value)} placeholder="/path/to/folder (one git repo per directory)" />
           </label>
-          <p className="muted form-hint">Step one: the agent reads the sub-projects and writes the contract between them, then proposes one task per sub-project. Nothing is created until you approve the plan in the inbox. No branch, no code changes. Name any system map or architecture doc in the prompt.</p>
+          <p className="muted form-hint">Step one: the agent reads the sub-projects and writes the contract between them, then proposes one task per sub-project. Approving the plan in the inbox creates and dispatches those tasks directly. No branch, no code changes. Name any system map or architecture doc in the prompt.</p>
         </>
       ) : null}
       <PromptAttachments files={files} onChange={setFiles} disabled={busy}>
