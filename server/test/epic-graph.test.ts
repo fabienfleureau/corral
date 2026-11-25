@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Db } from "../db.ts";
 import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "../epic-graph.ts";
-import type { EpicLink, Item, Task } from "../types.ts";
+import type { EpicLink, EpicTicket, Item, Task } from "../types.ts";
 
 const task = (key: string, over: Partial<Task> = {}): Task => ({
   id: key, title: `${key} t`, prompt: "", repo_path: "/r/a", target: "", target_state: "suggested", base_branch: null, branch: null,
@@ -122,4 +122,64 @@ test("no launch items are created; stale ones archive and stacking waits for the
     db.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("synced epic_tickets project onto the graph, block dependents, re-surface when archived, and preview stack_on", () => {
+  const ticket = (key: string, over: Partial<EpicTicket> = {}): EpicTicket => ({
+    epic_id: "e",
+    jira_key: key,
+    title: `${key} title`,
+    description: `${key} desc`,
+    jira_url: `https://j/browse/${key}`,
+    jira_status: "To Do",
+    jira_parent_key: "E-1",
+    suggested_repo_path: "",
+    updated_ms: 1,
+    ...over,
+  });
+
+  // Uncreated ticket E-2 is ready; uncreated E-3 blocked by E-2 is blocked;
+  // uncreated E-4 blocked by Done E-1 is ready; Killed E-5 is killed and unblocks E-6.
+  const views = epicViews(
+    [
+      task("E-0", { status: "dispatched", branch: "feat/e0", pr_url: "u", repo_path: "/r/a" }),
+      // Archived task for E-7 must not suppress the synced ticket E-7.
+      task("E-7", { status: "archived" }),
+    ],
+    [
+      link("E-2", "E-0"),
+      link("E-3", "E-2"),
+      link("E-4", "E-1"),
+      link("E-6", "E-5"),
+    ],
+    [pr("E-0", { ready: 1 })],
+    [
+      ticket("E-0"),
+      ticket("E-1", { jira_status: "Done" }),
+      ticket("E-2", { suggested_repo_path: "/r/a" }),
+      ticket("E-3"),
+      ticket("E-4"),
+      ticket("E-5", { jira_status: "Killed" }),
+      ticket("E-6"),
+      ticket("E-7"),
+    ],
+  );
+
+  const byKey = new Map(views.map((v) => [v.task.jira_key!, v]));
+  assert.equal(byKey.get("E-0")?.has_task, true);
+  assert.equal(byKey.get("E-0")?.state, "pr_ready");
+  assert.equal(byKey.get("E-1")?.has_task, false);
+  assert.equal(byKey.get("E-1")?.state, "merged");
+  assert.equal(byKey.get("E-2")?.has_task, false);
+  assert.equal(byKey.get("E-2")?.state, "ready");
+  assert.equal(byKey.get("E-2")?.stack_on, "feat/e0");
+  assert.equal(byKey.get("E-3")?.has_task, false);
+  assert.equal(byKey.get("E-3")?.state, "blocked");
+  assert.equal(byKey.get("E-3")?.blockers[0]?.satisfied, false);
+  assert.equal(byKey.get("E-3")?.blockers[0]?.task_id, null);
+  assert.equal(byKey.get("E-4")?.state, "ready");
+  assert.equal(byKey.get("E-5")?.state, "killed");
+  assert.equal(byKey.get("E-6")?.state, "ready");
+  assert.equal(byKey.get("E-7")?.has_task, false);
+  assert.equal(byKey.get("E-7")?.state, "ready");
 });

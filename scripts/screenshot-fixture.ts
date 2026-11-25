@@ -204,11 +204,38 @@ export function seedEpic(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
     status: "open", terminal_address: null, exit_code: null,
     created_ms: now - 30_000, updated_ms: now - 30_000, epic_id: "sample-epic",
   });
+  db.replaceEpicTickets("sample-epic", [
+    ...rows.map((r) => ({
+      epic_id: "sample-epic",
+      jira_key: r.key,
+      title: `${r.key} ${r.title}`,
+      description: r.title,
+      jira_url: `https://jira.example.com/browse/${r.key}`,
+      jira_status: r.jiraStatus ?? "To Do",
+      jira_parent_key: "EX-100",
+      suggested_repo_path: r.repo,
+      updated_ms: now,
+    })),
+    // Synced Jira ticket with no Corral task yet: appears in "ready to launch"
+    // so the Epic page shows the repository picker and "Create & dispatch".
+    {
+      epic_id: "sample-epic",
+      jira_key: "EX-106",
+      title: "EX-106 Validate widget size units in CLI",
+      description: "Validate numeric widget size units in the CLI before sending requests.",
+      jira_url: "https://jira.example.com/browse/EX-106",
+      jira_status: "To Do",
+      jira_parent_key: "EX-100",
+      suggested_repo_path: "",
+      updated_ms: now,
+    },
+  ]);
   db.replaceEpicLinks("sample-epic", [
     { task_key: "EX-102", blocked_by_key: "EX-101" },
     { task_key: "EX-105", blocked_by_key: "EX-101" },
     { task_key: "EX-103", blocked_by_key: "EX-102" },
     { task_key: "EX-104", blocked_by_key: "EX-103" },
+    { task_key: "EX-106", blocked_by_key: "EX-101" },
   ]);
   const pr = (key: string, ready: number): Item => ({
     id: `sample-epic-pr-${key}`, kind: "pr", status: "open", title: `PR ${ready ? "ready for review" : "needs work"}: ${key}`, summary: ready ? "ready for review" : "checks pending", body: "", context: "",

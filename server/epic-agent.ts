@@ -436,7 +436,12 @@ export class EpicAgentRunner {
     const design = this.db.latestDesign(epic.id);
     const epicTasks = this.db.listEpicTasks(epic.id);
     const links = this.db.listEpicLinks(epic.id);
-    const viewById = new Map(epicViews(epicTasks, links, this.db.listActivePrItems()).map((v) => [v.task.id, v]));
+    const rawTickets = this.db.listEpicTickets(epic.id);
+    const viewById = new Map(
+      epicViews(epicTasks, links, this.db.listActivePrItems(), rawTickets)
+        .filter((v) => v.has_task)
+        .map((v) => [v.task.id, v]),
+    );
     const tasks = epicTasks.map((task) => {
       const v = viewById.get(task.id);
       return {
@@ -455,7 +460,7 @@ export class EpicAgentRunner {
         description: task.prompt,
       };
     });
-    const jiraTickets = this.db.listEpicTickets(epic.id).map((ticket) => ({
+    const jiraTickets = rawTickets.map((ticket) => ({
       key: ticket.jira_key,
       title: ticket.title,
       status: ticket.jira_status,

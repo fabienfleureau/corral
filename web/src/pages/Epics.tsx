@@ -97,6 +97,68 @@ export function epicTaskConf(
   };
 }
 
+export function epicViewKey(v: Pick<EpicTaskView, "has_task"> & { task: Pick<Task, "id" | "jira_key"> }): string {
+  return v.has_task === false ? `ticket:${v.task.jira_key ?? v.task.id}` : v.task.id;
+}
+
+export function resolveReadyLaunchConf(
+  task: Pick<Task, "repo_path" | "target" | "agent" | "model" | "reasoning" | "review">,
+  repoPath: string,
+  pickedConf: string,
+  epicFavorite: Favorite | null,
+  favorites: readonly Favorite[],
+  repos: readonly Pick<Repo, "path" | "context">[],
+): ReturnType<typeof epicTaskConf> {
+  const effectiveContext = repoPath.trim() ? (repoContext([...repos], repoPath) ?? "professional") : null;
+  if (pickedConf.startsWith("fav:")) {
+    const favName = pickedConf.slice(4);
+    const fav = favorites.find((f) => f.name === favName) ?? null;
+    if (!fav) return null;
+    if (effectiveContext && (fav.context ?? "professional") !== effectiveContext) return null;
+    return {
+      target: fav.harness,
+      agent: fav.agent || null,
+      model: fav.model || null,
+      reasoning: fav.reasoning || null,
+      review: fav.review || null,
+      inherited: false,
+      favoriteName: fav.name,
+    };
+  }
+  if (pickedConf.startsWith("target:")) {
+    const target = pickedConf.slice(7);
+    if (!target) return null;
+    return {
+      target,
+      agent: task.agent ?? null,
+      model: task.model ?? null,
+      reasoning: task.reasoning ?? null,
+      review: task.review ?? null,
+      inherited: false,
+    };
+  }
+  return epicTaskConf({ ...task, repo_path: repoPath }, epicFavorite, [...repos]);
+}
+
+export function previewStackOn(
+  view: Pick<EpicTaskView, "blockers" | "stack_on">,
+  allViews: readonly Pick<EpicTaskView, "has_task" | "state" | "task">[],
+  repoPath: string,
+): string | null {
+  const trimmed = repoPath.trim();
+  if (!trimmed) return null;
+  const byKey = new Map(allViews.map((v) => [v.task.jira_key ?? v.task.id, v]));
+  const open = view.blockers
+    .map((b) => byKey.get(b.key))
+    .filter((v): v is Pick<EpicTaskView, "has_task" | "state" | "task"> =>
+      Boolean(v) && v!.state !== "merged" && v!.state !== "killed" && v!.state !== "out",
+    );
+  const sameRepo = open.filter(
+    (v) => v.has_task !== false && v.task.repo_path === trimmed && Boolean(v.task.branch),
+  );
+  return open.length === 1 && sameRepo.length === 1 ? sameRepo[0].task.branch : null;
+}
+
 export function reconcileSelectedEpic(currentId: string | null, rows: readonly Pick<Epic, "id">[]): string | null {
   if (currentId && rows.some((r) => r.id === currentId)) return currentId;
   return rows[0]?.id ?? null;
@@ -182,9 +244,14 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [detail, setDetail] = useState<EpicDetail | null>(null);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [agents, setAgents] = useState<string[]>([]);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
+  const [draftRepos, setDraftRepos] = useState<Record<string, string>>({});
+  const [draftConfs, setDraftConfs] = useState<Record<string, string>>({});
+  const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
+  const [launchStatus, setLaunchStatus] = useState("");
   const [request, setRequest] = useState("");
   const [favorite, setFavorite] = useState("");
   const [favoriteStatus, setFavoriteStatus] = useState("");
@@ -194,12 +261,20 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const fieldIdPrefix = useId();
+  const repoSelectRefs = useRef<Record<string, HTMLSelectElement | null>>({});
+  const confSelectRefs = useRef<Record<string, HTMLSelectElement | null>>({});
 
   useEffect(() => {
     let cancelled = false;
     api.listEpics().then((rows) => { if (!cancelled) { setEpics(rows); setSelectedId((id) => reconcileSelectedEpic(id, rows)); } }).catch((e) => { if (!cancelled) setError(errText(e)); });
     api.listRepos().then((rows) => { if (!cancelled) setRepos(rows); }).catch(() => undefined);
-    api.getConfig().then((cfg) => { if (!cancelled) setFavorites(cfg.favorites ?? []); }).catch(() => undefined);
+    api.getConfig().then((cfg) => {
+      if (!cancelled) {
+        setFavorites(cfg.favorites ?? []);
+        setAgents(cfg.agents ?? []);
+      }
+    }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [eventVersion]);
 
@@ -218,6 +293,10 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     setFavorite(detail.epic.favorite_name ?? "");
     setFavoriteStatus("");
     setRepoPath(detail.epic.repo_path ?? "");
+    setDraftRepos({});
+    setDraftConfs({});
+    setCardErrors({});
+    setLaunchStatus("");
     setRequest("");
     setCreatedTask(null);
     setConfirmRemove(false);
@@ -272,6 +351,8 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     if (!detail) return;
     setCreatedTask(null);
     setFavoriteStatus("");
+    setCardErrors({});
+    setDraftConfs({});
     void run(async () => {
       const d = await api.patchEpicSettings(detail.epic.id, { favorite_name: favorite });
       setFavorite(d.epic.favorite_name ?? "");
@@ -286,15 +367,77 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
     });
   };
 
-  // Launching is explicit: a task whose blockers cleared stays on this page
-  // until the human starts it. Without an effective harness or repo, send them to its form.
-  const launch = (task: Task, epicId: string, canLaunch: boolean) => {
-    if (!canLaunch) {
-      window.location.hash = `/tasks?task=${encodeURIComponent(task.id)}`;
+  // Launching is explicit: a task or synced ticket whose blockers cleared stays on
+  // this page until the human picks a repo (and conf if needed) and starts it.
+  const launchReady = async (
+    v: EpicTaskView,
+    epicId: string,
+    selectedRepo: string,
+    pickedConf: string,
+    effectiveConf: ReturnType<typeof epicTaskConf>,
+    compatibleFavoritesCount: number,
+  ) => {
+    const viewKey = epicViewKey(v);
+    const repoInput = selectedRepo.trim();
+    if (!repoInput) {
+      setCardErrors((prev) => ({ ...prev, [viewKey]: "Pick a repository first." }));
+      repoSelectRefs.current[viewKey]?.focus();
       return;
     }
-    setLaunchingId(task.id);
-    void run(async () => { await api.launchEpicTask(epicId, task.id); }).finally(() => setLaunchingId(null));
+    if (!effectiveConf?.target) {
+      setCardErrors((prev) => ({
+        ...prev,
+        [viewKey]: compatibleFavoritesCount > 0 ? "Pick a favorite or harness first." : "Pick a harness first.",
+      }));
+      confSelectRefs.current[viewKey]?.focus();
+      return;
+    }
+
+    const payload: { repo_path: string; favorite?: string; target?: string } = { repo_path: repoInput };
+    if (pickedConf.startsWith("fav:")) payload.favorite = pickedConf.slice(4);
+    else if (pickedConf.startsWith("target:")) payload.target = pickedConf.slice(7);
+
+    setCardErrors((prev) => {
+      if (!(viewKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[viewKey];
+      return next;
+    });
+    setLaunchStatus("");
+    setError(null);
+    setLaunchingId(viewKey);
+    try {
+      if (v.has_task === false) {
+        const jiraKey = v.task.jira_key ?? v.task.id;
+        await api.launchEpicTicket(epicId, jiraKey, payload);
+        setLaunchStatus(`${jiraKey} created and dispatched.`);
+      } else {
+        await api.launchEpicTask(epicId, v.task.id, payload);
+        setLaunchStatus(`${v.task.jira_key ?? v.task.title} launched.`);
+      }
+      setDraftRepos((prev) => {
+        if (!(viewKey in prev)) return prev;
+        const next = { ...prev };
+        delete next[viewKey];
+        return next;
+      });
+      setDraftConfs((prev) => {
+        if (!(viewKey in prev)) return prev;
+        const next = { ...prev };
+        delete next[viewKey];
+        return next;
+      });
+      const updated = await api.getEpic(epicId);
+      setDetail(updated);
+      refresh();
+    } catch (e) {
+      setCardErrors((prev) => ({ ...prev, [viewKey]: errText(e) }));
+      if (v.has_task === false) {
+        api.getEpic(epicId).then((updated) => setDetail(updated)).catch(() => undefined);
+      }
+    } finally {
+      setLaunchingId(null);
+    }
   };
 
   const removeEpic = async () => {
@@ -491,16 +634,35 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
             </form>
             {createdTask ? <p className="epic-request-created" role="status">Task created: <a href={`#/tasks?task=${encodeURIComponent(createdTask.id)}`}>{createdTask.title}</a></p> : null}
           </section>
+          {launchStatus ? <p className="muted" role="status">{launchStatus}</p> : null}
           <div className="epic-groups">
             {epicBoardGroups(detail.views).map(({ state, label, views }) => (
               <section key={state} className="epic-group" aria-label={label}>
                 <h3>{label} <span>{views.length}</span></h3>
                 <ul className="epic-tasks">
             {views.map((v) => {
-              const conf = epicTaskConf(v.task, savedFavorite, repos);
-              const canLaunch = Boolean(conf?.target && v.task.repo_path);
+              const viewKey = epicViewKey(v);
+              const isReadyCard = v.state === "ready" && !detail.epic.error;
+              const selectedRepo = isReadyCard ? (draftRepos[viewKey] ?? v.task.repo_path) : v.task.repo_path;
+              const pickedConf = isReadyCard ? (draftConfs[viewKey] ?? "") : "";
+              const baseConf = epicTaskConf({ ...v.task, repo_path: selectedRepo }, savedFavorite, repos);
+              const conf = isReadyCard
+                ? resolveReadyLaunchConf(v.task, selectedRepo, pickedConf, savedFavorite, favorites, repos)
+                : baseConf;
+              const selectedContext = selectedRepo.trim() ? (repoContext(repos, selectedRepo) ?? "professional") : null;
+              const compatibleFavorites = favoritesFor(favorites, selectedContext);
+              const showConfPicker = isReadyCard && (!baseConf || Boolean(pickedConf));
+              const cardError = isReadyCard ? cardErrors[viewKey] : undefined;
+              const repoFieldId = `${fieldIdPrefix}-${viewKey}-repo`;
+              const confFieldId = `${fieldIdPrefix}-${viewKey}-conf`;
+              const errorId = `${fieldIdPrefix}-${viewKey}-err`;
+              const repoMissingError = Boolean(cardError && !selectedRepo.trim());
+              const confMissingError = Boolean(cardError && selectedRepo.trim() && !conf?.target);
+              const stackOn = isReadyCard ? previewStackOn(v, detail.views, selectedRepo) : v.stack_on;
+              const cardLabel = v.task.jira_key ?? v.task.title;
+              const isLaunchingThis = launchingId === viewKey;
               return (
-              <li key={v.task.id} className="epic-task" data-state={state}>
+              <li key={viewKey} className="epic-task" data-state={state}>
                 <div className="epic-task-line">
                   <h4 className="epic-task-title">
                     {v.task.jira_url ? (
@@ -512,36 +674,129 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
                   <span className={STATE_BADGE[state]}>{label}</span>
                   {v.testable ? <span className="badge badge-ready">testable</span> : null}
                   {v.impacted ? <span className="badge badge-wait" title="Started on an older design and not merged yet">impacted by design change</span> : null}
-                  {v.state === "ready" && !detail.epic.error ? (
-                    <button
-                      className="btn btn-primary"
-                      type="button"
-                      aria-label={`Launch ${v.task.jira_key ?? v.task.title}`}
-                      title={canLaunch
-                        ? (conf?.inherited ? `Start using epic favorite ${conf.favoriteName}` : "Start the agent on this task")
-                        : v.task.repo_path
-                          ? "Assign an epic favorite or pick a harness on the task first"
-                          : "Pick a repository on the task first"}
-                      disabled={busy || launchingId !== null}
-                      onClick={() => launch(v.task, detail.epic.id, canLaunch)}
+                  {!isReadyCard && v.has_task !== false ? (
+                    <select
+                      aria-label={`Repository of ${cardLabel}`}
+                      value={v.task.repo_path}
+                      disabled={v.task.status !== "open"}
+                      onChange={(e) => void run(async () => { await api.patchTask(v.task.id, { repo_path: e.target.value }); })}
                     >
-                      {launchingId === v.task.id ? <Spinner /> : null}
-                      {canLaunch ? "Launch" : "Configure"}
-                    </button>
+                      <option value="">Pick a repository…</option>
+                      {repos.map((r) => <option key={r.id} value={r.path}>{r.name}</option>)}
+                    </select>
                   ) : null}
-                  <select
-                    aria-label={`Repository of ${v.task.jira_key ?? v.task.title}`}
-                    value={v.task.repo_path}
-                    disabled={v.task.status !== "open"}
-                    onChange={(e) => void run(async () => { await api.patchTask(v.task.id, { repo_path: e.target.value }); })}
-                  >
-                    <option value="">Pick a repository…</option>
-                    {repos.map((r) => <option key={r.id} value={r.path}>{r.name}</option>)}
-                  </select>
                 </div>
+                {isReadyCard ? (
+                  <form
+                    className="epic-task-launch"
+                    aria-label={`Launch ${cardLabel}`}
+                    noValidate
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void launchReady(v, detail.epic.id, selectedRepo, pickedConf, conf, compatibleFavorites.length);
+                    }}
+                  >
+                    <div className="epic-task-field">
+                      <label htmlFor={repoFieldId}>Repository</label>
+                      <select
+                        ref={(el) => { repoSelectRefs.current[viewKey] = el; }}
+                        id={repoFieldId}
+                        name="repo_path"
+                        value={selectedRepo}
+                        disabled={busy || launchingId !== null}
+                        aria-invalid={repoMissingError ? true : undefined}
+                        aria-describedby={cardError ? errorId : undefined}
+                        onChange={(e) => {
+                          const nextRepo = e.target.value;
+                          setDraftRepos((prev) => ({ ...prev, [viewKey]: nextRepo }));
+                          setCardErrors((prev) => {
+                            if (!(viewKey in prev)) return prev;
+                            const next = { ...prev };
+                            delete next[viewKey];
+                            return next;
+                          });
+                          if (pickedConf.startsWith("fav:") && nextRepo.trim()) {
+                            const favName = pickedConf.slice(4);
+                            const nextCtx = repoContext(repos, nextRepo) ?? "professional";
+                            const stillCompatible = favoritesFor(favorites, nextCtx).some((f) => f.name === favName);
+                            if (!stillCompatible) {
+                              setDraftConfs((prev) => {
+                                if (!(viewKey in prev)) return prev;
+                                const next = { ...prev };
+                                delete next[viewKey];
+                                return next;
+                              });
+                            }
+                          }
+                        }}
+                      >
+                        <option value="">Pick a repository…</option>
+                        {selectedRepo && !repos.some((r) => r.path === selectedRepo) ? (
+                          <option value={selectedRepo}>{selectedRepo}</option>
+                        ) : null}
+                        {repos.map((r) => <option key={r.id} value={r.path}>{r.name}</option>)}
+                      </select>
+                    </div>
+                    {showConfPicker ? (
+                      <div className="epic-task-field">
+                        <label htmlFor={confFieldId}>{compatibleFavorites.length > 0 ? "Favorite / harness" : "Harness"}</label>
+                        <select
+                          ref={(el) => { confSelectRefs.current[viewKey] = el; }}
+                          id={confFieldId}
+                          name="conf"
+                          value={pickedConf}
+                          disabled={busy || launchingId !== null}
+                          aria-invalid={confMissingError ? true : undefined}
+                          aria-describedby={cardError ? errorId : undefined}
+                          onChange={(e) => {
+                            const nextConf = e.target.value;
+                            setDraftConfs((prev) => ({ ...prev, [viewKey]: nextConf }));
+                            setCardErrors((prev) => {
+                              if (!(viewKey in prev)) return prev;
+                              const next = { ...prev };
+                              delete next[viewKey];
+                              return next;
+                            });
+                          }}
+                        >
+                          <option value="">{compatibleFavorites.length > 0 ? "Pick a favorite or harness…" : "Pick a harness…"}</option>
+                          {compatibleFavorites.length > 0 ? (
+                            <optgroup label="Favorites">
+                              {compatibleFavorites.map((f) => (
+                                <option key={f.name} value={`fav:${f.name}`}>
+                                  {f.name} — {favoriteConfSummary(f)}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                          {agents.length > 0 ? (
+                            <optgroup label="Harnesses">
+                              {agents.map((a) => (
+                                <option key={a} value={`target:${a}`}>{a}</option>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                        </select>
+                      </div>
+                    ) : null}
+                    <div className="epic-task-launch-actions">
+                      <button
+                        className="btn btn-primary"
+                        type="submit"
+                        disabled={busy || launchingId !== null}
+                      >
+                        {isLaunchingThis ? <Spinner /> : null}
+                        {v.has_task === false
+                          ? (isLaunchingThis ? "Creating & dispatching…" : "Create & dispatch")
+                          : (isLaunchingThis ? "Launching…" : "Launch")}
+                      </button>
+                    </div>
+                    {cardError ? <p id={errorId} className="inline-error epic-task-error" role="alert">{cardError}</p> : null}
+                  </form>
+                ) : null}
                 {conf ? (
                   <div className="epic-task-sub epic-task-conf">
-                    {conf.inherited ? `Epic favorite (${conf.favoriteName}): ` : ""}
+                    {conf.inherited ? `Epic favorite (${conf.favoriteName}): ` : conf.favoriteName ? `${conf.favoriteName}: ` : ""}
                     {favoriteConfSummary({
                       harness: conf.target,
                       agent: conf.agent ?? "",
@@ -554,7 +809,7 @@ export function EpicsPage({ eventVersion, refresh }: { eventVersion: number; ref
                 {v.blockers.length ? (
                   <div className="epic-task-sub">
                     Blocked by {v.blockers.map((b) => `${b.key}${b.satisfied ? " ✓" : ""}`).join(", ")}
-                    {v.stack_on ? ` · stacks on ${v.stack_on}` : ""}
+                    {stackOn ? ` · stacks on ${stackOn}` : ""}
                   </div>
                 ) : null}
                 {v.alert ? <div className="inline-error" role="alert">{v.alert}</div> : null}

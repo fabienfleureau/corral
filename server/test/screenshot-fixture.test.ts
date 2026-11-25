@@ -14,6 +14,7 @@ test("screenshot fixture includes representative synthetic task settings", () =>
     assert.ok(tasks.every(t => t.repo_path.startsWith("/sample/")));
     assert.equal(db.getEpic("sample-epic")?.favorite_name, "Careful review", "the Epic page shows a saved favorite");
     assert.equal(db.getEpic("sample-epic")?.repo_path, "/sample/example-project", "the Epic page shows a saved working directory");
+    assert.ok(db.listEpicTickets("sample-epic").some(t => t.jira_key === "EX-106"), "the Epic page includes a synced Jira ticket without a task yet");
     assert.ok(db.listEpicTasks("sample-epic").some(t => !t.jira_key), "the Epic page has a prompt task to keep off the board");
     assert.ok(tasks.some(t => t.jira_key && t.jira_url), "a Jira-imported task carries its ticket link");
     assert.ok(tasks.some(t => t.repeat_of === "sample-done"), "a task is tagged as a probable repeat of a done one");

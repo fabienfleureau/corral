@@ -351,6 +351,7 @@ export type Epic = {
 
 export type EpicTaskView = {
   task: Task;
+  has_task?: boolean;
   state: EpicTaskState;
   blockers: { key: string; task_id: string | null; satisfied: boolean }[];
   alert: string | null;

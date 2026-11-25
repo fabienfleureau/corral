@@ -21,6 +21,8 @@ type ApiModule = {
     importEpic: (key: string) => Promise<unknown>;
     orchestrateEpic: (id: string, request: string) => Promise<unknown>;
     createEpicRequest: (id: string, input: unknown) => Promise<unknown>;
+    launchEpicTask: (epicId: string, taskId: string, input?: unknown) => Promise<unknown>;
+    launchEpicTicket: (epicId: string, jiraKey: string, input: unknown) => Promise<unknown>;
     archiveTask: (task: { id: string; terminal_address: string | null }) => Promise<unknown>;
   };
   ApiError: new (status: number, message: string) => Error & { status: number };
@@ -156,4 +158,33 @@ test("planning and task creation hit different epic routes", async () => {
   ]);
   assert.match(calls[0].body, /review the design/);
   assert.match(calls[1].body, /favorite_name/);
+});
+
+test("launchEpicTicket and launchEpicTask send repo and optional favorite/target", async () => {
+  const calls: { url: string; method: string; body: string | undefined }[] = [];
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    calls.push({ url, method: init.method ?? "GET", body: init.body === undefined ? undefined : String(init.body) });
+    return new Response(JSON.stringify({ address: "s1", worktreePath: "/w", branch: "b", task: { id: "t1" } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+  try {
+    await api.launchEpicTicket("e-1", "EX-106", { repo_path: "/sample/work", favorite: "WorkFav" });
+    await api.launchEpicTask("e-1", "t-1", { repo_path: "/sample/home", target: "codex" });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(calls, [
+    {
+      method: "POST",
+      url: "/api/epics/e-1/tickets/EX-106/launch",
+      body: JSON.stringify({ repo_path: "/sample/work", favorite: "WorkFav" }),
+    },
+    {
+      method: "POST",
+      url: "/api/epics/e-1/tasks/t-1/launch",
+      body: JSON.stringify({ repo_path: "/sample/home", target: "codex" }),
+    },
+  ]);
 });

@@ -464,7 +464,7 @@ export class Db {
   }
 
   getTaskByJiraKey(key: string): Task | null {
-    const row = this.stmt(`SELECT * FROM tasks WHERE jira_key = ?`).get(key);
+    const row = this.stmt(`SELECT * FROM tasks WHERE jira_key = ? ORDER BY (status = 'archived') ASC, created_ms DESC LIMIT 1`).get(key);
     return (row as unknown as Task) ?? null;
   }
 
@@ -631,6 +631,10 @@ export class Db {
 
   listEpicTickets(epicId: string): EpicTicket[] {
     return this.stmt(`SELECT * FROM epic_tickets WHERE epic_id = ? ORDER BY jira_key`).all(epicId) as unknown as EpicTicket[];
+  }
+
+  listAllEpicTickets(): EpicTicket[] {
+    return this.stmt(`SELECT * FROM epic_tickets ORDER BY epic_id, jira_key`).all() as unknown as EpicTicket[];
   }
 
   getEpicTicket(epicId: string, jiraKey: string): EpicTicket | null {
