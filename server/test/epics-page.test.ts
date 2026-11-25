@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import type { EpicTaskView, Favorite, Repo } from "../../web/src/types.ts";
 
 const bundle = await build({
-  stdin: { contents: `export { epicBoardGroups, epicTaskConf, favoriteConfSummary, nextSelectedEpicAfterRemove, reconcileSelectedEpic } from "./web/src/pages/Epics.tsx";`, resolveDir: process.cwd(), loader: "ts" },
+  stdin: { contents: `export { epicBoardGroups, epicTaskConf, epicViewKey, favoriteConfSummary, nextSelectedEpicAfterRemove, previewStackOn, reconcileSelectedEpic, resolveReadyLaunchConf } from "./web/src/pages/Epics.tsx";`, resolveDir: process.cwd(), loader: "ts" },
   bundle: true,
   platform: "node",
   format: "cjs",
@@ -23,12 +23,26 @@ const mod = {
       epicFavorite: Favorite | null,
       repos: Pick<Repo, "path" | "context">[],
     ) => { target: string; agent: string | null; model: string | null; reasoning: string | null; review: string | null; inherited: boolean; favoriteName?: string } | null;
+    epicViewKey: (v: Pick<EpicTaskView, "has_task"> & { task: Pick<EpicTaskView["task"], "id" | "jira_key"> }) => string;
+    resolveReadyLaunchConf: (
+      task: Pick<EpicTaskView["task"], "repo_path" | "target" | "agent" | "model" | "reasoning" | "review">,
+      repoPath: string,
+      pickedConf: string,
+      epicFavorite: Favorite | null,
+      favorites: readonly Favorite[],
+      repos: readonly Pick<Repo, "path" | "context">[],
+    ) => { target: string; agent: string | null; model: string | null; reasoning: string | null; review: string | null; inherited: boolean; favoriteName?: string } | null;
+    previewStackOn: (
+      view: Pick<EpicTaskView, "blockers" | "stack_on">,
+      allViews: readonly Pick<EpicTaskView, "has_task" | "state" | "task">[],
+      repoPath: string,
+    ) => string | null;
     reconcileSelectedEpic: (currentId: string | null, rows: readonly { id: string }[]) => string | null;
     nextSelectedEpicAfterRemove: (rows: readonly { id: string }[], removedId: string) => string | null;
   },
 };
 new Function("require", "module", "exports", bundle.outputFiles[0].text)(createRequire(import.meta.url), mod, mod.exports);
-const { epicBoardGroups, epicTaskConf, favoriteConfSummary, nextSelectedEpicAfterRemove, reconcileSelectedEpic } = mod.exports;
+const { epicBoardGroups, epicTaskConf, epicViewKey, favoriteConfSummary, nextSelectedEpicAfterRemove, previewStackOn, reconcileSelectedEpic, resolveReadyLaunchConf } = mod.exports;
 
 const view = (id: string, state: EpicTaskView["state"]): EpicTaskView => ({
   task: { id, title: id, jira_key: id } as EpicTaskView["task"],
@@ -103,4 +117,48 @@ test("nextSelectedEpicAfterRemove picks the neighbor after removal or null when 
   assert.equal(nextSelectedEpicAfterRemove(rows, "e3"), "e2");
   assert.equal(nextSelectedEpicAfterRemove([{ id: "e1" }], "e1"), null);
   assert.equal(nextSelectedEpicAfterRemove(rows, "missing"), "e1");
+});
+
+test("epicViewKey, resolveReadyLaunchConf, and previewStackOn handle ticket picks and live stacking preview", () => {
+  const workFav: Favorite = { name: "WorkFav", harness: "claude", agent: "worker", model: "opus", reasoning: "high", context: "professional", review: "cubic" };
+  const homeFav: Favorite = { name: "HomeFav", harness: "codex", agent: "", model: "gpt-5", reasoning: "medium", context: "personal", review: "" };
+  const repos: Pick<Repo, "path" | "context">[] = [
+    { path: "/work/app", context: null },
+    { path: "/home/side", context: "personal" },
+  ];
+  const emptyTask = { repo_path: "", target: "", agent: null, model: null, reasoning: null, review: null };
+
+  assert.equal(epicViewKey({ has_task: false, task: { id: "ticket:E-1", jira_key: "E-1" } }), "ticket:E-1");
+  assert.equal(epicViewKey({ has_task: true, task: { id: "t-1", jira_key: "E-1" } }), "t-1");
+
+  // Inherits epic favorite when repo matches context.
+  assert.deepEqual(
+    resolveReadyLaunchConf(emptyTask, "/work/app", "", workFav, [workFav, homeFav], repos),
+    { target: "claude", agent: "worker", model: "opus", reasoning: "high", review: "cubic", inherited: true, favoriteName: "WorkFav" },
+  );
+  // Incompatible repo context drops inherited favorite; picking compatible HomeFav or harness resolves it.
+  assert.equal(resolveReadyLaunchConf(emptyTask, "/home/side", "", workFav, [workFav, homeFav], repos), null);
+  assert.deepEqual(
+    resolveReadyLaunchConf(emptyTask, "/home/side", "fav:HomeFav", workFav, [workFav, homeFav], repos),
+    { target: "codex", agent: null, model: "gpt-5", reasoning: "medium", review: null, inherited: false, favoriteName: "HomeFav" },
+  );
+  assert.equal(resolveReadyLaunchConf(emptyTask, "/work/app", "fav:HomeFav", workFav, [workFav, homeFav], repos), null);
+  assert.deepEqual(
+    resolveReadyLaunchConf(emptyTask, "/home/side", "target:codex", workFav, [workFav, homeFav], repos),
+    { target: "codex", agent: null, model: null, reasoning: null, review: null, inherited: false },
+  );
+
+  // Live stacking preview updates when repo changes to match the sole unmerged prerequisite.
+  const prereq = {
+    has_task: true,
+    state: "pr_ready" as const,
+    task: { id: "t1", jira_key: "E-1", repo_path: "/work/app", branch: "feat/e1" } as EpicTaskView["task"],
+  };
+  const dependent = {
+    blockers: [{ key: "E-1", task_id: "t1", satisfied: true }],
+    stack_on: null,
+  };
+  assert.equal(previewStackOn(dependent, [prereq], "/work/app"), "feat/e1");
+  assert.equal(previewStackOn(dependent, [prereq], "/home/side"), null);
+  assert.equal(previewStackOn(dependent, [prereq], ""), null);
 });

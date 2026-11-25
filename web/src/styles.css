@@ -3750,7 +3750,13 @@ select:focus {
 .epic-task-title { margin: 0; overflow-wrap: anywhere; }
 /* The title links the whole card to Jira; its controls stay clickable. */
 .epic-task a.card-link::after { content: ""; position: absolute; inset: 0; }
-.epic-task a, .epic-task button, .epic-task select { position: relative; z-index: 1; }
+.epic-task a, .epic-task button, .epic-task select, .epic-task form { position: relative; z-index: 1; }
+.epic-task-launch { display: grid; gap: .5rem; margin-block-start: .35rem; }
+.epic-task-field { display: flex; flex-direction: column; align-items: stretch; gap: .2rem; }
+.epic-task-launch label { font-size: .78rem; color: var(--muted); font-weight: 600; }
+.epic-task-launch select { inline-size: 100%; max-inline-size: none; min-inline-size: 0; }
+.epic-task-launch-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-block-start: .1rem; }
+.epic-task-error { margin: 0; font-size: .85rem; }
 .epic-task:has(a.card-link:hover) { border-color: var(--accent-ink); }
 .epic-task:has(a.card-link:focus-visible) { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 .epic-task a.card-link:focus-visible { outline: none; }

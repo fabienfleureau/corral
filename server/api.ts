@@ -16,7 +16,7 @@ import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncJiraStage } from "./jira-status.ts";
 import { syncEpic } from "./epic.ts";
 import { EpicAgentRunner } from "./epic-agent.ts";
-import { applyEpicFavoriteToOpenTasks, createEpicAgentTask, createEpicRequestTask, EpicRequestError, resolveEpicFavorite, resolveTaskPatch, saveEpicRequestSettings, type EpicAgentTaskInput, type EpicRequestSettings } from "./epic-request.ts";
+import { applyEpicFavoriteToOpenTasks, createEpicAgentTask, createEpicRequestTask, createTaskFromEpicTicket, EpicRequestError, resolveAgentRepoPath, resolveEpicFavorite, resolveEpicLaunchOptions, resolveTaskPatch, saveEpicRequestSettings, type EpicAgentTaskInput, type EpicRequestSettings } from "./epic-request.ts";
 import { orchestrationPrompt } from "./epic-orchestration.ts";
 import { archiveEpicLaunchItems, epicSummary, epicViews, stackEpicTaskOnPrerequisite } from "./epic-graph.ts";
 import { applyAmendment, impactedTaskIds, proposeAmendments, rejectAmendment, reviseDesign } from "./epic-design.ts";
@@ -41,7 +41,7 @@ import { addRepo, gitRemoteUrls, gitToplevel, importFingerprint, importPreview, 
 import { matchRepoForPull } from "./repo-match.ts";
 import { startSyncAllPrs, syncTaskPr, type PrDelivery } from "./pr.ts";
 import { cachedPulls, platformRateLimits, refreshPulls } from "./pulls.ts";
-import type { EpicLink, Item, Repo, Task } from "./types.ts";
+import type { EpicLink, EpicTicket, Item, Repo, Task } from "./types.ts";
 import { PR_URL_RE, taskLabel } from "./types.ts";
 import { PlanConflictError, PlanDeliveryError, PlanError, approvePlan, isDirectory, listTaskPlanRevisions, requestPlanChanges, validatePlanReviewInput, validateSubtasks } from "./multi-repo.ts";
 import { DEFAULT_PRICES, USAGE_RANGES, UsageScanner, attachQuotaPredictions, buildReport, claudeQuota, codexQuota, defaultSources, GoQuotaCache, type AgentQuota, type UsageRange } from "./usage.ts";
@@ -1164,9 +1164,13 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     // The board data mirrors Jira: a prompt-created task stays on the Tasks page.
     const allTasks = state.db.listEpicTasks(id);
     const tasks = allTasks.filter((t) => t.jira_key), links = state.db.listEpicLinks(id);
+    const tickets = state.db.listEpicTickets(id);
     const design = state.db.latestDesign(id);
     const impacted = impactedTaskIds(state.db, id, { tasks: allTasks, latestVersion: design?.version ?? 1 });
-    const views = epicViews(tasks, links, state.db.listActivePrItems()).map((v) => ({ ...v, impacted: impacted.has(v.task.id) }));
+    const views = epicViews(tasks, links, state.db.listActivePrItems(), tickets).map((v) => ({
+      ...v,
+      impacted: v.has_task ? impacted.has(v.task.id) : false,
+    }));
     return {
       epic, tasks, links, views, summary: epicSummary(views),
       design, design_versions: state.db.countDesigns(id),
@@ -1191,10 +1195,21 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       if (list) list.push(link);
       else linksByEpic.set(link.epic_id, [link]);
     }
+    const ticketsByEpic = new Map<string, EpicTicket[]>();
+    for (const ticket of state.db.listAllEpicTickets()) {
+      const list = ticketsByEpic.get(ticket.epic_id);
+      if (list) list.push(ticket);
+      else ticketsByEpic.set(ticket.epic_id, [ticket]);
+    }
     const agentStates = epicAgents.runStates();
     json(res, 200, epics.map((epic) => ({
       ...epic,
-      summary: epicSummary(epicViews(tasksByEpic.get(epic.id) ?? [], linksByEpic.get(epic.id) ?? [], items)),
+      summary: epicSummary(epicViews(
+        tasksByEpic.get(epic.id) ?? [],
+        linksByEpic.get(epic.id) ?? [],
+        items,
+        ticketsByEpic.get(epic.id) ?? [],
+      )),
       agent_state: agentStates.get(epic.id) ?? null,
     })));
   });
@@ -1366,9 +1381,92 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     } catch (err) { epicRequestFailure(res, err); }
   });
 
+  // Create and dispatch a ready synced Jira ticket directly from the Epic page.
+  on("POST", "/api/epics/:id/tickets/:jiraKey/launch", async (_req, res, { params, body }) => {
+    const epic = state.db.getEpic(params.id);
+    if (!epic) return json(res, 404, { error: "epic not found" });
+    if (epic.error) return json(res, 409, { error: epic.error });
+    const jiraKey = decodeURIComponent(params.jiraKey).trim().toUpperCase();
+    const ticket = state.db.getEpicTicket(epic.id, jiraKey);
+    if (!ticket) return json(res, 404, { error: "ticket not in epic" });
+    const existing = state.db.getTaskByJiraKey(jiraKey);
+    if (existing && existing.status !== "archived") {
+      return json(res, 409, { error: `a task for Jira ticket ${jiraKey} already exists` });
+    }
+    const tickets = state.db.listEpicTickets(epic.id);
+    const view = epicViews(
+      state.db.listEpicTasks(epic.id),
+      state.db.listEpicLinks(epic.id),
+      state.db.listActivePrItems(),
+      tickets,
+    ).find((v) => !v.has_task && v.task.jira_key === jiraKey);
+    if (!view) return json(res, 404, { error: "ticket not in epic" });
+    if (view.state !== "ready") return json(res, 409, { error: `ticket is ${view.state}, only ready tickets can be launched` });
+
+    const repos = state.db.listRepos();
+    let repoPath: string;
+    let conf: ReturnType<typeof resolveEpicLaunchOptions>;
+    try {
+      if (body !== undefined && body !== null && (typeof body !== "object" || Array.isArray(body))) {
+        throw new EpicRequestError("launch body must be an object");
+      }
+      const b = (body ?? {}) as Record<string, unknown>;
+      if (("repo_path" in b && b.repo_path !== undefined && typeof b.repo_path !== "string") ||
+          ("repo" in b && b.repo !== undefined && typeof b.repo !== "string")) {
+        throw new EpicRequestError("repo_path must be a string");
+      }
+      const rawRepo = typeof b.repo_path === "string"
+        ? b.repo_path
+        : (typeof b.repo === "string" ? b.repo : ticket.suggested_repo_path);
+      repoPath = resolveAgentRepoPath(rawRepo, repos);
+      conf = resolveEpicLaunchOptions({
+        epic,
+        repoPath,
+        body,
+        favorites: state.cfg.favorites ?? [],
+        repos,
+        reviewers: state.cfg.reviewers ?? [],
+        configuredAgents: Object.keys(state.cfg.agents ?? {}),
+      });
+    } catch (err) {
+      return epicRequestFailure(res, err);
+    }
+
+    const createdTask = createTaskFromEpicTicket(state.db, epic, ticket, repoPath, conf);
+    state.hub.broadcast("task.updated", createdTask);
+    if (conf.baseBranch === undefined) {
+      const createdView = epicViews(
+        state.db.listEpicTasks(epic.id),
+        state.db.listEpicLinks(epic.id),
+        state.db.listActivePrItems(),
+        tickets,
+      ).find((v) => v.has_task && v.task.id === createdTask.id);
+      if (createdView) stackEpicTaskOnPrerequisite(state.db, state.hub, createdView);
+    }
+    try {
+      const result = await dispatchTask(
+        state.db, state.cfg, state.backend, state.db.getTask(createdTask.id)!, conf.target, {
+          agent: conf.agent,
+          model: conf.model,
+          reasoning: conf.reasoning,
+          review: conf.reviewName,
+          jira: state.jira ?? null,
+        },
+      );
+      archiveEpicLaunchItems(state.db, state.hub);
+      const latestTask = state.db.getTask(createdTask.id)!;
+      state.hub.broadcast("task.updated", latestTask);
+      state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));
+      json(res, 200, { ...result, task: latestTask });
+    } catch (err) {
+      state.hub.broadcast("epic.updated", state.db.getEpic(epic.id));
+      json(res, 500, { error: String(err), task: state.db.getTask(createdTask.id) });
+    }
+  });
+
   // A ready epic task starts only when the human clicks on the Epic page.
   // Readiness is rechecked here: a stale page must not launch a blocked task.
-  on("POST", "/api/epics/:id/tasks/:taskId/launch", async (_req, res, { params }) => {
+  on("POST", "/api/epics/:id/tasks/:taskId/launch", async (_req, res, { params, body }) => {
     const epic = state.db.getEpic(params.id);
     if (!epic) return json(res, 404, { error: "epic not found" });
     if (epic.error) return json(res, 409, { error: epic.error });
@@ -1376,49 +1474,72 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     if (linked?.epic_id === epic.id && !linked.jira_key) {
       return json(res, 409, { error: "only Jira tickets can be launched from the epic; dispatch this task from the Tasks page" });
     }
-    const view = epicViews(
-      state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), state.db.listActivePrItems(),
-    ).find((v) => v.task.id === params.taskId);
+    const tickets = state.db.listEpicTickets(epic.id);
+    let view = epicViews(
+      state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), state.db.listActivePrItems(), tickets,
+    ).find((v) => v.has_task && v.task.id === params.taskId);
     if (!view) return json(res, 404, { error: "task not in epic" });
     if (view.state !== "ready") return json(res, 409, { error: `task is ${view.state}, only ready tasks can be launched` });
     const task = view.task;
-    if (!task.repo_path?.trim()) return json(res, 400, { error: "task has no repo — set one on the task before launching" });
-    const reviewers = state.cfg.reviewers ?? [];
-    const epicFavorite = resolveEpicFavorite(epic, task.repo_path, state.cfg.favorites ?? [], state.db.listRepos());
-    let effectiveTarget = task.target;
-    let effectiveAgent = task.agent ?? null;
-    let effectiveModel = task.model ?? null;
-    let effectiveReasoning = task.reasoning ?? null;
-    let effectiveReview: string | null = null;
-    if (effectiveTarget) {
-      const savedReviewer = reviewerBySummary(task.review, reviewers);
-      effectiveReview = savedReviewer && !delegateConflict(savedReviewer, effectiveTarget, effectiveAgent) ? savedReviewer.name : null;
-    } else if (epicFavorite) {
-      effectiveTarget = epicFavorite.harness;
-      effectiveAgent = task.agent ?? (epicFavorite.agent || null);
-      effectiveModel = task.model ?? (epicFavorite.model || null);
-      effectiveReasoning = task.reasoning ?? (epicFavorite.reasoning || null);
-      const favReviewer = epicFavorite.review
-        ? reviewers.find((r) => r.name === epicFavorite.review) ?? null
-        : reviewerBySummary(task.review, reviewers);
-      if (favReviewer) {
-        const conflict = delegateConflict(favReviewer, effectiveTarget, effectiveAgent);
-        if (conflict) return json(res, 400, { error: conflict });
-        effectiveReview = favReviewer.name;
+
+    const repos = state.db.listRepos();
+    let repoPath: string;
+    let conf: ReturnType<typeof resolveEpicLaunchOptions>;
+    try {
+      if (body !== undefined && body !== null && (typeof body !== "object" || Array.isArray(body))) {
+        throw new EpicRequestError("launch body must be an object");
       }
-    } else if (epic.favorite_name?.trim()) {
-      return json(res, 400, { error: `epic favorite "${epic.favorite_name}" is not configured for this task's repository — configure the task or assign a compatible favorite` });
-    } else {
-      return json(res, 400, { error: "task has no harness — set one on the task before launching" });
+      const b = (body ?? {}) as Record<string, unknown>;
+      const hasRepo = "repo_path" in b || "repo" in b;
+      const rawRepo = "repo_path" in b ? b.repo_path : b.repo;
+      if (hasRepo && rawRepo !== undefined) {
+        if (typeof rawRepo !== "string") throw new EpicRequestError("repo_path must be a string");
+        repoPath = resolveAgentRepoPath(rawRepo, repos);
+      } else {
+        repoPath = task.repo_path?.trim() ?? "";
+        if (!repoPath) return json(res, 400, { error: "task has no repo — set one on the task before launching" });
+      }
+      conf = resolveEpicLaunchOptions({
+        epic,
+        repoPath,
+        existingTask: task,
+        body,
+        favorites: state.cfg.favorites ?? [],
+        repos,
+        reviewers: state.cfg.reviewers ?? [],
+        configuredAgents: Object.keys(state.cfg.agents ?? {}),
+      });
+    } catch (err) {
+      return epicRequestFailure(res, err);
     }
-    stackEpicTaskOnPrerequisite(state.db, state.hub, view);
+
+    if (repoPath !== task.repo_path || conf.explicitOverride) {
+      const patch: Partial<Task> = {};
+      if (repoPath !== task.repo_path) patch.repo_path = repoPath;
+      if (conf.explicitOverride) {
+        patch.target = conf.target;
+        patch.agent = conf.agent;
+        patch.model = conf.model;
+        patch.reasoning = conf.reasoning;
+        patch.review = conf.frozenReview;
+        if (conf.baseBranch !== undefined) patch.base_branch = conf.baseBranch;
+      }
+      state.db.updateTask(task.id, patch);
+      state.hub.broadcast("task.updated", state.db.getTask(task.id));
+      view = epicViews(
+        state.db.listEpicTasks(epic.id), state.db.listEpicLinks(epic.id), state.db.listActivePrItems(), tickets,
+      ).find((v) => v.has_task && v.task.id === params.taskId) ?? view;
+    }
+    if (conf.baseBranch === undefined) {
+      stackEpicTaskOnPrerequisite(state.db, state.hub, view);
+    }
     try {
       const result = await dispatchTask(
-        state.db, state.cfg, state.backend, state.db.getTask(task.id)!, effectiveTarget, {
-          agent: effectiveAgent,
-          model: effectiveModel,
-          reasoning: effectiveReasoning,
-          review: effectiveReview,
+        state.db, state.cfg, state.backend, state.db.getTask(task.id)!, conf.target, {
+          agent: conf.agent,
+          model: conf.model,
+          reasoning: conf.reasoning,
+          review: conf.reviewName,
           jira: state.jira ?? null,
         },
       );

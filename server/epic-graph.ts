@@ -5,7 +5,7 @@
 import type { Hub } from "./capture.ts";
 import type { Db } from "./db.ts";
 import { isJiraDone, isJiraKilled } from "./epic.ts";
-import type { EpicLink, Item, Task } from "./types.ts";
+import type { EpicLink, EpicTicket, Item, Task } from "./types.ts";
 
 export type EpicTaskState = "out" | "killed" | "merged" | "pr_ready" | "pr_open" | "running" | "ready" | "blocked";
 
@@ -18,6 +18,8 @@ export interface EpicBlocker {
 
 export interface EpicTaskView {
   task: Task;
+  /** True when backed by a row in `tasks`; false when projected from synced `epic_tickets`. */
+  has_task: boolean;
   state: EpicTaskState;
   blockers: EpicBlocker[];
   /** A prerequisite PR was closed without merging: its dependents stay blocked. */
@@ -49,43 +51,94 @@ function prItemByTask(items: Item[]): Map<string, Item> {
   return out;
 }
 
-export function epicViews(tasks: Task[], links: EpicLink[], items: Item[]): EpicTaskView[] {
+function ticketToTask(ticket: EpicTicket): Task {
+  return {
+    id: `ticket:${ticket.jira_key}`,
+    title: ticket.title,
+    prompt: ticket.description,
+    kind: "code",
+    repo_path: ticket.suggested_repo_path,
+    target: "",
+    target_state: "suggested",
+    agent: null,
+    model: null,
+    reasoning: null,
+    review: null,
+    base_branch: null,
+    branch: null,
+    worktree_path: null,
+    assignee: null,
+    jira_key: ticket.jira_key,
+    jira_url: ticket.jira_url || null,
+    jira_parent_key: ticket.jira_parent_key,
+    jira_status: ticket.jira_status,
+    pr_url: null,
+    pr_meta: null,
+    status: "open",
+    terminal_address: null,
+    exit_code: null,
+    created_ms: ticket.updated_ms,
+    updated_ms: ticket.updated_ms,
+    epic_id: ticket.epic_id,
+    epic_out: 0,
+  };
+}
+
+export function epicViews(tasks: Task[], links: EpicLink[], items: Item[], tickets: EpicTicket[] = []): EpicTaskView[] {
   // The board mirrors Jira tickets. A task made from a request on the Epic
   // page has no ticket, so it stays on the Tasks page instead of this board.
-  const boardTasks = tasks.filter((t) => t.jira_key);
-  const byKey = new Map(boardTasks.map((t) => [t.jira_key!, t]));
+  // Archived tasks are excluded so a synced Jira ticket can re-surface for re-launch.
+  const boardTasks = tasks.filter((t) => t.jira_key && t.status !== "archived");
+  const taskByKey = new Map(boardTasks.map((t) => [t.jira_key!, t]));
+  const entries: { task: Task; has_task: boolean }[] = boardTasks.map((task) => ({ task, has_task: true }));
+  for (const ticket of tickets) {
+    if (!taskByKey.has(ticket.jira_key)) {
+      entries.push({ task: ticketToTask(ticket), has_task: false });
+    }
+  }
+  const entryByKey = new Map(entries.map((e) => [e.task.jira_key!, e]));
   const prs = prItemByTask(items);
   const prReady = (t: Task) => { const i = prs.get(t.id); return Boolean(i && i.status === "open" && i.ready === 1); };
   const closedUnmerged = (t: Task) => { const i = prs.get(t.id); return Boolean(t.pr_url && i && i.status === "resolved" && !isMerged(t)); };
   const satisfied = (t: Task) => t.epic_out === 1 || isJiraKilled(t.jira_status) || isMerged(t) || prReady(t);
 
-  const views = boardTasks.map((task): EpicTaskView => {
+  const views = entries.map(({ task, has_task }): EpicTaskView => {
     const blockers = links
       .filter((l) => l.task_key === task.jira_key)
-      .map((l) => ({ key: l.blocked_by_key, t: byKey.get(l.blocked_by_key) }))
-      .map(({ key, t }): EpicBlocker => ({ key, task_id: t?.id ?? null, satisfied: t ? satisfied(t) : true }));
+      .map((l) => ({ key: l.blocked_by_key, dep: entryByKey.get(l.blocked_by_key) }))
+      .map(({ key, dep }): EpicBlocker => ({
+        key,
+        task_id: dep?.has_task ? dep.task.id : null,
+        satisfied: dep ? satisfied(dep.task) : true,
+      }));
     const blocked = blockers.filter((b) => !b.satisfied);
-    const closed = blockers.find((b) => { const t = b.task_id ? boardTasks.find((x) => x.id === b.task_id) : null; return t ? closedUnmerged(t) : false; });
-    const killed = blockers.find((b) => { const t = b.task_id ? boardTasks.find((x) => x.id === b.task_id) : null; return t ? isJiraKilled(t.jira_status) : false; });
-    const item = prs.get(task.id);
+    const closed = blockers.find((b) => {
+      const dep = entryByKey.get(b.key);
+      return dep?.has_task ? closedUnmerged(dep.task) : false;
+    });
+    const killed = blockers.find((b) => {
+      const dep = entryByKey.get(b.key);
+      return dep ? isJiraKilled(dep.task.jira_status) : false;
+    });
+    const item = has_task ? prs.get(task.id) : undefined;
     let state: EpicTaskState;
     if (task.epic_out === 1) state = "out";
     else if (isJiraKilled(task.jira_status)) state = "killed";
     else if (isMerged(task)) state = "merged";
-    else if (prReady(task)) state = "pr_ready";
-    else if (task.pr_url || item) state = "pr_open";
-    else if (task.status === "dispatched" || task.terminal_address) state = "running";
+    else if (has_task && prReady(task)) state = "pr_ready";
+    else if (has_task && (task.pr_url || item)) state = "pr_open";
+    else if (has_task && (task.status === "dispatched" || task.terminal_address)) state = "running";
     else state = blocked.length ? "blocked" : "ready";
 
     // Stack on the prerequisite's branch only when exactly one same-repo
     // prerequisite is still unmerged; otherwise the default branch.
     const open = blockers
-      .map((b) => (b.task_id ? boardTasks.find((t) => t.id === b.task_id)! : null))
-      .filter((t): t is Task => Boolean(t) && !isMerged(t!) && !isJiraKilled(t!.jira_status) && t!.epic_out !== 1);
-    const sameRepo = open.filter((t) => t.repo_path && t.repo_path === task.repo_path && t.branch);
-    const stack_on = open.length === 1 && sameRepo.length === 1 ? sameRepo[0].branch : null;
+      .map((b) => entryByKey.get(b.key))
+      .filter((e): e is { task: Task; has_task: boolean } => Boolean(e) && !isMerged(e!.task) && !isJiraKilled(e!.task.jira_status) && e!.task.epic_out !== 1);
+    const sameRepo = open.filter((e) => e.has_task && e.task.repo_path && e.task.repo_path === task.repo_path && e.task.branch);
+    const stack_on = open.length === 1 && sameRepo.length === 1 ? sameRepo[0].task.branch : null;
     return {
-      task, state, blockers,
+      task, has_task, state, blockers,
       alert: closed
         ? `Prerequisite ${closed.key} PR was closed without merging`
         : killed ? `Prerequisite ${killed.key} was killed in Jira` : null,
@@ -100,7 +153,7 @@ export function epicViews(tasks: Task[], links: EpicLink[], items: Item[]): Epic
     if (depth.has(key)) return depth.get(key)!;
     if (seen.has(key)) return 0; // cycle: reported on the epic, never loops here
     seen.add(key);
-    const d = Math.max(-1, ...links.filter((l) => l.task_key === key && byKey.has(l.blocked_by_key)).map((l) => depthOf(l.blocked_by_key, seen))) + 1;
+    const d = Math.max(-1, ...links.filter((l) => l.task_key === key && entryByKey.has(l.blocked_by_key)).map((l) => depthOf(l.blocked_by_key, seen))) + 1;
     depth.set(key, d);
     return d;
   };
@@ -144,9 +197,9 @@ export function archiveEpicLaunchItems(db: Db, hub: Hub): void {
   if (epicIds.size === 0) return;
   const prItems = db.listActivePrItems();
   for (const epicId of epicIds) {
-    const views = epicViews(db.listEpicTasks(epicId), db.listEpicLinks(epicId), prItems);
+    const views = epicViews(db.listEpicTasks(epicId), db.listEpicLinks(epicId), prItems, db.listEpicTickets(epicId));
     for (const v of views) {
-      if (v.state === "ready") continue;
+      if (!v.has_task || v.state === "ready") continue;
       for (const existing of byTaskId.get(v.task.id) ?? []) {
         db.updateItem(existing.id, { status: "archived", resolved_ms: Date.now() });
         hub.broadcast("item.updated", db.getItem(existing.id));

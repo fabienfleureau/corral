@@ -245,8 +245,10 @@ export const api = {
     post(`/api/epics/${id}/agent/run`, instruction ? { instruction } : undefined),
   importEpic: async (key: string): Promise<EpicDetail> => checkEpicDetail(await post("/api/epics", { key }), "POST", "/api/epics"),
   syncEpic: async (id: string): Promise<EpicDetail> => checkEpicDetail(await post(`/api/epics/${id}/sync`), "POST", `/api/epics/${id}/sync`),
-  launchEpicTask: (epicId: string, taskId: string): Promise<DispatchResult> =>
-    post<DispatchResult>(`/api/epics/${epicId}/tasks/${taskId}/launch`),
+  launchEpicTask: (epicId: string, taskId: string, input?: { repo_path?: string; favorite?: string; target?: string }): Promise<DispatchResult> =>
+    post<DispatchResult>(`/api/epics/${epicId}/tasks/${taskId}/launch`, input),
+  launchEpicTicket: (epicId: string, jiraKey: string, input: { repo_path: string; favorite?: string; target?: string }): Promise<DispatchResult & { task: Task }> =>
+    post<DispatchResult & { task: Task }>(`/api/epics/${epicId}/tickets/${encodeURIComponent(jiraKey)}/launch`, input),
   reviseDesign: async (id: string, input: { body: string; reason: string }): Promise<EpicDetail> =>
     checkEpicDetail(await post(`/api/epics/${id}/design`, input), "POST", `/api/epics/${id}/design`),
   applyAmendment: (itemId: string): Promise<Item> => post(`/api/items/${itemId}/amendment/apply`),

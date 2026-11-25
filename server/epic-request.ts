@@ -8,7 +8,7 @@ import { favoriteForPath, type Favorite } from "./favorites.ts";
 import { delegateConflict, reviewerBySummary, reviewSummary, type Reviewer } from "./reviewers.ts";
 import type { Db } from "./db.ts";
 import { logTaskEvent } from "./task-events.ts";
-import type { Epic, Repo, Task } from "./types.ts";
+import type { Epic, EpicTicket, Repo, Task } from "./types.ts";
 
 export interface EpicRequestSettings {
   favorite_name?: string;
@@ -181,7 +181,7 @@ export function createEpicRequestTask(
   return task;
 }
 
-function resolveAgentRepoPath(raw: string, repos: Repo[]): string {
+export function resolveAgentRepoPath(raw: string, repos: Repo[]): string {
   const wanted = raw.trim();
   if (!wanted) throw new EpicRequestError("repo_path is required");
   const lower = wanted.toLowerCase();
@@ -191,6 +191,224 @@ function resolveAgentRepoPath(raw: string, repos: Repo[]): string {
   if (matched) return matched.path;
   if (!isAbsolute(wanted)) throw new EpicRequestError("repo_path must be a registered repository name or an absolute path");
   return wanted;
+}
+
+export interface ResolvedEpicLaunchOptions {
+  target: string;
+  agent: string | null;
+  model: string | null;
+  reasoning: string | null;
+  reviewName: string | null;
+  frozenReview: string | null;
+  baseBranch?: string | null;
+  explicitOverride: boolean;
+}
+
+function optionalBodyString(b: Record<string, unknown>, field: string): string | null | undefined {
+  if (!(field in b) || b[field] === undefined) return undefined;
+  const val = b[field];
+  if (val === null) return null;
+  if (typeof val !== "string") throw new EpicRequestError(`${field} must be a string or null`);
+  return val.trim() || null;
+}
+
+/**
+ * Resolve effective dispatch settings for launching a ready epic ticket or task.
+ * Precedence: explicit request `favorite`/`target` > existing task `target` >
+ * compatible epic favorite > 400 error.
+ */
+export function resolveEpicLaunchOptions(opts: {
+  epic: Pick<Epic, "favorite_name">;
+  repoPath: string;
+  existingTask?: Pick<Task, "target" | "agent" | "model" | "reasoning" | "review"> | null;
+  body: unknown;
+  favorites: Favorite[];
+  repos: Repo[];
+  reviewers: Reviewer[];
+  configuredAgents?: string[];
+}): ResolvedEpicLaunchOptions {
+  const raw = opts.body;
+  if (raw !== undefined && raw !== null && (typeof raw !== "object" || Array.isArray(raw))) {
+    throw new EpicRequestError("launch body must be an object");
+  }
+  const b = (raw ?? {}) as Record<string, unknown>;
+  const rawFav = "favorite" in b ? b.favorite : b.favorite_name;
+  if (rawFav !== undefined && rawFav !== null && typeof rawFav !== "string") {
+    throw new EpicRequestError("favorite must be a string");
+  }
+  const favoriteName = typeof rawFav === "string" ? rawFav.trim() : "";
+  if ("target" in b && b.target !== undefined && b.target !== null && typeof b.target !== "string") {
+    throw new EpicRequestError("target must be a string");
+  }
+  const explicitTarget = typeof b.target === "string" ? b.target.trim() : "";
+  const explicitAgent = optionalBodyString(b, "agent");
+  const explicitModel = optionalBodyString(b, "model");
+  const explicitReasoning = optionalBodyString(b, "reasoning");
+  const baseBranch = optionalBodyString(b, "base_branch");
+  const configuredAgents = opts.configuredAgents ?? [];
+  const existing = opts.existingTask ?? null;
+  const explicitOverride = Boolean(
+    favoriteName || explicitTarget || explicitAgent !== undefined || explicitModel !== undefined ||
+    explicitReasoning !== undefined || baseBranch !== undefined,
+  );
+
+  if (favoriteName) {
+    const favorite = favoriteForPath(favoriteName, opts.repoPath, opts.favorites, opts.repos);
+    if (!favorite) throw new EpicRequestError(`favorite ${favoriteName} is not configured for this repository`);
+    const target = explicitTarget || favorite.harness;
+    if (configuredAgents.length > 0 && !configuredAgents.includes(target)) {
+      throw new EpicRequestError(`unknown harness: ${target}`);
+    }
+    const agent = explicitAgent !== undefined ? explicitAgent : (favorite.agent || null);
+    const model = explicitModel !== undefined ? explicitModel : (favorite.model || null);
+    const reasoning = explicitReasoning !== undefined ? explicitReasoning : (favorite.reasoning || null);
+    const reviewer = favorite.review ? opts.reviewers.find((r) => r.name === favorite.review) : undefined;
+    if (reviewer) {
+      const conflict = delegateConflict(reviewer, target, agent);
+      if (conflict) throw new EpicRequestError(conflict);
+    }
+    return {
+      target,
+      agent,
+      model,
+      reasoning,
+      reviewName: reviewer ? reviewer.name : null,
+      frozenReview: reviewer ? reviewSummary(reviewer) : null,
+      ...(baseBranch !== undefined ? { baseBranch } : {}),
+      explicitOverride: true,
+    };
+  }
+
+  if (explicitTarget) {
+    if (configuredAgents.length > 0 && !configuredAgents.includes(explicitTarget)) {
+      throw new EpicRequestError(`unknown harness: ${explicitTarget}`);
+    }
+    const agent = explicitAgent !== undefined ? explicitAgent : (existing?.agent ?? null);
+    const model = explicitModel !== undefined ? explicitModel : (existing?.model ?? null);
+    const reasoning = explicitReasoning !== undefined ? explicitReasoning : (existing?.reasoning ?? null);
+    const savedReviewer = existing ? reviewerBySummary(existing.review, opts.reviewers) : undefined;
+    const validReviewer = savedReviewer && !delegateConflict(savedReviewer, explicitTarget, agent) ? savedReviewer : undefined;
+    return {
+      target: explicitTarget,
+      agent,
+      model,
+      reasoning,
+      reviewName: validReviewer ? validReviewer.name : null,
+      frozenReview: validReviewer ? reviewSummary(validReviewer) : null,
+      ...(baseBranch !== undefined ? { baseBranch } : {}),
+      explicitOverride: true,
+    };
+  }
+
+  if (existing?.target) {
+    const target = existing.target;
+    const agent = explicitAgent !== undefined ? explicitAgent : (existing.agent ?? null);
+    const model = explicitModel !== undefined ? explicitModel : (existing.model ?? null);
+    const reasoning = explicitReasoning !== undefined ? explicitReasoning : (existing.reasoning ?? null);
+    const savedReviewer = reviewerBySummary(existing.review, opts.reviewers);
+    const validReviewer = savedReviewer && !delegateConflict(savedReviewer, target, agent) ? savedReviewer : undefined;
+    return {
+      target,
+      agent,
+      model,
+      reasoning,
+      reviewName: validReviewer ? validReviewer.name : null,
+      frozenReview: validReviewer ? reviewSummary(validReviewer) : null,
+      ...(baseBranch !== undefined ? { baseBranch } : {}),
+      explicitOverride,
+    };
+  }
+
+  if (opts.epic.favorite_name?.trim()) {
+    const epicFavorite = resolveEpicFavorite(opts.epic, opts.repoPath, opts.favorites, opts.repos);
+    if (!epicFavorite) {
+      throw new EpicRequestError(
+        `epic favorite "${opts.epic.favorite_name}" is not configured for this task's repository — configure the task or assign a compatible favorite`,
+      );
+    }
+    const target = epicFavorite.harness;
+    const agent = explicitAgent !== undefined ? explicitAgent : (existing?.agent ?? (epicFavorite.agent || null));
+    const model = explicitModel !== undefined ? explicitModel : (existing?.model ?? (epicFavorite.model || null));
+    const reasoning = explicitReasoning !== undefined ? explicitReasoning : (existing?.reasoning ?? (epicFavorite.reasoning || null));
+    const favReviewer = epicFavorite.review
+      ? opts.reviewers.find((r) => r.name === epicFavorite.review) ?? null
+      : existing ? reviewerBySummary(existing.review, opts.reviewers) ?? null : null;
+    if (favReviewer) {
+      const conflict = delegateConflict(favReviewer, target, agent);
+      if (conflict) throw new EpicRequestError(conflict);
+    }
+    return {
+      target,
+      agent,
+      model,
+      reasoning,
+      reviewName: favReviewer ? favReviewer.name : null,
+      frozenReview: favReviewer ? reviewSummary(favReviewer) : null,
+      ...(baseBranch !== undefined ? { baseBranch } : {}),
+      explicitOverride,
+    };
+  }
+
+  throw new EpicRequestError(
+    existing ? "task has no harness — set one on the task before launching" : "favorite or target (harness) is required",
+  );
+}
+
+/**
+ * Create an open Corral code task from a synced `epic_tickets` row using the
+ * validated repository and launch settings, ready for immediate dispatch.
+ */
+export function createTaskFromEpicTicket(
+  db: Db,
+  epic: Epic,
+  ticket: EpicTicket,
+  repoPath: string,
+  conf: ResolvedEpicLaunchOptions,
+): Task {
+  const now = Date.now();
+  const title = ticket.title.trim() || ticket.jira_key;
+  const prompt = ticket.description.trim() || title;
+  const task: Task = {
+    id: randomUUID(),
+    title,
+    prompt,
+    kind: "code",
+    repo_path: repoPath,
+    target: conf.target,
+    target_state: "suggested",
+    agent: conf.agent,
+    model: conf.model,
+    reasoning: conf.reasoning,
+    review: conf.frozenReview,
+    base_branch: conf.baseBranch ?? null,
+    branch: null,
+    worktree_path: null,
+    assignee: null,
+    jira_key: ticket.jira_key,
+    jira_url: ticket.jira_url || null,
+    jira_parent_key: ticket.jira_parent_key ?? epic.jira_key,
+    jira_status: ticket.jira_status,
+    pr_url: null,
+    pr_meta: null,
+    status: "open",
+    terminal_address: null,
+    exit_code: null,
+    created_ms: now,
+    updated_ms: now,
+    epic_id: epic.id,
+    epic_out: 0,
+  };
+  db.insertTask(task);
+  db.recordMetric("task.created", task.id, { source: "epic_launch", epic: epic.jira_key });
+  logTaskEvent(db, task.id, "created", `Task created from epic ticket ${ticket.jira_key}`, {
+    source: "epic_launch",
+    epic: epic.jira_key,
+    repo: repoPath,
+    target: conf.target,
+    agent: conf.agent,
+    jira_key: ticket.jira_key,
+  });
+  return task;
 }
 
 /**
