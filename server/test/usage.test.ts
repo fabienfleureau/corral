@@ -581,3 +581,10 @@ test("attachQuotaPredictions clones snapshots without mutating cached inputs", (
   assert.equal(enriched[0].windows[0].prediction, null);
   assert.equal(enriched[0].windows[1].prediction?.status, "safe");
 });
+
+test("effort-suffixed opus 5.5 and Antigravity aliases are priced; unknown is not", () => {
+  for (const model of ["claude-opus-5-5-medium", "gemini-flash-worker-agy", "gemini-pro-orchestrator-neon"]) {
+    assert.ok(priceFor(model, DEFAULT_PRICES), model);
+  }
+  assert.equal(priceFor("unknown", DEFAULT_PRICES), null);
+});
