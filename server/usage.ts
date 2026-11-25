@@ -60,7 +60,7 @@ export interface ModelPrice {
 // priced, not as an unpriced call.
 export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   "claude-fable-5*": { input: 10, output: 50, cacheRead: 0.25 },
-  "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
+  "claude-opus-5-5*": { input: 4, output: 20, cacheRead: 0.2 },
   "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4*": { input: 5, output: 25 },
   "claude-sonnet-5*": { input: 2, output: 10, cacheRead: 0.2 },
@@ -85,6 +85,9 @@ export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   // https://aistudio.google.com/docs/pricing (as of 2026-11-24)
   "gemini-4-neon*": { input: 3, output: 15, cacheRead: 0.15 },
   "gemini-4-hydrogen*": { input: 1.5, output: 7.5, cacheRead: 0.075 },
+  // Antigravity worker/orchestrator aliases, priced as the family they route to (assumed).
+  "gemini-pro-orchestrator-neon*": { input: 3, output: 15, cacheRead: 0.15 },
+  "gemini-flash-worker-agy*": { input: 0.75, output: 3.75, cacheRead: 0.075 },
   // Rate until 2026-12-31; it doubles on 2027-01-01.
   "gemini-3.8-flash*": { input: 0.75, output: 3.75, cacheRead: 0.075 },
 };
