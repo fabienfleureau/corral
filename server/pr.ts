@@ -686,16 +686,33 @@ function snapshotPr(pr: PrInfo, ready: boolean, reasons: string[], triage: PrTri
 /** The agent has this task's PR item in flight: the item waits under
  *  "In progress" instead of asking the human for something nobody can act on
  *  yet. Cleared when the run ends or the gate passes. */
-function setItemHandling(db: Db, hub: Hub, taskId: string, handling: boolean, opts: { unsnooze?: boolean } = {}): void {
+export function setItemHandling(db: Db, hub: Hub, taskId: string, handling: boolean, opts: { unsnooze?: boolean } = {}): void {
   const item = db.findPrItemForTask(taskId);
   const value = handling ? 1 : 0;
-  if (!item) return;
+  if (!item || (handling && item.status !== "open")) return;
   const patch: Partial<Item> = {};
   if ((item.handling ?? 0) !== value) patch.handling = value;
   if (handling && opts.unsnooze && item.snooze_until_ms !== null) patch.snooze_until_ms = null;
   if (Object.keys(patch).length === 0) return;
   db.updateItem(item.id, patch);
   hub.broadcast("item.updated", db.getItem(item.id));
+}
+
+/** True when the task's current session is actively working in the backend
+ *  (falling back to the last tracked terminal status if unreachable). */
+async function isTaskSessionWorking(db: Db, task: Task, backend?: WorkerBackend): Promise<boolean> {
+  if (!task.terminal_address) return false;
+  const tracked = db.getTerminal(task.terminal_address);
+  if (typeof backend?.get === "function") {
+    try {
+      const live = await backend.get(task.terminal_address, { strict: true });
+      if (!live) return false;
+      return live.state !== "finished" && live.status === "working";
+    } catch {
+      return tracked?.last_status === "working";
+    }
+  }
+  return tracked?.last_status === "working";
 }
 
 /** The run ended (finished, idle, or reported done): the PR item goes back to
@@ -761,6 +778,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   const existing = db.findPrItemForTask(task.id, { includeArchived: true });
   const shouldResolve = pr.state !== "OPEN";
   const merged = pr.state === "MERGED";
+  const agentWorking = !shouldResolve && await isTaskSessionWorking(db, task, opts.backend);
   syncJiraPrStage(db, hub, task, pr, ready, merged, opts);
   // Before the snapshot below replaces it: the last state seen while open.
   if (merged) recordMerge(db, hub, task, pr, readMeta(task.pr_meta).pr ?? null);
@@ -889,7 +907,7 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
       context: "",
       options: null,
       ready: shouldResolve ? 1 : ready ? 1 : 0,
-      handling: 0,
+      handling: agentWorking ? 1 : 0,
       triage: triageJson,
       source_ref: task.terminal_address,
       task_id: task.id,
@@ -924,8 +942,15 @@ export async function syncTaskPr(db: Db, hub: Hub, staleTask: Task, opts: SyncOp
   const readyFlag = shouldResolve ? 1 : ready ? 1 : 0;
   if (existing.ready !== readyFlag) patch.ready = readyFlag;
   // Keeping the work is up to the run: this only ends the handling phase when
-  // the gate passes or the PR closes (capture clears it when a run ends).
-  const handling = shouldResolve || ready ? 0 : existing.handling ?? 0;
+  // the gate passes and the session is not actively working (capture clears it
+  // when a run ends).
+  const handling = shouldResolve
+    ? 0
+    : agentWorking
+      ? 1
+      : ready
+        ? 0
+        : existing.handling ?? 0;
   if ((existing.handling ?? 0) !== handling) patch.handling = handling;
   if (shouldResolve && existing.status !== doneStatus && existing.status !== "archived") {
     patch.status = doneStatus;

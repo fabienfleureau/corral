@@ -16,7 +16,7 @@ import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { JiraTransitionGateway } from "./jira-status.ts";
 import type { WorkerBackend, WorkerElicitation, WorkerEvent, WorkerRunOutcome, WorkerSession } from "./worker.ts";
-import { clearItemHandling, completeTask, doneReported, isPrSyncedTask, noteDoneReport, syncTaskPr, type SyncOptions } from "./pr.ts";
+import { clearItemHandling, completeTask, doneReported, isPrSyncedTask, noteDoneReport, setItemHandling, syncTaskPr, type SyncOptions } from "./pr.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { PlanConflictError, planMarkdown, readSpec } from "./multi-repo.ts";
@@ -163,6 +163,7 @@ export class CaptureEngine {
     const taskId = e.task_id ?? tracked?.task_id ?? null;
     if (!tracked && !taskId) return; // not a Corral session
     const task = taskId ? this.db.getTask(taskId) : null;
+    const isCurrentSession = !task?.terminal_address || task.terminal_address === e.address;
     const blocked = e.status === "blocked";
     const wasBlocked = tracked?.last_status === "blocked";
     const status = e.status ?? null;
@@ -184,7 +185,7 @@ export class CaptureEngine {
     }
     if (task?.status === "archived" || this.archiving.has(e.address)) {
       this.cancelStoppedRetries(e.address);
-      if (runEnded && taskId) clearItemHandling(this.db, this.hub, taskId);
+      if (runEnded && taskId && isCurrentSession) clearItemHandling(this.db, this.hub, taskId);
       return;
     }
 
@@ -195,8 +196,9 @@ export class CaptureEngine {
         return false;
       })
       : false;
-    if (runEnded && taskId) clearItemHandling(this.db, this.hub, taskId);
+    if (runEnded && taskId && isCurrentSession) clearItemHandling(this.db, this.hub, taskId);
     if (runResumed) resumeSnoozedItems(this.db, this.hub, { taskId, address: e.address });
+    if (status === "working" && taskId && isCurrentSession) setItemHandling(this.db, this.hub, taskId, true);
 
     if (blocked) {
       this.cancelPendingRetry(e.address);
@@ -583,7 +585,15 @@ export class CaptureEngine {
     this.cancelPendingRetry(e.address);
     this.retrySentAt.delete(e.address);
     this.unreadStops.delete(e.address);
-    const taskId = e.task_id ?? this.db.getTerminal(e.address)?.task_id ?? null;
+    const tracked = this.db.getTerminal(e.address);
+    const taskId = e.task_id ?? tracked?.task_id ?? null;
+    if (tracked) {
+      this.db.upsertTerminal({
+        ...tracked,
+        last_status: e.exit_code && e.exit_code !== 0 ? "error" : "done",
+        updated_ms: Date.now(),
+      });
+    }
     const task = taskId ? this.db.getTask(taskId) : null;
     this.resolveOpenQuestions({
       address: e.address,
