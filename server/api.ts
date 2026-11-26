@@ -12,6 +12,7 @@ import type { Config } from "./config.ts";
 import type { Db } from "./db.ts";
 import type { ModelAvailability, WorkerBackend, WorkerQuestion } from "./worker.ts";
 import { resumeSnoozedItems, type CaptureEngine, type Hub } from "./capture.ts";
+import { setItemHandling } from "./pr.ts";
 import type { JiraClient, JiraIssue } from "./jira.ts";
 import { syncJiraStage } from "./jira-status.ts";
 import { syncEpic } from "./epic.ts";
@@ -711,6 +712,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     await state.backend.send(task.terminal_address, prompt);
     state.capture?.resetStoppedRetries?.(task.terminal_address);
     resumeSnoozedItems(state.db, state.hub, { taskId: task.id, address: task.terminal_address });
+    setItemHandling(state.db, state.hub, task.id, true);
     logTaskEvent(state.db, task.id, "prompt", "Requested a Claude artifact", promptData(prompt, { session: task.terminal_address }));
     json(res, 200, { ok: true });
   });
