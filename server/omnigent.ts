@@ -11,6 +11,12 @@ import { join } from "node:path";
 import type { OmnigentConfig } from "./config.ts";
 import { resolveExecutable, runAsync } from "./exec.ts";
 import { LocalModelProbe } from "./model-probe.ts";
+import {
+  AntigravityActivityCache,
+  EMPTY_ANTIGRAVITY_ACTIVITY,
+  isAntigravityCascadeRunning,
+  type AntigravityActivitySnapshot,
+} from "./antigravity-status.ts";
 import type {
   WorkerAttachment,
   WorkerBackend,
@@ -292,6 +298,10 @@ class OmnigentHttpError extends Error {
   }
 }
 
+export interface OmnigentBackendOptions {
+  antigravityActivity?: () => Promise<AntigravityActivitySnapshot>;
+}
+
 export class OmnigentBackend implements WorkerBackend {
   name = "omnigent";
   private cfg: OmnigentConfig;
@@ -303,9 +313,12 @@ export class OmnigentBackend implements WorkerBackend {
   private localProbe = new LocalModelProbe();
   /** omnigent project name -> first-class project id (see `projectIdFor`). */
   private projectIds = new Map<string, string>();
+  private antigravityActivity: () => Promise<AntigravityActivitySnapshot>;
 
-  constructor(cfg: OmnigentConfig) {
+  constructor(cfg: OmnigentConfig, opts: OmnigentBackendOptions = {}) {
     this.cfg = cfg;
+    const cache = new AntigravityActivityCache();
+    this.antigravityActivity = opts.antigravityActivity ?? (() => cache.snapshot());
   }
 
   /** Availability of a configured local model server (2 s timeout, 30 s cache).
@@ -699,17 +712,53 @@ export class OmnigentBackend implements WorkerBackend {
     return id;
   }
 
+  private isAntigravitySession(raw: Record<string, unknown>, session: WorkerSession): boolean {
+    return harnessOf(str(raw.harness) ?? session.harness ?? "") === "antigravity";
+  }
+
+  /** Reconcile live Antigravity sessions reported as `idle` by Omnigent against
+   *  local `agy` Connect-RPC status so mid-turn progress text does not trigger
+   *  false stopped-run retries or drop active tasks from In progress. */
+  private async reconcileAntigravityIdle(
+    pairs: { raw: Record<string, unknown>; session: WorkerSession }[],
+  ): Promise<WorkerSession[]> {
+    const candidates = pairs.filter(
+      ({ raw, session }) =>
+        session.state !== "finished" &&
+        session.status === "idle" &&
+        this.isAntigravitySession(raw, session),
+    );
+    if (candidates.length === 0) return pairs.map((p) => p.session);
+    const snapshot = await this.antigravityActivity().catch(() => EMPTY_ANTIGRAVITY_ACTIVITY);
+    for (const { raw, session } of candidates) {
+      if (
+        isAntigravityCascadeRunning(snapshot, {
+          address: session.address,
+          externalSessionId: str(raw.external_session_id),
+        })
+      ) {
+        session.status = "working";
+      }
+    }
+    return pairs.map((p) => p.session);
+  }
+
   async list(): Promise<WorkerSession[]> {
     const res = await this.request<Record<string, unknown>>("GET", "/v1/sessions?limit=200");
     const rows = (res.data ?? res.sessions ?? res) as unknown;
     if (!Array.isArray(rows)) return [];
-    return rows.map((r) => this.normalize(r as Record<string, unknown>));
+    const pairs = rows.map((r) => {
+      const raw = r as Record<string, unknown>;
+      return { raw, session: this.normalize(raw) };
+    });
+    return await this.reconcileAntigravityIdle(pairs);
   }
 
   async get(address: string, options?: { strict?: boolean }): Promise<WorkerSession | null> {
     try {
       const raw = await this.request<Record<string, unknown>>("GET", `/v1/sessions/${address}`);
-      return this.normalize(raw);
+      const [session] = await this.reconcileAntigravityIdle([{ raw, session: this.normalize(raw) }]);
+      return session;
     } catch (err) {
       if (options?.strict && !(err instanceof OmnigentHttpError && err.status === 404)) throw err;
       return null;

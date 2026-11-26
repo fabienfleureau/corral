@@ -36,7 +36,9 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   `<jira-key>/<short-slug>` for a ticket, `corral/<short-slug>-<task-id>`
   otherwise: whole words only, no mid-word truncation. Antigravity tasks run
   without tool-approval prompts because they have no human at the terminal
-  ([ADR 0014](adr/0014-antigravity-permission-bypass.md)).
+  ([ADR 0014](adr/0014-antigravity-permission-bypass.md)), and Corral verifies
+  idle Antigravity sessions against local `agy` so active runs stay in
+  progress ([ADR 0024](adr/0024-antigravity-local-status-probe.md)).
 - **Cleanup** — when a task is done or archived, Corral asks omnigent to remove
   its worktree and local branch. An open PR keeps them until the PR is merged or
   closed, because the review loop still needs the branch. A periodic pass retries
