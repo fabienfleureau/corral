@@ -1604,6 +1604,18 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.redacted-export {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.redacted-export-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .action-label {
   font-size: 12px;
   color: var(--muted);
@@ -3535,6 +3547,13 @@ select:focus {
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   border-radius: 14px 14px 0 0;
+}
+.history-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 .history-title {
   margin: 0;

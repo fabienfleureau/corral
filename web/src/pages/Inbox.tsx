@@ -19,6 +19,8 @@ import { parseGrillRound, formatGrillAnswers } from "../grill-format";
 import { QuestionReply } from "../QuestionReply";
 import { GrillRoundDialog } from "../GrillRoundDialog";
 import { TaskHistoryButton } from "../TaskHistory";
+import { RedactedMarkdownButtons } from "../RedactedMarkdown";
+import { inboxReportMarkdown } from "../redacted-export";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePaneWidth } from "../use-pane-size";
 import type { PaneLimits } from "../pane-size";
@@ -801,6 +803,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 {selected.kind === "pr" && linkedTask?.branch ? <ForcePrRefresh task={linkedTask} onChecked={refresh} /> : null}
                 {linkedTask ? <RequestArtifact key={linkedTask.id} task={linkedTask} /> : null}
                 {linkedTask ? <TaskHistoryButton taskId={linkedTask.id} title={linkedTask.title || linkedTask.prompt.trim().split("\n")[0] || "Untitled task"} version={eventVersion} /> : null}
+                <RedactedMarkdownButtons markdown={inboxReportMarkdown(selected, linkedTask)} basename={`report-${selected.id}`} />
                 <button
                   className="btn"
                   onClick={() => void runAction(() => api.resolveItem(selected.id))}

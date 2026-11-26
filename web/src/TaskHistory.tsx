@@ -8,6 +8,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "./api";
+import { RedactedMarkdownButtons } from "./RedactedMarkdown";
+import { detailRows, KIND_LABELS, taskHistoryMarkdown } from "./redacted-export";
 import type { TaskEvent, TaskEventKind } from "./types";
 import { errText, formatTs } from "./util";
 import { Spinner } from "./ui";
@@ -69,42 +71,6 @@ const ICONS: Record<TaskEventKind, ReactNode> = {
   ),
 };
 
-const KIND_LABELS: Record<TaskEventKind, string> = {
-  created: "created",
-  updated: "updated",
-  status: "status",
-  prompt: "prompt",
-  question: "question",
-  jira: "jira",
-  pr: "pr",
-  session: "session",
-};
-
-/** Preferred order of the detail keys, so a prompt shows its text first. */
-const DETAIL_ORDER = ["text", "from", "to", "field", "pr", "key", "session", "source", "chars", "error"];
-
-function detailRows(event: TaskEvent): [string, string][] {
-  if (!event.data) return [];
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(event.data) as Record<string, unknown>;
-  } catch {
-    return [];
-  }
-  // The message already carries the from → to of a field change.
-  const hidden = new Set(["from", "to"]);
-  const keys = Object.keys(parsed).filter((k) => !hidden.has(k) && parsed[k] !== null && parsed[k] !== "");
-  keys.sort((a, b) => {
-    const ai = DETAIL_ORDER.indexOf(a);
-    const bi = DETAIL_ORDER.indexOf(b);
-    return (ai < 0 ? 99 : ai) - (bi < 0 ? bi : 99);
-  });
-  return keys.map((k) => {
-    const value = parsed[k];
-    return [k, typeof value === "string" ? value : JSON.stringify(value)] as [string, string];
-  });
-}
-
 export function TaskHistoryDialog({ taskId, title, version = 0, onClose }: { taskId: string; title: string; version?: number; onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const headingId = useId();
@@ -156,6 +122,7 @@ export function TaskHistoryDialog({ taskId, title, version = 0, onClose }: { tas
     }
     return groups;
   }, [events]);
+  const exportText = useMemo(() => events ? taskHistoryMarkdown(title, events) : "", [title, events]);
 
   return (
     <dialog
@@ -170,9 +137,12 @@ export function TaskHistoryDialog({ taskId, title, version = 0, onClose }: { tas
           <h2 id={headingId} className="history-title">History</h2>
           <p className="history-sub">{title}</p>
         </div>
-        <button type="button" className="btn" autoFocus onClick={() => dialogRef.current?.close()}>
-          Close
-        </button>
+        <div className="history-head-actions">
+          {events ? <RedactedMarkdownButtons markdown={exportText} basename={`history-${taskId}`} /> : null}
+          <button type="button" className="btn" autoFocus onClick={() => dialogRef.current?.close()}>
+            Close
+          </button>
+        </div>
       </div>
 
       <div className="history-body">
