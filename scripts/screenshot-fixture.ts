@@ -10,6 +10,63 @@ import type { TaskEvent } from "../server/task-events.ts";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { deflateSync } from "node:zlib";
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i];
+    for (let b = 0; b < 8; b++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Uint8Array): Buffer {
+  const buf = Buffer.alloc(12 + data.length);
+  buf.writeUInt32BE(data.length, 0);
+  buf.write(type, 4, 4, "ascii");
+  Buffer.from(data).copy(buf, 8);
+  buf.writeUInt32BE(crc32(buf.subarray(4, 8 + data.length)), 8 + data.length);
+  return buf;
+}
+
+/** Deterministic 64x40 RGBA PNG for offline thumbnail previews in the screenshot fixture. */
+function syntheticPreviewPng(accent: [number, number, number]): Buffer {
+  const width = 64;
+  const height = 40;
+  const stride = 1 + width * 4;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * stride;
+    raw[rowStart] = 0; // filter type 0
+    for (let x = 0; x < width; x++) {
+      const px = rowStart + 1 + x * 4;
+      const inHeader = y < 8;
+      const inBar = y >= 14 && y <= 32 && ((x >= 8 && x <= 20 && y >= 20) || (x >= 26 && x <= 38 && y >= 14) || (x >= 44 && x <= 56 && y >= 24));
+      const [r, g, b] = inHeader
+        ? [231, 236, 251]
+        : inBar
+          ? accent
+          : [244, 245, 247];
+      raw[px] = r;
+      raw[px + 1] = g;
+      raw[px + 2] = b;
+      raw[px + 3] = 255;
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+  const idat = deflateSync(raw);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", idat),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
 
 /** Written by scripts/capture-screenshot.sh so the Markdown-path link has a file. */
 export const SCREENSHOT_MARKDOWN_PATH = "/tmp/corral-screenshot-plan.md";
@@ -74,6 +131,17 @@ export function seedScreenshotData(db: Db): void {
   seedAgentRuns(db, now);
   seedStoppedRuns(db);
   seedPrWaits(db);
+  seedTaskAttachmentPreviews(db, now);
+}
+
+function seedTaskAttachmentPreviews(db: Db, now: number): void {
+  const insert = db.raw.prepare(
+    `INSERT OR REPLACE INTO task_attachments (id, task_id, filename, content_type, bytes, data, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const openPng = syntheticPreviewPng([59, 83, 196]);
+  const prPng = syntheticPreviewPng([38, 115, 77]);
+  insert.run("fixture-attach-open", "sample-open", "search-ranking-preview.png", "image/png", openPng.length, openPng, now);
+  insert.run("fixture-attach-pr", "sample-pr-task", "auth-refresh-diff.png", "image/png", prPng.length, prPng, now + 1);
 }
 
 /** Dispatch, ready-for-review and resolution times for the Improve page's PR
@@ -455,7 +523,10 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
     threads: [],
     ...overrides,
   });
-  const readyPr = pr({ changed_file_paths: ["server/search.ts", "server/test/search.test.ts", "web/src/pages/Search.tsx", "web/src/styles.css", "docs/search.md", "server/api.ts"] });
+  const readyPr = pr({
+    description: "## Why\n\nRecent results are buried under old but heavily linked ones.\n\n## What\n\nRank by recency and show why a result matched.\n\n![Before & after ranking](/api/tasks/sample-open/attachments/fixture-attach-open)",
+    changed_file_paths: ["server/search.ts", "server/test/search.test.ts", "web/src/pages/Search.tsx", "web/src/styles.css", "docs/search.md", "server/api.ts"],
+  });
   const readyTriage = classifyPrTriage(readyPr);
   const workPr = pr({
     url: "https://gitlab.com/example/platform/-/merge_requests/29",
@@ -551,7 +622,7 @@ export function seedInboxItems(db: Db, now = Date.UTC(2025, 0, 15, 12)): void {
       status: "open",
       title: "Agent stopped without reporting",
       summary: "",
-      body: "**Evidence checks out** (fixture snapshot 2025-01-15T12:00Z): 30d = 202 failed / 3112.\n\n- Qovery-side failures explain most of the gap\n- The engine root cause is still unknown\n\nReview the [evidence](https://example.com/evidence) before replying.",
+      body: "**Evidence checks out** (fixture snapshot 2025-01-15T12:00Z): 30d = 202 failed / 3112.\n\n- Qovery-side failures explain most of the gap\n- The engine root cause is still unknown\n\nReview the [evidence](https://example.com/evidence) or the [Weekly KPI artifact](https://claude.ai/public/artifacts/kpi-weekly-reporters-fixture) before replying.",
       context: "",
       options: null,
       ready: 1,

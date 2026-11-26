@@ -22,8 +22,13 @@ import { TaskHistoryButton } from "../TaskHistory";
 import { RedactedMarkdownButtons } from "../RedactedMarkdown";
 import { inboxReportMarkdown } from "../redacted-export";
 import { ResizeHandle } from "../ResizeHandle";
-import { usePaneWidth } from "../use-pane-size";
+import { usePaneFlag, usePaneWidth } from "../use-pane-size";
 import type { PaneLimits } from "../pane-size";
+import { visibleStripEntries, type QuickJumpRef } from "../recents-pins";
+import { useRecentsPins } from "../use-recents-pins";
+import { PinButton, RecentsStrip, type StripEntry } from "../RecentsStrip";
+import { combineRowImages, extractArtifactBadges, extractMarkdownImages, taskAttachmentPreviews } from "../row-previews";
+import { PreviewToggleButton, RowPreviews } from "../RowPreviews";
 
 type StatusFilter = "open" | "snoozed" | "in-progress";
 
@@ -179,6 +184,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [selected, setSelected] = useState<Item | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const listSize = usePaneWidth("corral.inboxListWidth", LIST_DEFAULT_WIDTH, LIST_LIMITS);
+  const [showPreviews, setShowPreviews] = usePaneFlag("corral.inboxPreviews");
+  const { recents, pins, recordRecent, togglePin, isPinned } = useRecentsPins("corral.inboxRecents", "corral.inboxPins");
 
   const [replyText, setReplyText] = useState("");
   const [replyBusy, setReplyBusy] = useState(false);
@@ -304,6 +311,77 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
     for (const t of tasks) map[t.id] = t;
     return map;
   }, [tasks]);
+
+  const itemsById = useMemo(() => {
+    const map = new Map<string, Item>();
+    for (const item of allItems) map.set(item.id, item);
+    return map;
+  }, [allItems]);
+
+  const inProgressItemIds = useMemo(() => new Set(inProgressItems.map((i) => i.id)), [inProgressItems]);
+  const snoozedItemIds = useMemo(() => new Set(snoozedItems.map((i) => i.id)), [snoozedItems]);
+  const inProgressTaskIds = useMemo(() => new Set(inProgressTasks.map((t) => t.id)), [inProgressTasks]);
+
+  const selectInboxEntry = useCallback((entry: QuickJumpRef) => {
+    if (entry.kind === "task") {
+      if (!inProgressTaskIds.has(entry.id)) return;
+      setStatusFilter("in-progress");
+      setSelected(null);
+      setSelectedTaskId(entry.id);
+      setPlanNotice(null);
+      recordRecent(entry);
+      return;
+    }
+    const item = itemsById.get(entry.id);
+    if (!item) return;
+    const nextFilter: StatusFilter = inProgressItemIds.has(item.id)
+      ? "in-progress"
+      : snoozedItemIds.has(item.id)
+        ? "snoozed"
+        : "open";
+    setStatusFilter(nextFilter);
+    setSelectedTaskId(null);
+    setSelected(item);
+    setPlanNotice(null);
+    recordRecent(entry);
+  }, [inProgressItemIds, inProgressTaskIds, itemsById, recordRecent, snoozedItemIds]);
+
+  const resolveStripEntry = useCallback((ref: QuickJumpRef): StripEntry | null => {
+    if (ref.kind === "task") {
+      const task = tasksById[ref.id];
+      if (!task) return null;
+      return {
+        ref,
+        label: task.title || task.prompt.trim().split("\n")[0] || "Untitled task",
+        badge: "task",
+      };
+    }
+    const item = itemsById.get(ref.id);
+    if (!item) return null;
+    return {
+      ref,
+      label: inboxTitle(item, sessions),
+      badge: item.kind,
+    };
+  }, [itemsById, sessions, tasksById]);
+
+  const stripEntries = useMemo(() => {
+    const { pinned, recents: filteredRecents } = visibleStripEntries(
+      pins,
+      recents,
+      (ref) => (ref.kind === "task" ? inProgressTaskIds.has(ref.id) : itemsById.has(ref.id)),
+    );
+    return {
+      pinned: pinned.map(resolveStripEntry).filter((entry): entry is StripEntry => entry !== null),
+      recents: filteredRecents.map(resolveStripEntry).filter((entry): entry is StripEntry => entry !== null),
+    };
+  }, [inProgressTaskIds, itemsById, pins, recents, resolveStripEntry]);
+
+  const activeStripRef: QuickJumpRef | null = selectedTaskId
+    ? { kind: "task", id: selectedTaskId }
+    : selected
+      ? { kind: "item", id: selected.id }
+      : null;
 
   const applyItem = (updated: Item) => {
     setSelected(updated);
@@ -453,22 +531,38 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               </button>
             ))}
           </div>
+          <PreviewToggleButton enabled={showPreviews} onToggle={() => setShowPreviews(!showPreviews)} />
           <span className={`inbox-refresh-status ${error || syncRequest === "error" ? "inbox-refresh-error" : ""}`}
             role="status" aria-label={refreshStatus} title={refreshStatus}>
             {loading || syncRequest === "requesting" ? <Spinner /> : error || syncRequest === "error" ? "!" : "✓"}
           </span>
         </div>
+        <RecentsStrip
+          pinned={stripEntries.pinned}
+          recents={stripEntries.recents}
+          activeRef={activeStripRef}
+          onSelect={selectInboxEntry}
+          onUnpin={togglePin}
+        />
         {error ? <div className="inline-error">{error}</div> : null}
         <div className="item-list">
           {statusFilter === "in-progress" && inProgressTasks.map((task) => {
             const location = taskLocation(task, repos);
+            const taskRef: QuickJumpRef = { kind: "task", id: task.id };
+            const taskTitleText = task.title || task.prompt.trim().split("\n")[0] || "Untitled task";
+            const taskImages = showPreviews
+              ? combineRowImages(taskAttachmentPreviews(task.id, task.image_attachments), extractMarkdownImages(task.prompt))
+              : { visible: [], extraCount: 0 };
+            const taskArtifacts = showPreviews
+              ? extractArtifactBadges({ text: task.prompt, title: task.title })
+              : [];
             return (
               <div key={task.id} role="button" tabIndex={0}
                 className={`item-row ${selectedTaskId === task.id ? "selected" : ""}`}
-                onClick={() => { setSelected(null); setSelectedTaskId(task.id); }}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(null); setSelectedTaskId(task.id); } }}>
+                onClick={() => { setSelected(null); setSelectedTaskId(task.id); recordRecent(taskRef); }}
+                onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(null); setSelectedTaskId(task.id); recordRecent(taskRef); } }}>
                 <span className="item-row-main">
-                  <span className="item-row-title">{task.title || task.prompt.trim().split("\n")[0] || "Untitled task"}</span>
+                  <span className="item-row-title">{taskTitleText}</span>
                   {location ? (
                     <span className="item-row-context" title={location.path}>
                       {location.isRepo ? location.label : location.path}
@@ -478,10 +572,16 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                     <span>Task · in progress</span>
                     <AgentRunBadge status={agentRunStatus(task, sessions, terminals)} />
                   </span>
+                  {showPreviews ? (
+                    <RowPreviews images={taskImages.visible} extraCount={taskImages.extraCount} artifacts={taskArtifacts} />
+                  ) : null}
                 </span>
                 <span className="item-row-side">
+                  <span className="item-row-side-top">
+                    <PinButton pinned={isPinned(taskRef)} label={taskTitleText} onToggle={() => togglePin(taskRef)} />
+                    <span className="time" title={formatTs(task.created_ms)}>{timeAgo(task.created_ms)}</span>
+                  </span>
                   <JiraPill jiraKey={task.jira_key} jiraUrl={task.jira_url} />
-                  <span className="time" title={formatTs(task.created_ms)}>{timeAgo(task.created_ms)}</span>
                 </span>
               </div>
             );
@@ -499,25 +599,37 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
               const rowTask = item.task_id ? tasksById[item.task_id] : undefined;
               const rowLocation = statusFilter === "in-progress" ? taskLocation(rowTask, repos) : null;
               const rowPr = itemPrUrl(item.body, rowTask?.pr_url);
+              const itemRef: QuickJumpRef = { kind: "item", id: item.id };
+              const titleText = inboxTitle(item, sessions);
+              const rowImages = showPreviews
+                ? combineRowImages(
+                    rowTask ? taskAttachmentPreviews(rowTask.id, rowTask.image_attachments) : [],
+                    extractMarkdownImages(`${item.summary}\n${item.body}`),
+                  )
+                : { visible: [], extraCount: 0 };
+              const rowArtifacts = showPreviews
+                ? extractArtifactBadges({ text: `${item.summary}\n${item.body}\n${rowTask?.prompt ?? ""}`, title: titleText })
+                : [];
               return (
                 <div
                   key={item.id}
                   role="button"
                   tabIndex={0}
                   className={`item-row ${needsYou ? "needs-you" : ""} ${selected?.id === item.id ? "selected" : ""}`}
-                  onClick={() => { setSelectedTaskId(null); setSelected(item); }}
+                  onClick={() => { setSelectedTaskId(null); setSelected(item); recordRecent(itemRef); }}
                   onKeyDown={(e) => {
                     if (e.target !== e.currentTarget) return;
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       setSelectedTaskId(null);
                       setSelected(item);
+                      recordRecent(itemRef);
                     }
                   }}
                 >
                   <KindIcon kind={item.kind} />
                   <span className="item-row-main">
-                    <span className="item-row-title">{inboxTitle(item, sessions)}</span>
+                    <span className="item-row-title">{titleText}</span>
                     {rowLocation ? (
                       <span className="item-row-context" title={rowLocation.path}>
                         {rowLocation.isRepo ? rowLocation.label : rowLocation.path}
@@ -542,10 +654,16 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                         <span className="badge badge-mine">agent revising</span>
                       ) : null}
                     </span>
+                    {showPreviews ? (
+                      <RowPreviews images={rowImages.visible} extraCount={rowImages.extraCount} artifacts={rowArtifacts} />
+                    ) : null}
                   </span>
                   <span className="item-row-side">
-                    <span className="time" title={formatTs(item.created_ms)}>
-                      {timeAgo(item.created_ms)}
+                    <span className="item-row-side-top">
+                      <PinButton pinned={isPinned(itemRef)} label={titleText} onToggle={() => togglePin(itemRef)} />
+                      <span className="time" title={formatTs(item.created_ms)}>
+                        {timeAgo(item.created_ms)}
+                      </span>
                     </span>
                     {needsYou ? <span className="badge badge-urgent">needs you</span> : null}
                     {isRepeatSnoozed(item) ? (
@@ -601,7 +719,14 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
         {selectedTask ? (
           <>
             <div className="detail-head">
-              <h2 className="detail-title">{selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"}</h2>
+              <div className="detail-title-row">
+                <h2 className="detail-title">{selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"}</h2>
+                <PinButton
+                  pinned={isPinned({ kind: "task", id: selectedTask.id })}
+                  label={selectedTask.title || selectedTask.prompt.trim().split("\n")[0] || "Untitled task"}
+                  onToggle={() => togglePin({ kind: "task", id: selectedTask.id })}
+                />
+              </div>
               <div className="detail-meta">
                 <span className="chip chip-static status-dispatched">in progress</span>
                 <AgentRunBadge status={agentRunStatus(selectedTask, sessions, terminals)} />
@@ -641,6 +766,11 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             <div className="detail-head">
               <div className="detail-title-row">
                 <h2 className="detail-title">{itemDisplayTitle(selected.title)}</h2>
+                <PinButton
+                  pinned={isPinned({ kind: "item", id: selected.id })}
+                  label={itemDisplayTitle(selected.title)}
+                  onToggle={() => togglePin({ kind: "item", id: selected.id })}
+                />
                 {prUrl ? (
                   <a href={prUrl} target="_blank" rel="noreferrer" className="btn btn-primary pr-open" title={prUrl}>
                     Open {prLabel(prUrl)}
