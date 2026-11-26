@@ -138,7 +138,23 @@ test(
   withDb(async (db) => {
     db.insertTask(makeTask());
     const broadcasts: string[] = [];
-    const engine = new CaptureEngine(db, stubBackend(), { broadcast: (t) => broadcasts.push(t) });
+    const pendingPr: PrInfo = {
+      url: "https://github.com/acme/app/pull/1",
+      title: "x",
+      state: "OPEN",
+      number: 1,
+      description: "",
+      additions: 1,
+      deletions: 0,
+      changed_files: 1,
+      mergeable: "MERGEABLE",
+      base_ref: "main",
+      review_decision: null,
+      checks: { total: 1, failed: 0, pending: true },
+      threads: [],
+      threads_known: true,
+    };
+    const engine = new CaptureEngine(db, stubBackend(), { broadcast: (t) => broadcasts.push(t) }, null, null, { prFinder: () => pendingPr });
     const first = await engine.createStructuredQuestion({ kind: "done", taskId: "task-1", title: "PR: x", body: "did x" });
     assert.equal(first.ready, 0);
     const second = await engine.createStructuredQuestion({ kind: "done", taskId: "task-1", title: "PR: x v2", body: "did more" });

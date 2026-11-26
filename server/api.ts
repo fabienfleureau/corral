@@ -435,12 +435,12 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       state.db.updateItem(item.id, { status: "open", resolved_ms: null, handling: 1, snooze_until_ms: null, body: replyBody });
     } else {
       state.db.updateItem(item.id, { status: "resolved", resolved_ms: Date.now(), snooze_until_ms: null, body: replyBody });
-      if (item.task_id) {
-        const linked = state.db.getTask(item.task_id);
-        if (linked && linked.status === "done") {
-          state.db.updateTask(linked.id, { status: "dispatched" });
-          state.hub.broadcast("task.updated", state.db.getTask(linked.id));
-        }
+    }
+    if (item.task_id) {
+      const linked = state.db.getTask(item.task_id);
+      if (linked && linked.status === "done") {
+        state.db.updateTask(linked.id, { status: "dispatched" });
+        state.hub.broadcast("task.updated", state.db.getTask(linked.id));
       }
     }
     state.db.reward("inbox", item.id);

@@ -32,7 +32,7 @@ import {
   type StoppedCategory,
   type StoppedRetryConfig,
 } from "./stopped-retry.ts";
-import type { Item, TaskSpec } from "./types.ts";
+import type { Item, Task, TaskSpec } from "./types.ts";
 import { reviewReportedDone } from "./review-outcome.ts";
 import { pullUrlForRemotes } from "./repo-match.ts";
 import { gitRemoteUrls } from "./repos.ts";
@@ -513,9 +513,11 @@ export class CaptureEngine {
 
     const previous = this.db.questionItemForTerminal(e.address) ?? (taskId ? this.db.openQuestionItemForTask(taskId) : null);
     if (previous) {
+      const reopened = previous.status === "resolved";
       this.db.updateItem(previous.id, {
-        status: "open", resolved_ms: null, title, summary, body: `${previous.body}\n\n---\n\n${body}`,
+        status: "open", resolved_ms: null, snooze_until_ms: null, title, summary, body: `${previous.body}\n\n---\n\n${body}`,
         options, structured, elicitation, source_ref: e.address, task_id: taskId ?? previous.task_id,
+        ...(reopened ? { created_ms: Date.now() } : {}),
       });
       const updated = this.db.getItem(previous.id)!;
       this.hub.broadcast("item.updated", updated);
@@ -707,18 +709,21 @@ export class CaptureEngine {
       const existing = (address ? this.db.questionItemForTerminal(address) : null)
         ?? (taskId ? this.db.openQuestionItemForTask(taskId) : null);
       if (existing) {
+        const reopened = existing.status === "resolved";
         this.db.updateItem(existing.id, {
           title: opts.title,
           summary: opts.body,
-          body: existing.status === "resolved" ? `${existing.body}\n\n---\n\n${opts.body}` : opts.body,
+          body: reopened ? `${existing.body}\n\n---\n\n${opts.body}` : opts.body,
           status: "open",
           resolved_ms: null,
+          snooze_until_ms: null,
           elicitation: null,
           context: context || existing.body,
           options: optionsJson,
           source_ref: address ?? existing.source_ref,
           task_id: taskId ?? existing.task_id,
           structured: 1,
+          ...(reopened ? { created_ms: Date.now() } : {}),
         });
         this.db.recordMetric("item.structured_report", existing.id, { task_id: taskId });
         const updated = this.db.getItem(existing.id);
@@ -915,11 +920,31 @@ export class CaptureEngine {
   private completeReported(taskId: string): void {
     try {
       const task = this.db.getTask(taskId);
-      if (!task || !doneReported(task)) return;
-      completeTask(this.db, this.hub, taskId, "reported", "done-report", "No PR found for the done report — task done");
+      if (!task) return;
+      if (doneReported(task)) {
+        completeTask(this.db, this.hub, taskId, "reported", "done-report", "No PR found for the done report — task done");
+      }
+      this.settleUnmatchedPrItem(task);
     } catch {
       /* best effort (e.g. shutting down): the session's end completes it */
     }
+  }
+
+  /** When no PR exists for a done report, convert the "checking the PR"
+   *  placeholder into a ready digest so it does not stay stuck unready. */
+  private settleUnmatchedPrItem(task: Task): void {
+    if (task.pr_url) return;
+    const item = this.db.findPrItemForTask(task.id);
+    if (!item || item.status !== "open" || item.ready !== 0 || item.summary !== "checking the PR") return;
+    const now = Date.now();
+    for (const oldDigest of this.db.listOpenItemsForTask(task.id, "digest")) {
+      this.db.updateItem(oldDigest.id, { status: "resolved", resolved_ms: now });
+      const updatedDigest = this.db.getItem(oldDigest.id);
+      if (updatedDigest) this.hub.broadcast("item.updated", updatedDigest);
+    }
+    this.db.updateItem(item.id, { kind: "digest", summary: item.body, ready: 1, handling: 0 });
+    const settled = this.db.getItem(item.id);
+    if (settled) this.hub.broadcast("item.updated", settled);
   }
 }
 
@@ -943,8 +968,8 @@ export function resumeSnoozedItems(
       db.updateItem(item.id, { handling: 1, snooze_until_ms: null });
     } else {
       db.updateItem(item.id, { status: "resolved", resolved_ms: now, snooze_until_ms: null });
-      if (item.task_id) reopenTaskId ??= item.task_id;
     }
+    if (item.task_id) reopenTaskId ??= item.task_id;
     const next = db.getItem(item.id);
     if (next) {
       hub.broadcast("item.updated", next);
