@@ -1,5 +1,11 @@
 // Entity types — mirrors API.md exactly.
 
+export type TaskImageAttachment = {
+  id: string;
+  filename: string;
+  content_type: string;
+};
+
 export type Task = {
   id: string;
   title: string;
@@ -21,6 +27,8 @@ export type Task = {
   session_reasoning: string | null;
   /** Files attached to the prompt (absent in a task just created). */
   attachment_count?: number;
+  /** Image attachments in drop order, for list row thumbnail previews. */
+  image_attachments?: TaskImageAttachment[];
   base_branch: string | null;
   branch: string | null;
   worktree_path: string | null;

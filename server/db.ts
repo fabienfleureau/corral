@@ -452,10 +452,35 @@ export class Db {
     return rows.map((r) => ({ filename: r.filename, contentType: r.content_type, data: r.data }));
   }
 
+  /** One stored attachment with its bytes, for inline thumbnail or download serving. */
+  getTaskAttachmentFile(taskId: string, attachmentId: string): { id: string; filename: string; content_type: string; bytes: number; data: Uint8Array } | null {
+    const row = this.stmt(
+      `SELECT id, filename, content_type, bytes, data FROM task_attachments WHERE task_id = ? AND id = ?`,
+    ).get(taskId, attachmentId);
+    return (row as unknown as { id: string; filename: string; content_type: string; bytes: number; data: Uint8Array }) ?? null;
+  }
+
   /** How many files each task carries (tasks without any are absent). */
   attachmentCounts(): Map<string, number> {
     const rows = this.stmt(`SELECT task_id, COUNT(*) AS n FROM task_attachments GROUP BY task_id`).all() as unknown as { task_id: string; n: number }[];
     return new Map(rows.map((r) => [r.task_id, Number(r.n)]));
+  }
+
+  /** Image attachment metadata per task, in drop order (tasks without images are absent). */
+  imageAttachmentsByTask(): Map<string, { id: string; filename: string; content_type: string }[]> {
+    const rows = this.stmt(
+      `SELECT id, task_id, filename, content_type FROM task_attachments WHERE content_type IN ('image/png', 'image/jpeg', 'image/gif', 'image/webp') ORDER BY created_ms, rowid`,
+    ).all() as unknown as { id: string; task_id: string; filename: string; content_type: string }[];
+    const map = new Map<string, { id: string; filename: string; content_type: string }[]>();
+    for (const r of rows) {
+      let list = map.get(r.task_id);
+      if (!list) {
+        list = [];
+        map.set(r.task_id, list);
+      }
+      list.push({ id: r.id, filename: r.filename, content_type: r.content_type });
+    }
+    return map;
   }
 
   getTask(id: string): Task | null {
