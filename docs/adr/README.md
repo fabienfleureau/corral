@@ -33,6 +33,7 @@ They are required when a change makes or revisits such a decision.
 | [0022](0022-task-outcome-and-keep-open.md) | Proposed | A done report on a task with an open PR keeps the task open until the PR merges or closes; tasks record an outcome (merged, closed, reported) |
 | [0023](0023-approve-plan-dispatches-children.md) | Proposed | Approving a multi-repo plan creates and dispatches child code tasks directly |
 | [0024](0024-antigravity-local-status-probe.md) | Proposed | Verify idle Antigravity sessions against local `agy` Connect-RPC status |
+| [0025](0025-redacted-evidence-export.md) | Proposed | Copy or save browser-side redacted Markdown evidence for sharing |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.

@@ -50,6 +50,7 @@ through the API. The diagram groups responsibilities, not separate services.
 | Agent instructions | [`skills/`](../skills) holds injected conventions; [`docs/prompts.md`](prompts.md) registers file-based and inline prompts |
 | KPI monitoring | [`server/kpi.ts`](../server/kpi.ts) schedules opted-in, independent KPI analysis cycles, collects typed evidence from worker outcomes, keeps a bounded report memory, the measurement history and an optional goal baseline in SQLite and a per-KPI note in the working directory ([ADR 0005](adr/0005-kpi-scheduling-and-memory.md), [ADR 0008](adr/0008-kpi-memory-file.md)); a cycle's agent comes from a configured favorite and an arbitrary working directory ([ADR 0007](adr/0007-kpi-favorite-and-working-directory.md)) |
 | KPI artifacts | [`server/kpi-artifact.ts`](../server/kpi-artifact.ts) turns saved KPI reports into a private Claude artifact request with the sections chosen on the page; it dispatches an `ops` task so the URL comes back through the inbox ([ADR 0013](adr/0013-kpi-status-artifacts.md)) |
+| Evidence export | [`shared/redacted-markdown.ts`](../shared/redacted-markdown.ts) redacts local paths, credentials and shell transcripts in the browser; the inbox and task history copy or download the result ([ADR 0025](adr/0025-redacted-evidence-export.md)). There is no export endpoint and nothing is uploaded |
 | Agent control | [`server/agent-control.ts`](../server/agent-control.ts) exposes three MCP tools (`corral_next`, `corral_create_task`, `corral_instruct`) through `POST /api/mcp`; results are one short line for voice use, and dispatch remains human-owned |
 | Improvement metrics | [`server/improvement-metrics.ts`](../server/improvement-metrics.ts) derives Improve-page metrics from aggregate queries over `metrics_events`, `items` and `tasks`, so evidence caps never skew them; [`server/improvement-evidence.ts`](../server/improvement-evidence.ts) embeds them in the improvement digest. The stopped-run rate counts the `task.stopped_escalated` marker that capture records on every escalation; the PR wait split reads `task.dispatched`, `item.ready_for_review` and the PR item's resolution |
 | Worktree cleanup | [`server/worktree-cleanup.ts`](../server/worktree-cleanup.ts) decides when a terminal task no longer needs its worktree and asks `WorkerBackend.cleanup`; an open PR item holds the branch, and a sweep after PR sync retries leftovers ([ADR 0012](adr/0012-terminal-tasks-release-worktrees.md)) |
@@ -128,8 +129,12 @@ never dispatch a task or answer an inbox item.
 Agents, platform CLIs, and Jira use the privileges of configured accounts.
 Ticket and review text is untrusted input, including when passed to an agent;
 [`server/test/untrusted-data.test.ts`](../server/test/untrusted-data.test.ts)
-checks the prompt boundary. Local storage and offline browser caches can hold
-work content. Do not use a live account or real data for demo captures.
+checks the prompt boundary. The shareable Markdown from inbox reports and task
+history is redacted in the browser; the verbatim agent context drawer is not
+exported, and the human still reviews the text before pasting it elsewhere
+([ADR 0025](adr/0025-redacted-evidence-export.md)). Local storage and offline
+browser caches can hold work content. Do not use a live account or real data
+for demo captures.
 
 There is no durable external queue or multi-process scheduler. A restart
 interrupts in-process work, and config file changes require a restart. Server

@@ -152,6 +152,11 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   creation, edits, state changes, each prompt sent to the agent, Jira status
   moves, PR milestones and agent questions. Open it from the inbox or the tasks
   list (`GET /api/tasks/:id/events`).
+- **Redacted evidence export** — inbox reports and task history offer **Copy
+  Markdown** and **Download .md**. Both strip local paths, credentials and raw
+  shell transcripts in the browser, and never include the verbatim agent output
+  drawer. Check the result before pasting it into Slack, Jira or GitHub; nothing
+  is uploaded by Corral ([ADR 0025](adr/0025-redacted-evidence-export.md)).
 - **Sessions** — the omnigent sessions Corral knows about, with a link out to each.
 - **Usage** — Claude Code, Codex, OpenCode Go and Antigravity spend from local session data,
   quota for those agents and Google (from Antigravity) with weekly/monthly exhaustion
