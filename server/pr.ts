@@ -508,6 +508,7 @@ async function respawnForWork(
     "---",
     questionConvention(cfg, task),
   ].join("\n");
+  const previousAddress = task.terminal_address;
   const suffix = work.comments ? "review" : work.conflict ? "rebase" : "ci";
   const session = await backend.start({
     taskId: task.id,
@@ -528,6 +529,9 @@ async function respawnForWork(
     },
   });
   db.updateTask(task.id, { terminal_address: session.address });
+  if (previousAddress && previousAddress !== session.address && backend.archive) {
+    await backend.archive(previousAddress).catch(() => undefined);
+  }
   db.upsertTerminal({
     address: session.address,
     task_id: task.id,

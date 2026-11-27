@@ -53,6 +53,7 @@ import { withDeadline } from "./deadline.ts";
 import { cacheControlFor, etagFor, isFresh } from "./static-cache.ts";
 import { SessionFacts } from "./session-facts.ts";
 import type { SessionFact } from "./session-facts.ts";
+import { SessionCleanupRunner } from "./session-cleanup.ts";
 import { handleMcp, instructTask, InstructError } from "./agent-control.ts";
 import { cleanupFinishedTask } from "./worktree-cleanup.ts";
 import { reviewQuestionClosed, reviewReplied } from "./review-outcome.ts";
@@ -99,6 +100,7 @@ export interface AppState {
   googleQuota?: GoogleQuotaCache;
   /** Model/reasoning per task session: finished sessions are read once. */
   sessionFacts?: SessionFacts;
+  sessionCleanup?: SessionCleanupRunner;
   prAdditions?: PrAdditionsCache;
   /** Names untitled tasks (see titleCompleter); null disables it. */
   titleAssistant?: TitleCompleter | null;
@@ -762,11 +764,15 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       // agent already finished, or the session vanished) is effectively still
       // open: reopen it instead of refusing to dispatch.
       let active = false;
+      let archiveAddress: string | null = null;
       if (task.terminal_address && typeof state.backend.get === "function") {
         try {
           const session = await state.backend.get(task.terminal_address);
           active = !!session && session.state !== "finished"
             && session.status !== "done" && session.status !== "error";
+          if (!active && session && session.state !== "finished") {
+            archiveAddress = task.terminal_address;
+          }
         } catch {
           active = false;
         }
@@ -774,6 +780,9 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         active = true;
       }
       if (active) return json(res, 409, { error: "task already dispatched" });
+      if (archiveAddress && state.backend.archive) {
+        await state.backend.archive(archiveAddress).catch(() => undefined);
+      }
       state.db.updateTask(task.id, { status: "open", terminal_address: null });
     }
     const b = (body ?? {}) as {
@@ -1044,6 +1053,23 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
       return;
     }
     json(res, 200, { ok: true, opened: false });
+  });
+
+  const sessionCleanup = state.sessionCleanup ??= new SessionCleanupRunner(state.db, state.backend, {
+    hub: state.hub,
+    config: state.cfg.sessionCleanup,
+  });
+  on("GET", "/api/sessions/cleanup", (_req, res) => {
+    json(res, 200, sessionCleanup.status());
+  });
+  on("POST", "/api/sessions/cleanup", async (_req, res, { body }) => {
+    try {
+      const dryRun = (body as { dryRun?: unknown } | undefined)?.dryRun === true;
+      const report = await sessionCleanup.run({ dryRun, trigger: "manual" });
+      json(res, 200, report);
+    } catch (err) {
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // ---- worker harnesses (dispatch target picker) ----

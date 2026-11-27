@@ -118,6 +118,60 @@ export function seedScreenshotData(db: Db): void {
   db.updateTask("sample-review", { review_outcome: "skipped" }, false);
   // How the done task ended: the task row shows it next to the status.
   db.updateTask("sample-done", { outcome: "merged" }, false);
+
+  db.insertSessionCleanupRun({
+    id: "sample-cleanup-1",
+    ran_ms: now - 12 * 60_000,
+    dry_run: false,
+    trigger: "scheduled",
+    scanned: 6,
+    corral_owned: 5,
+    external_ignored: 1,
+    kept_active: 2,
+    cleaned: 2,
+    would_clean: 0,
+    failed: 0,
+    warnings: 1,
+    by_reason: { terminal_task: 1, finished_kpi: 1, stale_dispatched: 1 },
+    items: [
+      {
+        address: "sess-orphan-done",
+        name: "corral-update-docs",
+        harness: "codex",
+        status: "done",
+        task_id: "sample-done",
+        task_title: "Update project documentation",
+        created_ms: now - 3_600_000,
+        reason: "terminal_task",
+        detail: "Task is done without a worktree; session was never archived",
+        action: "archived",
+      },
+      {
+        address: "sess-orphan-kpi",
+        name: "KPI: Review turnaround · a1b2c3d4",
+        harness: "claude",
+        status: "done",
+        task_id: null,
+        task_title: null,
+        created_ms: now - 7_200_000,
+        reason: "finished_kpi",
+        detail: "KPI cycle finished without archiving its session",
+        action: "archived",
+      },
+      {
+        address: "sess-stale-1",
+        name: "corral-investigate-kpi",
+        harness: "claude",
+        status: "idle",
+        task_id: "sample-stopped-task",
+        task_title: "Investigate proposed KPI improvement",
+        created_ms: now - 30 * 3_600_000,
+        reason: "stale_dispatched",
+        detail: "Dispatched task is idle for >24h with no open inbox item",
+        action: "warning",
+      },
+    ],
+  });
   seedMultiRepo(db, now);
   db.insertRepo({ id: "sample-work", name: "example-project", path: "/sample/example-project", jira_prefix: "EX", context: null, source: "manual", created_ms: now });
   db.insertRepo({ id: "sample-home", name: "side-project", path: "/sample/side-project", jira_prefix: null, context: "personal", source: "manual", created_ms: now });

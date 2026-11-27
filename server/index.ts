@@ -16,6 +16,7 @@ import { KpiMonitor } from "./kpi.ts";
 import { EpicAgentRunner } from "./epic-agent.ts";
 import { AnalysisAgent } from "./analysis-agent.ts";
 import { ImprovementAnalysis } from "./improvement.ts";
+import { SessionCleanupRunner } from "./session-cleanup.ts";
 import { SkillsAnalysis } from "./skills-analysis.ts";
 import { skillsEvidenceSource } from "./skills-evidence.ts";
 import { llmComplete } from "./llm.ts";
@@ -60,6 +61,7 @@ const improvement = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg
 const skills = new SkillsAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt, SKILLS_ANALYSIS_TIMEOUT_MS), { evidence: skillsEvidenceSource(db), agent: analysisAgent });
 const engineeringSkills = new ImprovementAnalysis(db, hub, (prompt) => llmComplete(cfg, prompt), { agent: analysisAgent, mode: "engineering-skills" });
 const sessionFacts = new SessionFacts(backend);
+const sessionCleanup = new SessionCleanupRunner(db, backend, { hub, config: cfg.sessionCleanup });
 const kpis = new KpiMonitor(db, backend, { favorites: () => cfg.favorites ?? [], repos: () => db.listRepos() });
 const epicAgents = new EpicAgentRunner(db, backend, {
   favorites: () => cfg.favorites ?? [],
@@ -72,7 +74,7 @@ const epicAgents = new EpicAgentRunner(db, backend, {
     if (epic) hub.broadcast("epic.updated", epic);
   },
 });
-const state: AppState = { kpis, epicAgents, db, cfg, backend, capture, jira, hub, usage, improvement, skills, engineeringSkills, sessionFacts };
+const state: AppState = { kpis, epicAgents, db, cfg, backend, capture, jira, hub, usage, improvement, skills, engineeringSkills, sessionFacts, sessionCleanup };
 const tickKpis = () => void kpis.tick().catch((err) => console.error("corral: KPI poll failed", err));
 setTimeout(tickKpis, 5_000);
 setInterval(tickKpis, 30_000);
@@ -85,6 +87,12 @@ setTimeout(() => void skills.runIfDue().catch(() => undefined), 20_000);
 setInterval(() => void skills.runIfDue().catch(() => undefined), 60_000);
 setTimeout(() => void engineeringSkills.runIfDue().catch(() => undefined), 30_000);
 setInterval(() => void engineeringSkills.runIfDue().catch(() => undefined), 60_000);
+const cleanupCfg = sessionCleanup.config();
+if (cleanupCfg.enabled) {
+  const runCleanup = () => void sessionCleanup.run({ trigger: "scheduled" }).catch((err) => console.error("corral: session cleanup failed", err));
+  setTimeout(runCleanup, 45_000);
+  setInterval(runCleanup, cleanupCfg.intervalMinutes * 60_000);
+}
 // Tasks page: the queue's session model/reasoning costs one backend round trip
 // per task. Read them once in the background so the first list load is warm.
 setTimeout(() => void sessionFacts.prime(db.listTasks()).catch(() => undefined), 1_000);

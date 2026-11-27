@@ -230,3 +230,8 @@ Ask the active Claude session to create a private artifact and report its URL in
 ### GET /api/progression
 
 Returns local progression: `xp`, `level`, `levelXp`, `nextLevelXp`, `tasks`, and `inbox`. Only eligible actions recorded after installation are counted.
+
+### Sessions
+- `GET /api/sessions` → `SessionInfo[]` — live and finished worker sessions reported by the backend, enriched with linked Corral task titles.
+- `GET /api/sessions/cleanup` → `SessionCleanupStatus` — current `sessionCleanup` schedule configuration (`enabled`, `intervalMinutes`, `graceMinutes`, `staleDispatchedHours`), `running` flag, latest `SessionCleanupReport` (`lastRun`), and up to 20 recent run reports (`history`).
+- `POST /api/sessions/cleanup` `{dryRun?}` → `SessionCleanupReport` — runs an on-demand diagnosis and cleanup pass over live worker sessions (single-flight). When `dryRun: true`, classifies Corral-owned orphans (`terminal_task`, `superseded_task`, `missing_task`, `finished_kpi`, `finished_epic_agent`, `orphaned_child`, `unlinked_corral`) and stale `dispatched` warnings (`stale_dispatched`) without archiving, killing, or cleaning worktrees. External sessions without Corral ownership are ignored.
