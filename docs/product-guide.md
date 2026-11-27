@@ -22,6 +22,9 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   (`data_quality.retries`). The new-task form warns, without blocking, when a
   code prompt names another registered repo or uses words only that repo's
   past tasks use; **Use <repo>** switches the selection.
+  Every task row shows a short **ID** (the first eight characters of its UUID);
+  click it to copy the full UUID, so a task can be cited when asking an agent
+  to analyse a problem.
 - **Agent control (MCP)** — an agent can create an open task, ask what waits
   next, and give an instruction on a task by id or title. Three tools are served
   over the authenticated HTTP API, with one-line answers so a voice agent can
