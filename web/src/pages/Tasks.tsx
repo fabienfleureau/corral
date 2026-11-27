@@ -1,6 +1,6 @@
 // Tasks — dispatch queue grouped by repository.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { filterTasks, groupTasks, harnessLabel, sortRepos, lastHarnessSettings, lastSpecFolder, modelChoices, reasoningChoices } from "../task-page";
 import type { ModelOption } from "../task-page";
 import { api } from "../api";
@@ -21,6 +21,12 @@ import type { ImportSettings } from "../jira-import";
 import { taskFocusFromHash, taskPrefillFromHash } from "../selection-task";
 import { repoMismatch } from "../repo-mismatch";
 import type { TaskPrefill } from "../selection-task";
+import { usePaneFlag } from "../use-pane-size";
+import { visibleStripEntries, type QuickJumpRef } from "../recents-pins";
+import { useRecentsPins } from "../use-recents-pins";
+import { PinButton, RecentsStrip, type StripEntry } from "../RecentsStrip";
+import { combineRowImages, extractArtifactBadges, extractMarkdownImages, taskAttachmentPreviews } from "../row-previews";
+import { PreviewToggleButton, RowPreviews } from "../RowPreviews";
 
 const OUTCOME_LABEL: Record<NonNullable<Task["outcome"]>, string> = {
   merged: "PR merged",
@@ -58,6 +64,8 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const clearPrefill = useMemo(() => () => setPrefill(null), []);
   /** A daily activity item links here with `#/tasks?task=<id>`. */
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(() => taskFocusFromHash(window.location.hash));
+  const [showPreviews, setShowPreviews] = usePaneFlag("corral.taskPreviews");
+  const { recents, pins, recordRecent, togglePin, isPinned } = useRecentsPins("corral.taskRecents", "corral.taskPins");
 
   // A deep link (#/tasks?prompt=… or #/tasks?review=…) becomes form state, then
   // leaves the URL so a reload or a shared link does not resurrect a stale one.
@@ -136,6 +144,42 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const visibleTasks = useMemo(() => filterTasks(tasks, showDoneArchived), [tasks, showDoneArchived]);
   const groups = useMemo(() => groupTasks(visibleTasks), [visibleTasks]);
   const sortedRepos = useMemo(() => sortRepos(repos, tasks), [repos, tasks]);
+  const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+
+  useEffect(() => {
+    if (!focusedTaskId || !tasksById.has(focusedTaskId)) return;
+    recordRecent({ kind: "task", id: focusedTaskId });
+  }, [focusedTaskId, tasksById, recordRecent]);
+
+  const inspectTask = useCallback((taskId: string) => {
+    setFocusedTaskId(taskId);
+    recordRecent({ kind: "task", id: taskId });
+  }, [recordRecent]);
+
+  const toggleTaskPin = useCallback((taskId: string) => {
+    togglePin({ kind: "task", id: taskId });
+  }, [togglePin]);
+
+  const stripEntries = useMemo(() => {
+    const { pinned, recents: filteredRecents } = visibleStripEntries(
+      pins,
+      recents,
+      (ref) => ref.kind === "task" && tasksById.has(ref.id),
+    );
+    const toEntry = (ref: QuickJumpRef): StripEntry | null => {
+      const task = tasksById.get(ref.id);
+      if (!task) return null;
+      return {
+        ref,
+        label: task.title.trim() || firstLine(task.prompt) || "Untitled task",
+        badge: task.status,
+      };
+    };
+    return {
+      pinned: pinned.map(toEntry).filter((entry): entry is StripEntry => entry !== null),
+      recents: filteredRecents.map(toEntry).filter((entry): entry is StripEntry => entry !== null),
+    };
+  }, [pins, recents, tasksById]);
 
   // Reveal a task linked from another page: done tasks are hidden by default,
   // and its repo group may be collapsed.
@@ -196,7 +240,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         {open ? (
           <div className="task-group-body">
             {members.map((task) => (
-              <TaskRow key={task.id} task={task} focused={task.id === focusedTaskId} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} version={eventVersion} refresh={refresh} parentTitle={task.parent_task_id ? parentLabel(tasks, task.parent_task_id) : null} repeatTitle={task.repeat_of ? repeatLabel(tasks, task.repeat_of) : null} retryTitle={task.retry_of ? repeatLabel(tasks, task.retry_of) : null} />
+              <TaskRow key={task.id} task={task} focused={task.id === focusedTaskId} pinned={isPinned({ kind: "task", id: task.id })} onTogglePin={toggleTaskPin} onInspect={inspectTask} showPreviews={showPreviews} repos={sortedRepos} targets={targets} quotas={quotas} agentOptions={agentOptions} catalog={catalog} modelFacts={modelFacts} providerModels={providerModels} reviewers={reviewers} version={eventVersion} refresh={refresh} parentTitle={task.parent_task_id ? parentLabel(tasks, task.parent_task_id) : null} repeatTitle={task.repeat_of ? repeatLabel(tasks, task.repeat_of) : null} retryTitle={task.retry_of ? repeatLabel(tasks, task.retry_of) : null} />
             ))}
           </div>
         ) : null}
@@ -228,7 +272,16 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
               />
               <span>Show done &amp; archived</span>
             </label>
+            <PreviewToggleButton enabled={showPreviews} onToggle={() => setShowPreviews(!showPreviews)} />
         </div>
+        <RecentsStrip
+          className="recents-strip-card"
+          pinned={stripEntries.pinned}
+          recents={stripEntries.recents}
+          activeRef={focusedTaskId ? { kind: "task", id: focusedTaskId } : null}
+          onSelect={(ref) => inspectTask(ref.id)}
+          onUnpin={togglePin}
+        />
 
         {error ? <div className="inline-error">{error}</div> : null}
         {loading && tasks.length === 0 ? (
@@ -256,6 +309,10 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
 function TaskRow({
   task,
   focused,
+  pinned,
+  onTogglePin,
+  onInspect,
+  showPreviews,
   repos,
   targets,
   quotas,
@@ -273,6 +330,10 @@ function TaskRow({
   task: Task;
   /** Linked from the daily page: highlight this row. */
   focused: boolean;
+  pinned: boolean;
+  onTogglePin: (taskId: string) => void;
+  onInspect: (taskId: string) => void;
+  showPreviews: boolean;
   /** Title of the spec task this one was created from (multi-repo), or null. */
   parentTitle: string | null;
   /** Label of the done task this one probably repeats, or null. */
@@ -416,8 +477,16 @@ function TaskRow({
     }
   };
 
+  const rowLabel = task.title || firstLine(task.prompt) || "Untitled task";
+  const rowImages = showPreviews
+    ? combineRowImages(taskAttachmentPreviews(task.id, task.image_attachments), extractMarkdownImages(task.prompt))
+    : { visible: [], extraCount: 0 };
+  const rowArtifacts = showPreviews
+    ? extractArtifactBadges({ text: task.prompt, title: task.title })
+    : [];
+
   return (
-    <div className={`task-row${focused ? " task-row-focused" : ""}`} data-task-id={task.id}>
+    <div className={`task-row${focused ? " task-row-focused" : ""}`} data-task-id={task.id} onClick={() => onInspect(task.id)}>
       <div className="task-main">
         <div className="task-title">
           {task.title ? (
@@ -427,8 +496,9 @@ function TaskRow({
               {firstLine(task.prompt) || "Untitled task"}
             </span>
           )}
+          <PinButton pinned={pinned} label={rowLabel} onToggle={() => onTogglePin(task.id)} />
           {task.jira_key && task.jira_url ? (
-            <a href={task.jira_url} target="_blank" rel="noreferrer" className="meta-link" title={task.jira_url}>
+            <a href={task.jira_url} target="_blank" rel="noreferrer" className="meta-link" title={task.jira_url} onClick={(e) => e.stopPropagation()}>
               {task.jira_key}
               <ExternalLinkIcon />
             </a>
@@ -478,6 +548,9 @@ function TaskRow({
             {timeAgo(task.updated_ms)}
           </span>
         </div>
+        {showPreviews ? (
+          <RowPreviews images={rowImages.visible} extraCount={rowImages.extraCount} artifacts={rowArtifacts} />
+        ) : null}
         {task.status === "open" || (!task.repo_path && task.status !== "archived") ? (
           <div className="task-sub">
             <label className="field-inline">

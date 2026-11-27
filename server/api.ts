@@ -35,7 +35,7 @@ import { ArtifactRequestError, artifactFavorite, kpiArtifactPrompt, parseArtifac
 import { isInterval } from "./analysis-schedule.ts";
 import { DATA_NOT_INSTRUCTIONS, dispatchTask } from "./dispatch.ts";
 import { dailySummaryPrompt } from "./daily-summary.ts";
-import { checkAttachments, MAX_TASK_BODY_BYTES } from "./attachments.ts";
+import { checkAttachments, IMAGE_TYPES, MAX_TASK_BODY_BYTES } from "./attachments.ts";
 import { MarkdownFileError, readMarkdownFile } from "./markdown-file.ts";
 import { logTaskEvent, oneLine, promptData } from "./task-events.ts";
 import { addRepo, gitRemoteUrls, gitToplevel, importFingerprint, importPreview, jiraKeyPrefix, scanWorkspaceRepos } from "./repos.ts";
@@ -549,6 +549,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
     const tasks = state.db.listTasks(status as never);
     const facts = await taskSessionFacts(state, tasks);
     const attachments = state.db.attachmentCounts();
+    const imageAttachments = state.db.imageAttachmentsByTask();
     json(res, 200, tasks.map((task) => {
       const fact = task.terminal_address ? facts.get(task.terminal_address) : undefined;
       return {
@@ -556,6 +557,7 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
         session_model: fact?.model ?? null,
         session_reasoning: fact?.reasoning ?? null,
         attachment_count: attachments.get(task.id) ?? 0,
+        image_attachments: imageAttachments.get(task.id) ?? [],
       };
     }));
   });
@@ -628,6 +630,22 @@ export function createHttpServer(state: AppState): ReturnType<typeof createServe
   on("GET", "/api/tasks/:id/attachments", (_req, res, { params }) => {
     if (!state.db.getTask(params.id)) return json(res, 404, { error: "task not found" });
     json(res, 200, state.db.listTaskAttachments(params.id));
+  });
+
+  on("GET", "/api/tasks/:id/attachments/:attachmentId", (_req, res, { params }) => {
+    if (!state.db.getTask(params.id)) return json(res, 404, { error: "task not found" });
+    const file = state.db.getTaskAttachmentFile(params.id, params.attachmentId);
+    if (!file) return json(res, 404, { error: "attachment not found" });
+    const isImage = IMAGE_TYPES.has(file.content_type);
+    const safeName = file.filename.replace(/["\\\r\n]/g, "_");
+    res.writeHead(200, {
+      "Content-Type": file.content_type,
+      "Content-Length": String(file.data.byteLength),
+      "Cache-Control": "private, max-age=3600, immutable",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Disposition": `${isImage ? "inline" : "attachment"}; filename="${safeName}"`,
+    });
+    res.end(Buffer.from(file.data));
   });
 
   on("PATCH", "/api/tasks/:id", async (req, res, { body, params }) => {

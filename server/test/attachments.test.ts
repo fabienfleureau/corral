@@ -168,12 +168,29 @@ test("a task created with attachments stores them and lists them in drop order",
     assert.equal(res.status, 200);
     const task = (await res.json()) as Task;
 
-    const list = (await (await call("GET", `/api/tasks/${task.id}/attachments`)).json()) as { filename: string; bytes: number; content_type: string }[];
+    const list = (await (await call("GET", `/api/tasks/${task.id}/attachments`)).json()) as { id: string; filename: string; bytes: number; content_type: string }[];
     assert.deepEqual(list.map((a) => [a.filename, a.content_type, a.bytes]), [["shot.png", "image/png", 9], ["log.txt", "text/plain", 4]]);
     assert.ok(!("data" in list[0]), "the listing is metadata only");
 
-    const tasks = (await (await call("GET", "/api/tasks")).json()) as { id: string; attachment_count: number }[];
-    assert.equal(tasks.find((t) => t.id === task.id)?.attachment_count, 2);
+    const tasks = (await (await call("GET", "/api/tasks")).json()) as { id: string; attachment_count: number; image_attachments: { id: string; filename: string; content_type: string }[] }[];
+    const fetched = tasks.find((t) => t.id === task.id);
+    assert.equal(fetched?.attachment_count, 2);
+    assert.deepEqual(fetched?.image_attachments, [{ id: list[0].id, filename: "shot.png", content_type: "image/png" }]);
+
+    const imgRes = await call("GET", `/api/tasks/${task.id}/attachments/${list[0].id}`);
+    assert.equal(imgRes.status, 200);
+    assert.equal(imgRes.headers.get("content-type"), "image/png");
+    assert.equal(imgRes.headers.get("content-disposition"), 'inline; filename="shot.png"');
+    assert.equal(imgRes.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(await imgRes.text(), "png-bytes");
+
+    const txtRes = await call("GET", `/api/tasks/${task.id}/attachments/${list[1].id}`);
+    assert.equal(txtRes.status, 200);
+    assert.equal(txtRes.headers.get("content-disposition"), 'attachment; filename="log.txt"');
+    assert.equal(await txtRes.text(), "boom");
+
+    assert.equal((await call("GET", `/api/tasks/${task.id}/attachments/missing`)).status, 404);
+    assert.equal((await call("GET", `/api/tasks/missing/attachments/${list[0].id}`)).status, 404);
 
     const created = db.listTaskEvents(task.id).find((e) => e.kind === "created");
     assert.equal(JSON.parse(created?.data ?? "{}").attachments, 2);
