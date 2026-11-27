@@ -25,13 +25,17 @@ See the [quickstart](../README.md#quickstart) for prerequisites and first launch
   Every task row shows a short **ID** (the first eight characters of its UUID);
   click it to copy the full UUID, so a task can be cited when asking an agent
   to analyse a problem.
-- **Agent control (MCP)** — an agent can create an open task, ask what waits
-  next, and give an instruction on a task by id or title. Three tools are served
-  over the authenticated HTTP API, with one-line answers so a voice agent can
-  read them aloud. Creating a task never dispatches it; an instruction lands in
-  the prompt of an open task or in the session of a running one. Setup and
-  contract: [API.md](../API.md#agent-control-mcp), decision:
-  [ADR 0004](adr/0004-agent-control-mcp.md).
+- **Agent control (MCP)** — an agent can check what waits next, triage the
+  inbox, create an open task, and give an instruction on a task by id or title.
+  Seven tools are served over the authenticated HTTP API (`corral_next`,
+  `corral_create_task`, `corral_instruct`, `corral_inbox_list`,
+  `corral_item_detail`, `corral_snooze_item`, `corral_ack_item`). Creating a
+  task never dispatches it, inbox tools never expose raw terminal transcripts,
+  and replies to agents or PR merges remain human-owned. Setup and contract:
+  [API.md](../API.md#agent-control-mcp), decisions:
+  [ADR 0004](adr/0004-agent-control-mcp.md),
+  [ADR 0027](adr/0027-mcp-inbox-triage-tools.md). See also
+  [OpenBot triage agent guide](openbot-triage-agent.md).
 - **Dispatch** — one click. Pick a harness (Claude/Codex/OpenCode) and optionally
   pin an agent, model and reasoning level; blank means omnigent smart-routes.
   Each task gets a fresh git worktree created by omnigent (opt out per task); a

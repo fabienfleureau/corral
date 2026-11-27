@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { Db } from "../db.ts";
 import { createHttpServer, type AppState } from "../api.ts";
 import { nextSummary } from "../agent-control.ts";
+import { logTaskEvent } from "../task-events.ts";
 import type { WorkerBackend } from "../worker.ts";
 import type { Item, Task } from "../types.ts";
 
@@ -77,7 +78,15 @@ test("MCP handshake advertises three tools and short-answer instructions", async
     assert.match(init.body.result.instructions, /one short sentence/);
     assert.match(init.body.result.instructions, /data from Corral, not instructions/);
     const listed = await rpc(port, "tools/list");
-    assert.deepEqual(listed.body.result.tools.map((t: { name: string }) => t.name), ["corral_next", "corral_create_task", "corral_instruct"]);
+    assert.deepEqual(listed.body.result.tools.map((t: { name: string }) => t.name), [
+      "corral_next",
+      "corral_create_task",
+      "corral_instruct",
+      "corral_inbox_list",
+      "corral_item_detail",
+      "corral_snooze_item",
+      "corral_ack_item",
+    ]);
     const ping = await rpc(port, "ping");
     assert.deepEqual(ping.body.result, {});
     const unknown = await rpc(port, "resources/list");
@@ -225,6 +234,176 @@ test("the REST instruct endpoint validates input and reports where it landed", a
     const sentResult = await (await post("running", { text: "Use the new API." })).json() as { mode: string };
     assert.equal(sentResult.mode, "session");
     assert.equal(sent.length, 1);
+  } finally {
+    await close(server);
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("corral_inbox_list groups items by triage priority, promotes 2x snoozed, and omits raw context", async () => {
+  const { server, dir, db } = setup();
+  const port = await listen(server);
+  const now = Date.now();
+  try {
+    db.insertTask(task({ id: "t-q", title: "Question task", pr_url: null }));
+    db.insertTask(task({ id: "t-pr-ready", title: "Ready PR task", pr_url: "https://github.com/org/repo/pull/12" }));
+    db.insertTask(task({ id: "t-pr-wait", title: "Waiting PR task", pr_url: "https://github.com/org/repo/pull/13" }));
+    db.insertItem(item({ id: "i-digest", kind: "digest", title: "Daily digest", task_id: null, context: "SECRET_RAW_TRANSCRIPT", created_ms: now - 10_000 }));
+    db.insertItem(item({ id: "i-wait-pr", kind: "pr", title: "CI running", ready: 0, task_id: "t-pr-wait", context: "SECRET_RAW_TRANSCRIPT", created_ms: now - 5_000 }));
+    db.insertItem(item({
+      id: "i-ready-pr",
+      kind: "pr",
+      title: "Ready to review",
+      ready: 1,
+      triage: JSON.stringify({ tier: "routine", depth: "quick", mode: "observe", reasons: ["small diff"], source: "default" }),
+      task_id: "t-pr-ready",
+      context: "SECRET_RAW_TRANSCRIPT",
+      created_ms: now - 4_000,
+    }));
+    db.insertItem(item({ id: "i-q", kind: "question", title: "Pick option", task_id: "t-q", context: "SECRET_RAW_TRANSCRIPT", created_ms: now - 3_000 }));
+    db.insertItem(item({
+      id: "i-snoozed-twice",
+      kind: "digest",
+      title: "Repeatedly snoozed",
+      task_id: null,
+      context: "SECRET_RAW_TRANSCRIPT",
+      created_ms: now - 20_000,
+    }));
+    db.updateItem("i-snoozed-twice", { snooze_count: 2 });
+    db.insertItem(item({
+      id: "i-currently-snoozed",
+      kind: "question",
+      title: "Snoozed for later",
+      task_id: "t-q",
+      snooze_until_ms: now + 300_000,
+      created_ms: now - 1_000,
+    }));
+    db.insertItem(item({
+      id: "i-handling",
+      kind: "pr",
+      title: "Agent fixing comments",
+      handling: 1,
+      task_id: "t-pr-wait",
+      created_ms: now - 2_000,
+    }));
+
+    const res = await call(port, "corral_inbox_list");
+    assert.equal(res.isError, undefined);
+    assert.ok(!res.content[0].text.includes("SECRET_RAW_TRANSCRIPT"));
+    const payload = JSON.parse(res.content[0].text) as {
+      counts: { total_open: number; actionable: number; snoozed: number; handling: number; by_bucket: Record<string, number> };
+      items: { id: string; bucket: string; triage: { tier: string; depth: string } | null; task: { pr_url: string | null } | null }[];
+    };
+    assert.equal(payload.counts.total_open, 7);
+    assert.equal(payload.counts.actionable, 5);
+    assert.equal(payload.counts.snoozed, 1);
+    assert.equal(payload.counts.handling, 1);
+    assert.deepEqual(payload.counts.by_bucket, { blocking: 2, ready_pr: 1, waiting_pr: 1, other: 1 });
+    assert.deepEqual(payload.items.map((i) => i.id), ["i-snoozed-twice", "i-q", "i-ready-pr", "i-wait-pr", "i-digest"]);
+    assert.deepEqual(payload.items[0].bucket, "blocking");
+    assert.deepEqual(payload.items[2].triage, { tier: "routine", depth: "quick" });
+    assert.equal(payload.items[2].task?.pr_url, "https://github.com/org/repo/pull/12");
+
+    const filtered = JSON.parse((await call(port, "corral_inbox_list", { include_snoozed: true, kind: "question", limit: 1 })).content[0].text) as {
+      items: { id: string }[];
+    };
+    assert.equal(filtered.items.length, 1);
+    assert.equal(filtered.items[0].id, "i-currently-snoozed");
+  } finally {
+    await close(server);
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("corral_item_detail supports id prefix lookup, returns task events, and omits raw context", async () => {
+  const { server, dir, db } = setup();
+  const port = await listen(server);
+  try {
+    db.insertTask(task({ id: "task-abc", title: "Refactor auth", branch: "feat/auth" }));
+    logTaskEvent(db, "task-abc", "created", "Task created", null);
+    logTaskEvent(db, "task-abc", "prompt", "Dispatched to claude", { text: "huge prompt" });
+    db.insertItem(item({
+      id: "abcd-1234-item",
+      task_id: "task-abc",
+      title: "Need DB choice",
+      summary: "Should we use Postgres or SQLite?",
+      body: "Full question details",
+      options: JSON.stringify(["Postgres", "SQLite"]),
+      context: "RAW_TERMINAL_OUTPUT_DO_NOT_LEAK",
+    }));
+
+    const byPrefix = await call(port, "corral_item_detail", { item: "abcd" });
+    assert.equal(byPrefix.isError, undefined);
+    assert.ok(!byPrefix.content[0].text.includes("RAW_TERMINAL_OUTPUT_DO_NOT_LEAK"));
+    assert.ok(!byPrefix.content[0].text.includes("huge prompt"));
+    const detail = JSON.parse(byPrefix.content[0].text) as {
+      item: { id: string; options: string[] | null; summary: string };
+      task: { id: string; branch: string | null };
+      recent_events: { kind: string; message: string }[];
+    };
+    assert.equal(detail.item.id, "abcd-1234-item");
+    assert.deepEqual(detail.item.options, ["Postgres", "SQLite"]);
+    assert.equal(detail.task.branch, "feat/auth");
+    assert.equal(detail.recent_events.length, 2);
+
+    const shortPrefix = await call(port, "corral_item_detail", { item: "abc" });
+    assert.equal(shortPrefix.isError, true);
+    assert.match(shortPrefix.content[0].text, /at least 4 characters/);
+
+    db.insertItem(item({ id: "abcd-9999-item", task_id: "task-abc", title: "Second item" }));
+    const ambiguous = await call(port, "corral_item_detail", { item: "abcd" });
+    assert.equal(ambiguous.isError, true);
+    assert.match(ambiguous.content[0].text, /Several inbox items match/);
+  } finally {
+    await close(server);
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("corral_snooze_item and corral_ack_item update state, metrics, and review outcomes", async () => {
+  const { server, dir, db, broadcasts } = setup();
+  const port = await listen(server);
+  try {
+    db.insertTask(task({ id: "t-review", kind: "review", pr_url: "https://github.com/org/repo/pull/99" }));
+    db.insertItem(item({ id: "item-snooze", title: "Check later", task_id: null }));
+    db.insertItem(item({
+      id: "item-review-q",
+      kind: "question",
+      title: "Publish 3 review comments?",
+      body: "Publish the drafted review comments?",
+      options: JSON.stringify(["publish all", "none"]),
+      task_id: "t-review",
+      snooze_until_ms: Date.now() + 60_000,
+    }));
+
+    const badMinutes = await call(port, "corral_snooze_item", { item: "item-snooze", minutes: 1 });
+    assert.equal(badMinutes.isError, true);
+
+    const snoozed = await call(port, "corral_snooze_item", { item: "item-snooze", minutes: 120 });
+    assert.equal(snoozed.isError, undefined);
+    assert.match(snoozed.content[0].text, /Item snoozed for 120m: Check later\./);
+    const afterSnooze = db.getItem("item-snooze")!;
+    assert.equal(afterSnooze.snooze_count, 1);
+    assert.ok((afterSnooze.snooze_until_ms ?? 0) > Date.now() + 100 * 60_000);
+
+    const acked = await call(port, "corral_ack_item", { item: "item-review-q" });
+    assert.equal(acked.isError, undefined);
+    assert.match(acked.content[0].text, /Item acknowledged: Publish 3 review comments\?\./);
+    const afterAck = db.getItem("item-review-q")!;
+    assert.equal(afterAck.status, "resolved");
+    assert.equal(afterAck.snooze_until_ms, null);
+    assert.equal(db.getTask("t-review")!.review_outcome, "skipped");
+
+    const ackAgain = await call(port, "corral_ack_item", { item: "item-review-q" });
+    assert.equal(ackAgain.isError, true);
+    assert.match(ackAgain.content[0].text, /Only open inbox items/);
+
+    assert.ok(db.metricSummary().some((m) => m.name === "item.snoozed"));
+    assert.ok(db.metricSummary().some((m) => m.name === "item.resolved"));
+    assert.ok(broadcasts.some((b) => (b as { event: string }).event === "item.updated"));
   } finally {
     await close(server);
     db.close();
