@@ -1623,9 +1623,82 @@ select:focus {
   font-size: 12px;
 }
 
-.action-label {
-  font-size: 12px;
+.snooze-trigger {
+  transition: background 140ms ease, border-color 140ms ease, transform 160ms var(--ease-out);
+}
+
+.snooze-trigger:active:not(:disabled),
+.snooze-option:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.snooze-trigger[aria-expanded="true"] {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.snooze-caret {
   color: var(--muted);
+  transition: transform 150ms var(--ease-out);
+}
+
+.snooze-trigger[aria-expanded="true"] .snooze-caret {
+  transform: rotate(180deg);
+}
+
+.snooze-popover {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(16, 20, 26, 0.14), 0 1px 3px rgba(16, 20, 26, 0.08);
+}
+
+.snooze-popover:popover-open,
+.snooze-popover:not([popover]):not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@supports (position-area: block-end) {
+  .snooze-popover {
+    inset: auto;
+    margin: 6px 0;
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+  }
+}
+
+@supports not (position-area: block-end) {
+  .snooze-popover {
+    position: fixed;
+    inset: auto;
+    margin: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .snooze-popover {
+    opacity: 0;
+    translate: 0 -4px;
+    scale: 0.96;
+    transition: opacity 100ms var(--ease-out), translate 100ms var(--ease-out), scale 100ms var(--ease-out), display 100ms, overlay 100ms;
+    transition-behavior: allow-discrete;
+  }
+
+  .snooze-popover:popover-open {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+    transition-duration: 140ms;
+    @starting-style {
+      opacity: 0;
+      translate: 0 -4px;
+      scale: 0.96;
+    }
+  }
 }
 
 .reply-block {
@@ -4469,6 +4542,9 @@ a.preview-artifact-badge:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .snooze-trigger,
+  .snooze-caret,
+  .snooze-option,
   .recents-chip,
   .recents-chip-unpin,
   .pin-btn,
@@ -4476,6 +4552,8 @@ a.preview-artifact-badge:hover {
   .preview-thumb-btn {
     transition: background-color 150ms ease, border-color 150ms ease, opacity 150ms ease;
   }
+  .snooze-trigger:active:not(:disabled),
+  .snooze-option:active:not(:disabled),
   .recents-chip:active,
   .recents-chip-unpin:active,
   .pin-btn:active,

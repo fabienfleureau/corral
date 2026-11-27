@@ -20,6 +20,7 @@ import { QuestionReply } from "../QuestionReply";
 import { GrillRoundDialog } from "../GrillRoundDialog";
 import { TaskHistoryButton } from "../TaskHistory";
 import { RedactedMarkdownButtons } from "../RedactedMarkdown";
+import { SnoozeButton } from "../SnoozeButton";
 import { inboxReportMarkdown } from "../redacted-export";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePaneFlag, usePaneWidth } from "../use-pane-size";
@@ -948,28 +949,11 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                 >
                   Archive
                 </button>
-                <span className="action-label">Snooze:</span>
-                <button
-                  className="btn"
-                  onClick={() => void runAction(() => api.snoozeItem(selected.id, snoozeUntil("1h")))}
+                <SnoozeButton
+                  key={selected.id}
                   disabled={actionsLocked}
-                >
-                  1h
-                </button>
-                <button
-                  className="btn"
-                  onClick={() => void runAction(() => api.snoozeItem(selected.id, snoozeUntil("4h")))}
-                  disabled={actionsLocked}
-                >
-                  4h
-                </button>
-                <button
-                  className="btn"
-                  onClick={() => void runAction(() => api.snoozeItem(selected.id, snoozeUntil("tomorrow")))}
-                  disabled={actionsLocked}
-                >
-                  Tomorrow
-                </button>
+                  onSnooze={(preset) => void runAction(() => api.snoozeItem(selected.id, snoozeUntil(preset)))}
+                />
               </div>
               {actionError ? <div className="inline-error">{actionError}</div> : null}
               {attachCmd ? (

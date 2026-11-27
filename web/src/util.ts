@@ -19,8 +19,16 @@ export function formatTs(ms: number): string {
   return new Date(ms).toLocaleString();
 }
 
+export type SnoozePreset = "1h" | "4h" | "tomorrow";
+
+export const SNOOZE_PRESETS: readonly { preset: SnoozePreset; label: string }[] = [
+  { preset: "1h", label: "1h" },
+  { preset: "4h", label: "4h" },
+  { preset: "tomorrow", label: "Tomorrow" },
+];
+
 /** Compute the snooze-until timestamp for a preset. */
-export function snoozeUntil(preset: "1h" | "4h" | "tomorrow"): number {
+export function snoozeUntil(preset: SnoozePreset): number {
   if (preset === "1h") return Date.now() + 3_600_000;
   if (preset === "4h") return Date.now() + 4 * 3_600_000;
   const target = new Date();
