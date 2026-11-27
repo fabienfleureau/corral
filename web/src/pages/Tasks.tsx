@@ -27,6 +27,7 @@ import { useRecentsPins } from "../use-recents-pins";
 import { PinButton, RecentsStrip, type StripEntry } from "../RecentsStrip";
 import { combineRowImages, extractArtifactBadges, extractMarkdownImages, taskAttachmentPreviews } from "../row-previews";
 import { PreviewToggleButton, RowPreviews } from "../RowPreviews";
+import { taskRef } from "../../../shared/task-id";
 
 const OUTCOME_LABEL: Record<NonNullable<Task["outcome"]>, string> = {
   merged: "PR merged",
@@ -506,6 +507,7 @@ function TaskRow({
         </div>
         <div className="task-sub">
           <span className={`badge status-${task.status}`} title={task.worktree_path ? `Worktree: ${task.worktree_path}` : undefined}>{task.status}</span>
+          <TaskIdButton id={task.id} />
           {task.outcome ? <span className={`badge outcome-${task.outcome}`} title={OUTCOME_TITLE[task.outcome]}>{OUTCOME_LABEL[task.outcome]}</span> : null}
           {review ? <span className="badge badge-review" title="Reviews the linked PR/MR; comments are published after your approval">review</span> : null}
           {review && task.review_outcome === "published" ? <span className="badge badge-ready" title="You approved comments and the agent reported the review done">comments published</span> : null}
@@ -792,6 +794,40 @@ function repeatLabel(tasks: Task[], id: string): string {
 
 function firstLine(text: string): string {
   return text.trim().split("\n")[0].slice(0, 120);
+}
+
+/** Short reference plus click-to-copy full id, so a task can be cited by id. */
+function TaskIdButton({ id }: { id: string }) {
+  const [state, setState] = useState<"idle" | "ok" | "fail">("idle");
+  const [announcement, setAnnouncement] = useState("");
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => { if (timer.current !== null) window.clearTimeout(timer.current); }, []);
+
+  const copy = async () => {
+    let ok = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(id);
+        ok = true;
+      } else ok = copyWithExecCommand(id);
+    } catch {
+      ok = copyWithExecCommand(id);
+    }
+    const message = ok ? "Task ID copied" : "Could not copy task ID";
+    // VoiceOver skips a repeat announcement from the same live region.
+    setAnnouncement((previous) => previous.replace(/\u00a0$/, "") === message ? `${message}\u00a0` : message);
+    setState(ok ? "ok" : "fail");
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { setState("idle"); setAnnouncement(""); timer.current = null; }, 2000);
+  };
+
+  return <>
+    <button type="button" className={`badge badge-mute mono task-id-button${state === "fail" ? " task-id-failed" : ""}`}
+      title={`Task ID ${id}. Click to copy.`} onClick={() => void copy()}>
+      {state === "ok" ? "Copied" : state === "fail" ? "Copy failed" : `ID ${taskRef(id)}`}
+    </button>
+    <span className="visually-hidden" role="status">{announcement}</span>
+  </>;
 }
 
 /** Legacy clipboard fallback for contexts without the async Clipboard API. */

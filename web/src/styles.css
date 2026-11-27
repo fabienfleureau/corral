@@ -1806,6 +1806,30 @@ select:focus {
   color: var(--muted);
 }
 
+.task-id-button {
+  min-inline-size: 24px;
+  min-block-size: 24px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, transform 160ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .task-id-button:hover {
+    background: var(--bg-hover);
+    border-color: var(--border);
+  }
+}
+
+.task-id-button:active {
+  transform: scale(0.97);
+}
+
+.task-id-failed {
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+}
+
 .task-actions {
   flex: none;
   display: flex;
