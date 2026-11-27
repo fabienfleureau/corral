@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
 import type { DailyActivity, Epic, EpicAmendment, EpicDesign, EpicLink, EpicTicket, Item, ItemKind, ItemStatus, MetricEvent, PlanReview, PlanReviewComment, PlanRevision, PlanSubtask, Repo, Task, TaskAttachment, TaskStatus, TrackedTerminal } from "./types.ts";
+import type { SessionCleanupReport } from "../shared/session-cleanup.ts";
 import { logTaskChanges, TRACKED_TASK_FIELDS, type TaskEvent } from "./task-events.ts";
 
 const SCHEMA = `
@@ -212,6 +213,15 @@ CREATE TABLE IF NOT EXISTS plan_reviews (
   created_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_plan_reviews_task ON plan_reviews(task_id, created_ms);
+
+CREATE TABLE IF NOT EXISTS session_cleanup_runs (
+  id TEXT PRIMARY KEY,
+  ran_ms INTEGER NOT NULL,
+  dry_run INTEGER NOT NULL DEFAULT 0,
+  trigger TEXT NOT NULL DEFAULT 'scheduled',
+  report TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_cleanup_runs_ts ON session_cleanup_runs(ran_ms DESC);
 `;
 
 export class Db {
@@ -1057,5 +1067,55 @@ export class Db {
       comments: JSON.parse(r.comments_json) as PlanReviewComment[],
       created_ms: r.created_ms,
     }));
+  }
+
+  // ---- session cleanup runs & lookup helpers ----
+
+  insertSessionCleanupRun(report: SessionCleanupReport): void {
+    this.stmt(
+      `INSERT INTO session_cleanup_runs (id, ran_ms, dry_run, trigger, report)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(report.id, report.ran_ms, report.dry_run ? 1 : 0, report.trigger, JSON.stringify(report));
+    this.stmt(
+      `DELETE FROM session_cleanup_runs
+       WHERE id NOT IN (SELECT id FROM session_cleanup_runs ORDER BY ran_ms DESC LIMIT 20)`,
+    ).run();
+  }
+
+  listSessionCleanupRuns(limit = 20): SessionCleanupReport[] {
+    const rows = this.stmt(
+      `SELECT report FROM session_cleanup_runs ORDER BY ran_ms DESC LIMIT ?`,
+    ).all(limit) as unknown as { report: string }[];
+    return rows.map((r) => JSON.parse(r.report) as SessionCleanupReport);
+  }
+
+  listOpenItemTaskIds(): Set<string> {
+    const rows = this.stmt(
+      `SELECT DISTINCT task_id FROM items WHERE status = 'open' AND task_id IS NOT NULL`,
+    ).all() as unknown as { task_id: string }[];
+    return new Set(rows.map((r) => r.task_id));
+  }
+
+  listOpenPrTaskIds(): Set<string> {
+    const rows = this.stmt(
+      `SELECT DISTINCT task_id FROM items WHERE status = 'open' AND kind = 'pr' AND task_id IS NOT NULL`,
+    ).all() as unknown as { task_id: string }[];
+    return new Set(rows.map((r) => r.task_id));
+  }
+
+  listKpiMonitorSessions(): { id: string; run_name: string | null; run_state: string | null; address: string | null; finished_ms: number | null }[] {
+    const exists = this.stmt(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kpi_monitors'`).get();
+    if (!exists) return [];
+    return this.stmt(
+      `SELECT id, run_name, run_state, address, finished_ms FROM kpi_monitors`,
+    ).all() as unknown as { id: string; run_name: string | null; run_state: string | null; address: string | null; finished_ms: number | null }[];
+  }
+
+  listEpicAgentSessions(): { epic_id: string; run_name: string | null; run_state: string | null; address: string | null; finished_ms: number | null }[] {
+    const exists = this.stmt(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'epic_agents'`).get();
+    if (!exists) return [];
+    return this.stmt(
+      `SELECT epic_id, run_name, run_state, address, finished_ms FROM epic_agents`,
+    ).all() as unknown as { epic_id: string; run_name: string | null; run_state: string | null; address: string | null; finished_ms: number | null }[];
   }
 }

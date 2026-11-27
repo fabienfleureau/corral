@@ -251,7 +251,7 @@ function kpiPrompt(settings: KpiSettings, previous: KpiReport | null, startedMs:
 
 export class KpiMonitor {
   private db: Db;
-  private worker: Pick<WorkerBackend, "start" | "get" | "list" | "lastRunOutcome" | "inspectUrl">;
+  private worker: Pick<WorkerBackend, "start" | "get" | "list" | "lastRunOutcome" | "inspectUrl" | "archive">;
   private deps: KpiDeps;
   private clock: () => number;
   private busy = new Set<KpiId>();
@@ -456,6 +456,9 @@ export class KpiMonitor {
       UPDATE kpi_monitors SET run_name = NULL, run_state = 'complete', finished_ms = ?, error = NULL,
         report = ?, report_ms = ?, last_measurement = COALESCE(?, last_measurement)
       WHERE id = ? AND run_name = ?`).run(now, JSON.stringify({ ...report, memory }), now, report.measurement ? JSON.stringify(report.measurement) : null, id, row.run_name);
+    if (saved.changes) {
+      await this.worker.archive?.(session.address).catch(() => undefined);
+    }
     const measured = report.measurement;
     if (!measured || !saved.changes) return;
     // A re-measured window replaces the earlier value.

@@ -301,7 +301,7 @@ export function epicAgentPrompt(ctx: EpicPromptContext): string {
 
 export class EpicAgentRunner {
   private db: Db;
-  private worker: Pick<WorkerBackend, "start" | "get" | "list" | "lastRunOutcome" | "inspectUrl">;
+  private worker: Pick<WorkerBackend, "start" | "get" | "list" | "lastRunOutcome" | "inspectUrl" | "archive">;
   private deps: EpicAgentDeps;
   private clock: () => number;
   private busy = new Set<string>();
@@ -570,6 +570,7 @@ export class EpicAgentRunner {
         report = ?, report_ms = ?
       WHERE epic_id = ? AND run_name = ?
     `).run(now, JSON.stringify({ ...report, memory }), now, epic.id, row.run_name);
+    await this.worker.archive?.(session.address).catch(() => undefined);
     this.deps.onUpdate?.(epic.id);
   }
 

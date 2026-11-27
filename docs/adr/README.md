@@ -34,6 +34,7 @@ They are required when a change makes or revisits such a decision.
 | [0023](0023-approve-plan-dispatches-children.md) | Proposed | Approving a multi-repo plan creates and dispatches child code tasks directly |
 | [0024](0024-antigravity-local-status-probe.md) | Proposed | Verify idle Antigravity sessions against local `agy` Connect-RPC status |
 | [0025](0025-redacted-evidence-export.md) | Proposed | Copy or save browser-side redacted Markdown evidence for sharing |
+| [0026](0026-scheduled-orphaned-session-cleanup.md) | Proposed | Scheduled analysis and cleanup of orphaned Corral-owned omnigent sessions |
 
 Records 0001 and 0002 predate this index and retain their original concise text.
 Their status here reflects the repository's existing product rules.

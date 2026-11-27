@@ -2,6 +2,7 @@ import type { EpicAgentSettings, EpicAgentView } from "../../shared/epic-agent";
 import type { KpiArtifactRequest } from "../../shared/kpi-artifact";
 import type { KpiId, KpiSettings, KpiView } from "../../shared/kpis";
 import type { ImprovementMetrics } from "../../shared/improvement-metrics";
+import type { SessionCleanupReport, SessionCleanupStatus } from "../../shared/session-cleanup";
 // Typed HTTP client for the Corral API. Cookie auth (same-origin credentials).
 // Any 401 surfaces an "unauthorized" state through setUnauthorizedHandler.
 
@@ -316,6 +317,9 @@ export const api = {
 
   // ---- sessions ----
   listSessions: (): Promise<SessionInfo[]> => get<SessionInfo[]>("/api/sessions"),
+  getSessionCleanup: (): Promise<SessionCleanupStatus> => get<SessionCleanupStatus>("/api/sessions/cleanup"),
+  runSessionCleanup: (opts?: { dryRun?: boolean }): Promise<SessionCleanupReport> =>
+    post<SessionCleanupReport>("/api/sessions/cleanup", opts ?? {}),
   listTerminals: (): Promise<TrackedTerminal[]> => get<TrackedTerminal[]>("/api/terminals"),
   openSession: (address: string): Promise<{ ok: boolean; opened: boolean; url?: string }> =>
     post<{ ok: boolean; opened: boolean; url?: string }>(`/api/terminals/${encodeURIComponent(address)}/open`),

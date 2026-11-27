@@ -562,6 +562,8 @@ export class OmnigentBackend implements WorkerBackend {
       for (const file of start.attachments ?? []) files.push(await this.uploadAttachment(session.address, file));
       await this.sendContent(session.address, [...files, { type: "input_text", text: start.prompt }]);
     } catch (err) {
+      if (start.git) await this.cleanup(session.address).catch(() => undefined);
+      else await this.archive(session.address).catch(() => undefined);
       throw new Error(`session created (${session.address}) but prompt delivery failed: ${err}`);
     }
     return session;
