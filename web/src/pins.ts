@@ -1,9 +1,8 @@
-// Pure state helpers for the Recents / Pinned quick-jump strip.
-// Persisted per browser in localStorage by use-recents-pins.ts.
+// Pure state helpers for the pinned quick-jump strip.
+// Persisted per browser in localStorage by use-pins.ts.
 
 export type QuickJumpRef = { kind: "item" | "task"; id: string };
 
-export const MAX_RECENTS = 6;
 export const MAX_PINS = 6;
 
 export function sameQuickJumpRef(a: QuickJumpRef, b: QuickJumpRef): boolean {
@@ -11,7 +10,7 @@ export function sameQuickJumpRef(a: QuickJumpRef, b: QuickJumpRef): boolean {
 }
 
 /** Parse a stored JSON array of QuickJumpRef entries, dropping invalid or duplicate items. */
-export function parseStoredRefs(raw: string | null, max: number): QuickJumpRef[] {
+export function parseStoredPins(raw: string | null, max = MAX_PINS): QuickJumpRef[] {
   if (!raw || max <= 0) return [];
   let parsed: unknown;
   try {
@@ -35,12 +34,6 @@ export function parseStoredRefs(raw: string | null, max: number): QuickJumpRef[]
   return result;
 }
 
-/** Move `entry` to the front of `current` and cap at `max`. */
-export function recordRecent(current: QuickJumpRef[], entry: QuickJumpRef, max = MAX_RECENTS): QuickJumpRef[] {
-  if (max <= 0 || !entry.id.trim()) return [];
-  return [entry, ...current.filter((item) => !sameQuickJumpRef(item, entry))].slice(0, max);
-}
-
 /** Toggle `entry` in `current` pins: remove if present, otherwise prepend and cap at `max`. */
 export function togglePin(current: QuickJumpRef[], entry: QuickJumpRef, max = MAX_PINS): QuickJumpRef[] {
   if (current.some((item) => sameQuickJumpRef(item, entry))) {
@@ -54,13 +47,7 @@ export function isPinned(pins: QuickJumpRef[], entry: QuickJumpRef): boolean {
   return pins.some((item) => sameQuickJumpRef(item, entry));
 }
 
-/** Filter pinned and recent entries to those that currently exist, without duplicating pinned entries in recents. */
-export function visibleStripEntries(
-  pins: QuickJumpRef[],
-  recents: QuickJumpRef[],
-  exists: (ref: QuickJumpRef) => boolean,
-): { pinned: QuickJumpRef[]; recents: QuickJumpRef[] } {
-  const pinned = pins.filter(exists);
-  const filteredRecents = recents.filter((ref) => exists(ref) && !pinned.some((pin) => sameQuickJumpRef(pin, ref)));
-  return { pinned, recents: filteredRecents };
+/** Drop pins whose target no longer exists. */
+export function visiblePins(pins: QuickJumpRef[], exists: (ref: QuickJumpRef) => boolean): QuickJumpRef[] {
+  return pins.filter(exists);
 }

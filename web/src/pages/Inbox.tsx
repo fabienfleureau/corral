@@ -25,9 +25,9 @@ import { inboxReportMarkdown } from "../redacted-export";
 import { ResizeHandle } from "../ResizeHandle";
 import { usePaneFlag, usePaneWidth } from "../use-pane-size";
 import type { PaneLimits } from "../pane-size";
-import { visibleStripEntries, type QuickJumpRef } from "../recents-pins";
-import { useRecentsPins } from "../use-recents-pins";
-import { PinButton, RecentsStrip, type StripEntry } from "../RecentsStrip";
+import { visiblePins, type QuickJumpRef } from "../pins";
+import { usePins } from "../use-pins";
+import { PinButton, PinnedStrip, type StripEntry } from "../PinnedStrip";
 import { combineRowImages, extractArtifactBadges, extractMarkdownImages, taskAttachmentPreviews } from "../row-previews";
 import { PreviewToggleButton, RowPreviews } from "../RowPreviews";
 
@@ -186,7 +186,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const listSize = usePaneWidth("corral.inboxListWidth", LIST_DEFAULT_WIDTH, LIST_LIMITS);
   const [showPreviews, setShowPreviews] = usePaneFlag("corral.inboxPreviews");
-  const { recents, pins, recordRecent, togglePin, isPinned } = useRecentsPins("corral.inboxRecents", "corral.inboxPins");
+  const { pins, togglePin, isPinned } = usePins("corral.inboxPins");
 
   const [replyText, setReplyText] = useState("");
   const [replyBusy, setReplyBusy] = useState(false);
@@ -330,7 +330,6 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
       setSelected(null);
       setSelectedTaskId(entry.id);
       setPlanNotice(null);
-      recordRecent(entry);
       return;
     }
     const item = itemsById.get(entry.id);
@@ -344,8 +343,7 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
     setSelectedTaskId(null);
     setSelected(item);
     setPlanNotice(null);
-    recordRecent(entry);
-  }, [inProgressItemIds, inProgressTaskIds, itemsById, recordRecent, snoozedItemIds]);
+  }, [inProgressItemIds, inProgressTaskIds, itemsById, snoozedItemIds]);
 
   const resolveStripEntry = useCallback((ref: QuickJumpRef): StripEntry | null => {
     if (ref.kind === "task") {
@@ -366,17 +364,10 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
     };
   }, [itemsById, sessions, tasksById]);
 
-  const stripEntries = useMemo(() => {
-    const { pinned, recents: filteredRecents } = visibleStripEntries(
-      pins,
-      recents,
-      (ref) => (ref.kind === "task" ? inProgressTaskIds.has(ref.id) : itemsById.has(ref.id)),
-    );
-    return {
-      pinned: pinned.map(resolveStripEntry).filter((entry): entry is StripEntry => entry !== null),
-      recents: filteredRecents.map(resolveStripEntry).filter((entry): entry is StripEntry => entry !== null),
-    };
-  }, [inProgressTaskIds, itemsById, pins, recents, resolveStripEntry]);
+  const pinnedEntries = useMemo(() => {
+    const visible = visiblePins(pins, (ref) => (ref.kind === "task" ? inProgressTaskIds.has(ref.id) : itemsById.has(ref.id)));
+    return visible.map(resolveStripEntry).filter((entry): entry is StripEntry => entry !== null);
+  }, [inProgressTaskIds, itemsById, pins, resolveStripEntry]);
 
   const activeStripRef: QuickJumpRef | null = selectedTaskId
     ? { kind: "task", id: selectedTaskId }
@@ -538,9 +529,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             {loading || syncRequest === "requesting" ? <Spinner /> : error || syncRequest === "error" ? "!" : "✓"}
           </span>
         </div>
-        <RecentsStrip
-          pinned={stripEntries.pinned}
-          recents={stripEntries.recents}
+        <PinnedStrip
+          pinned={pinnedEntries}
           activeRef={activeStripRef}
           onSelect={selectInboxEntry}
           onUnpin={togglePin}
@@ -560,8 +550,8 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
             return (
               <div key={task.id} role="button" tabIndex={0}
                 className={`item-row ${selectedTaskId === task.id ? "selected" : ""}`}
-                onClick={() => { setSelected(null); setSelectedTaskId(task.id); recordRecent(taskRef); }}
-                onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(null); setSelectedTaskId(task.id); recordRecent(taskRef); } }}>
+                onClick={() => { setSelected(null); setSelectedTaskId(task.id); }}
+                onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelected(null); setSelectedTaskId(task.id); } }}>
                 <span className="item-row-main">
                   <span className="item-row-title">{taskTitleText}</span>
                   {location ? (
@@ -617,14 +607,13 @@ export function InboxPage({ active, eventVersion, refresh, onSeen }: { active: b
                   role="button"
                   tabIndex={0}
                   className={`item-row ${needsYou ? "needs-you" : ""} ${selected?.id === item.id ? "selected" : ""}`}
-                  onClick={() => { setSelectedTaskId(null); setSelected(item); recordRecent(itemRef); }}
+                  onClick={() => { setSelectedTaskId(null); setSelected(item); }}
                   onKeyDown={(e) => {
                     if (e.target !== e.currentTarget) return;
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       setSelectedTaskId(null);
                       setSelected(item);
-                      recordRecent(itemRef);
                     }
                   }}
                 >
