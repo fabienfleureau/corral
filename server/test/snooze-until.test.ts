@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { snoozeUntil } from "../../web/src/util.ts";
+import { SNOOZE_PRESETS, snoozeUntil } from "../../web/src/util.ts";
 
 test("1h and 4h snoozes are offsets from now", () => {
   const before = Date.now();
@@ -21,4 +21,15 @@ test("tomorrow snoozes until 9am the next local day", () => {
   assert.equal(until.getHours(), 9);
   assert.equal(until.getMinutes(), 0);
   assert.ok(until.getTime() > now.getTime());
+});
+
+test("snooze presets expose 1h, 4h, and Tomorrow in order and yield future timestamps", () => {
+  assert.deepEqual(
+    SNOOZE_PRESETS.map((p) => p.label),
+    ["1h", "4h", "Tomorrow"],
+  );
+  const now = Date.now();
+  for (const { preset } of SNOOZE_PRESETS) {
+    assert.ok(snoozeUntil(preset) > now);
+  }
 });
