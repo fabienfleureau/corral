@@ -4158,7 +4158,7 @@ select:focus {
   max-inline-size: 100%;
 }
 
-/* ---------- recents / pinned strip & row previews ---------- */
+/* ---------- pinned quick-jump strip & row previews ---------- */
 
 @property --fade-start {
   syntax: "<length>";
@@ -4172,14 +4172,14 @@ select:focus {
   initial-value: 0px;
 }
 
-.recents-strip {
+.pinned-strip {
   padding: 6px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-sunken);
   flex: none;
 }
 
-.recents-strip-card {
+.pinned-strip-card {
   padding: 8px 12px;
   margin-bottom: 12px;
   background: var(--bg);
@@ -4187,7 +4187,7 @@ select:focus {
   border-radius: 10px;
 }
 
-.recents-strip-scroll {
+.pinned-strip-scroll {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -4196,7 +4196,7 @@ select:focus {
 }
 
 @supports (animation-timeline: scroll()) {
-  .recents-strip-scroll {
+  .pinned-strip-scroll {
     --fade-size: 24px;
     --fade-dir: right;
     --fade-start-pos: 0;
@@ -4210,7 +4210,7 @@ select:focus {
     animation-range: 0 var(--fade-size), calc(100% - var(--fade-size)) 100%;
   }
 
-  .recents-strip-scroll:dir(rtl) {
+  .pinned-strip-scroll:dir(rtl) {
     --fade-dir: left;
     --fade-start-pos: 100%;
     --fade-end-pos: 0;
@@ -4225,7 +4225,7 @@ select:focus {
   from { --fade-end: var(--fade-size); }
 }
 
-.recents-group-label {
+.pinned-group-label {
   flex: none;
   font-size: 10.5px;
   font-weight: 600;
@@ -4235,15 +4235,7 @@ select:focus {
   margin-inline-end: 2px;
 }
 
-.recents-divider {
-  flex: none;
-  width: 1px;
-  height: 16px;
-  background: var(--border);
-  margin: 0 2px;
-}
-
-.recents-chip-group {
+.pinned-chip-group {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -4255,18 +4247,18 @@ select:focus {
   transition: border-color 150ms ease, background-color 150ms ease;
 }
 
-.recents-chip-group.is-active {
+.pinned-chip-group.is-active {
   border-color: var(--accent);
 }
 
-.recents-chip-group .recents-chip {
+.pinned-chip-group .pinned-chip {
   border: none;
   background: transparent;
   color: inherit;
   padding-inline-end: 4px;
 }
 
-.recents-chip {
+.pinned-chip {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -4281,42 +4273,24 @@ select:focus {
   transition: transform 160ms var(--ease-out), background-color 150ms ease, border-color 150ms ease;
 }
 
-.recents-chip-solo {
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-}
-
-.recents-chip-solo.is-active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-}
-
-.recents-chip:active {
+.pinned-chip:active {
   transform: scale(0.97);
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .recents-chip-solo:hover {
-    background: var(--bg-hover);
-  }
-}
-
-.recents-chip-label {
+.pinned-chip-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.recents-chip-badge {
+.pinned-chip-badge {
   flex: none;
   font-size: 10px;
   color: var(--muted);
   text-transform: lowercase;
 }
 
-.recents-chip-unpin {
+.pinned-chip-unpin {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -4336,12 +4310,12 @@ select:focus {
   transition: opacity 150ms ease, background-color 150ms ease, transform 160ms var(--ease-out);
 }
 
-.recents-chip-unpin:hover {
+.pinned-chip-unpin:hover {
   opacity: 1;
   background: var(--bg-hover);
 }
 
-.recents-chip-unpin:active {
+.pinned-chip-unpin:active {
   transform: scale(0.95);
 }
 
@@ -4569,8 +4543,8 @@ a.preview-artifact-badge:hover {
   .snooze-trigger,
   .snooze-caret,
   .snooze-option,
-  .recents-chip,
-  .recents-chip-unpin,
+  .pinned-chip,
+  .pinned-chip-unpin,
   .pin-btn,
   .preview-toggle,
   .preview-thumb-btn {
@@ -4578,8 +4552,8 @@ a.preview-artifact-badge:hover {
   }
   .snooze-trigger:active:not(:disabled),
   .snooze-option:active:not(:disabled),
-  .recents-chip:active,
-  .recents-chip-unpin:active,
+  .pinned-chip:active,
+  .pinned-chip-unpin:active,
   .pin-btn:active,
   .preview-toggle:active,
   .preview-thumb-btn:active,

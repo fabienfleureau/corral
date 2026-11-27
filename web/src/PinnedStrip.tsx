@@ -1,6 +1,6 @@
-// Compact Recents / Pinned quick-jump strip and row pin button.
+// Compact pinned quick-jump strip and row pin button.
 
-import { sameQuickJumpRef, type QuickJumpRef } from "./recents-pins";
+import { sameQuickJumpRef, type QuickJumpRef } from "./pins";
 
 export type StripEntry = {
   ref: QuickJumpRef;
@@ -43,47 +43,43 @@ export function PinButton({ pinned, label, onToggle }: { pinned: boolean; label:
   );
 }
 
-export function RecentsStrip({
+export function PinnedStrip({
   pinned,
-  recents,
   activeRef,
   onSelect,
   onUnpin,
   className,
 }: {
   pinned: StripEntry[];
-  recents: StripEntry[];
   activeRef: QuickJumpRef | null;
   onSelect: (ref: QuickJumpRef) => void;
   onUnpin: (ref: QuickJumpRef) => void;
   className?: string;
 }) {
-  if (pinned.length === 0 && recents.length === 0) return null;
+  if (pinned.length === 0) return null;
 
   return (
-    <div className={className ? `recents-strip ${className}` : "recents-strip"} role="region" aria-label="Pinned and recent">
-      <div className="recents-strip-scroll">
-        {pinned.length > 0 ? (
-          <span className="recents-group-label">Pinned</span>
-        ) : null}
+    <div className={className ? `pinned-strip ${className}` : "pinned-strip"} role="region" aria-label="Pinned">
+      <div className="pinned-strip-scroll">
+        <span className="pinned-group-label">Pinned</span>
         {pinned.map((entry) => {
           const active = activeRef !== null && sameQuickJumpRef(activeRef, entry.ref);
           return (
-            <span key={`pin-${entry.ref.kind}-${entry.ref.id}`} className={`recents-chip-group is-pinned${active ? " is-active" : ""}`}>
+            <span key={`pin-${entry.ref.kind}-${entry.ref.id}`} className={`pinned-chip-group is-pinned${active ? " is-active" : ""}`}>
               <button
                 type="button"
-                className="recents-chip"
+                className="pinned-chip"
                 aria-current={active ? "true" : undefined}
                 title={entry.label}
                 onClick={() => onSelect(entry.ref)}
               >
                 <PinIcon filled />
-                <span className="recents-chip-label">{entry.label}</span>
-                {entry.badge ? <span className="recents-chip-badge">{entry.badge}</span> : null}
+                <span className="pinned-chip-label">{entry.label}</span>
+                {entry.badge ? <span className="pinned-chip-badge">{entry.badge}</span> : null}
               </button>
               <button
                 type="button"
-                className="recents-chip-unpin"
+                className="pinned-chip-unpin"
                 aria-label={`Unpin ${entry.label}`}
                 title="Unpin"
                 onClick={() => onUnpin(entry.ref)}
@@ -91,26 +87,6 @@ export function RecentsStrip({
                 ×
               </button>
             </span>
-          );
-        })}
-        {pinned.length > 0 && recents.length > 0 ? <span className="recents-divider" aria-hidden="true" /> : null}
-        {recents.length > 0 ? (
-          <span className="recents-group-label">Recent</span>
-        ) : null}
-        {recents.map((entry) => {
-          const active = activeRef !== null && sameQuickJumpRef(activeRef, entry.ref);
-          return (
-            <button
-              key={`recent-${entry.ref.kind}-${entry.ref.id}`}
-              type="button"
-              className={`recents-chip recents-chip-solo${active ? " is-active" : ""}`}
-              aria-current={active ? "true" : undefined}
-              title={entry.label}
-              onClick={() => onSelect(entry.ref)}
-            >
-              <span className="recents-chip-label">{entry.label}</span>
-              {entry.badge ? <span className="recents-chip-badge">{entry.badge}</span> : null}
-            </button>
           );
         })}
       </div>

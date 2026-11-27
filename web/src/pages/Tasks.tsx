@@ -22,9 +22,9 @@ import { taskFocusFromHash, taskPrefillFromHash } from "../selection-task";
 import { repoMismatch } from "../repo-mismatch";
 import type { TaskPrefill } from "../selection-task";
 import { usePaneFlag } from "../use-pane-size";
-import { visibleStripEntries, type QuickJumpRef } from "../recents-pins";
-import { useRecentsPins } from "../use-recents-pins";
-import { PinButton, RecentsStrip, type StripEntry } from "../RecentsStrip";
+import { visiblePins, type QuickJumpRef } from "../pins";
+import { usePins } from "../use-pins";
+import { PinButton, PinnedStrip, type StripEntry } from "../PinnedStrip";
 import { combineRowImages, extractArtifactBadges, extractMarkdownImages, taskAttachmentPreviews } from "../row-previews";
 import { PreviewToggleButton, RowPreviews } from "../RowPreviews";
 import { taskRef } from "../../../shared/task-id";
@@ -66,7 +66,7 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   /** A daily activity item links here with `#/tasks?task=<id>`. */
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(() => taskFocusFromHash(window.location.hash));
   const [showPreviews, setShowPreviews] = usePaneFlag("corral.taskPreviews");
-  const { recents, pins, recordRecent, togglePin, isPinned } = useRecentsPins("corral.taskRecents", "corral.taskPins");
+  const { pins, togglePin, isPinned } = usePins("corral.taskPins");
 
   // A deep link (#/tasks?prompt=… or #/tasks?review=…) becomes form state, then
   // leaves the URL so a reload or a shared link does not resurrect a stale one.
@@ -147,26 +147,14 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
   const sortedRepos = useMemo(() => sortRepos(repos, tasks), [repos, tasks]);
   const tasksById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
-  useEffect(() => {
-    if (!focusedTaskId || !tasksById.has(focusedTaskId)) return;
-    recordRecent({ kind: "task", id: focusedTaskId });
-  }, [focusedTaskId, tasksById, recordRecent]);
-
-  const inspectTask = useCallback((taskId: string) => {
-    setFocusedTaskId(taskId);
-    recordRecent({ kind: "task", id: taskId });
-  }, [recordRecent]);
+  const inspectTask = useCallback((taskId: string) => setFocusedTaskId(taskId), []);
 
   const toggleTaskPin = useCallback((taskId: string) => {
     togglePin({ kind: "task", id: taskId });
   }, [togglePin]);
 
-  const stripEntries = useMemo(() => {
-    const { pinned, recents: filteredRecents } = visibleStripEntries(
-      pins,
-      recents,
-      (ref) => ref.kind === "task" && tasksById.has(ref.id),
-    );
+  const pinnedEntries = useMemo(() => {
+    const visible = visiblePins(pins, (ref) => ref.kind === "task" && tasksById.has(ref.id));
     const toEntry = (ref: QuickJumpRef): StripEntry | null => {
       const task = tasksById.get(ref.id);
       if (!task) return null;
@@ -176,11 +164,8 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
         badge: task.status,
       };
     };
-    return {
-      pinned: pinned.map(toEntry).filter((entry): entry is StripEntry => entry !== null),
-      recents: filteredRecents.map(toEntry).filter((entry): entry is StripEntry => entry !== null),
-    };
-  }, [pins, recents, tasksById]);
+    return visible.map(toEntry).filter((entry): entry is StripEntry => entry !== null);
+  }, [pins, tasksById]);
 
   // Reveal a task linked from another page: done tasks are hidden by default,
   // and its repo group may be collapsed.
@@ -275,10 +260,9 @@ export function TasksPage({ eventVersion, refresh }: { eventVersion: number; ref
             </label>
             <PreviewToggleButton enabled={showPreviews} onToggle={() => setShowPreviews(!showPreviews)} />
         </div>
-        <RecentsStrip
-          className="recents-strip-card"
-          pinned={stripEntries.pinned}
-          recents={stripEntries.recents}
+        <PinnedStrip
+          className="pinned-strip-card"
+          pinned={pinnedEntries}
           activeRef={focusedTaskId ? { kind: "task", id: focusedTaskId } : null}
           onSelect={(ref) => inspectTask(ref.id)}
           onUnpin={togglePin}
